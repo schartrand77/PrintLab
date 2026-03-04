@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>HA-BambuLab</Name>
+  <Repository>ghcr.io/REPLACE_WITH_YOUR_NAMESPACE/ha-bambulab-home-assistant:latest</Repository>
+  <Registry>https://ghcr.io</Registry>
+  <Network>host</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/greghesp/ha-bambulab</Support>
+  <Project>https://github.com/greghesp/ha-bambulab</Project>
+  <Overview>Home Assistant container with the ha-bambulab custom integration auto-installed on every startup.</Overview>
+  <Category>HomeAutomation:</Category>
+  <WebUI>http://[IP]:[PORT:8123]</WebUI>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/home-assistant/brands/master/core_integrations/bambu_lab/icon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>Host networking and mapped /config.</Requires>
+
+  <Config Name="WebUI" Target="8123" Default="8123" Mode="tcp" Description="Home Assistant UI port" Type="Port" Display="always" Required="true" Mask="false">8123</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/ha-bambulab/config" Mode="rw" Description="Home Assistant configuration path" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/ha-bambulab/config</Config>
+  <Config Name="TimeZone" Target="TZ" Default="Etc/UTC" Mode="" Description="Timezone" Type="Variable" Display="advanced" Required="false" Mask="false">Etc/UTC</Config>
+  <Config Name="BambuLab Git Ref" Target="HA_BAMBULAB_REF" Default="main" Mode="" Description="Git branch/tag for ha-bambulab" Type="Variable" Display="advanced" Required="false" Mask="false">main</Config>
+  <Config Name="BambuLab Repo URL" Target="HA_BAMBULAB_REPO" Default="https://github.com/greghesp/ha-bambulab.git" Mode="" Description="Git repository for ha-bambulab" Type="Variable" Display="advanced" Required="false" Mask="false">https://github.com/greghesp/ha-bambulab.git</Config>
+</Container>
