@@ -8,17 +8,21 @@ This is **not** Home Assistant. It runs as a direct web/API service.
 ## What it provides
 
 - Direct MQTT connection to your printer (LAN mode / local MQTT by default).
-- Simple web dashboard at `http://localhost:8080`.
+- Multi-printer gallery dashboard at `http://localhost:8080`.
+- Printer detail dashboard at `http://localhost:8080/printer/{printer_id}`.
 - REST API for status and control actions.
 - Pause / resume / stop, refresh state, chamber light control, fan and temperature control.
 
 ## Quick start
 
-1. Copy `.env.example` to `.env` and fill in:
+1. Copy `.env.example` to `.env` and fill in either:
+   - single-printer `PRINTER_HOST` / `PRINTER_SERIAL` / `PRINTER_ACCESS_CODE`
+   - or `PRINTERS_JSON` with multiple printers
+2. If using single-printer mode, fill in:
    - `PRINTER_HOST`
    - `PRINTER_SERIAL`
    - `PRINTER_ACCESS_CODE`
-2. Build and run:
+3. Build and run:
 
 ```bash
 docker compose up -d --build
@@ -33,7 +37,9 @@ http://localhost:8080
 ## API endpoints
 
 - `GET /health`
+- `GET /api/printers`
 - `GET /api/state`
+- `GET /api/printers/{printer_id}/state`
 - `POST /api/actions/pause`
 - `POST /api/actions/resume`
 - `POST /api/actions/stop`
@@ -41,6 +47,7 @@ http://localhost:8080
 - `POST /api/actions/chamber-light` with `{"on": true|false}`
 - `POST /api/actions/fan` with `{"fan":"part_cooling|auxiliary|chamber|heatbreak|secondary_auxiliary","percent":0-100}`
 - `POST /api/actions/temperature` with `{"target":"heatbed|nozzle","value":0-320}`
+- `POST /api/printers/{printer_id}/actions/...` (printer-scoped equivalents for all action endpoints)
 - `GET /api/works/services`
 - `GET /api/works/{makerworks|orderworks|stockworks}/health?path=/health`
 - `POST /api/works/{makerworks|orderworks|stockworks}/request`
@@ -49,6 +56,7 @@ http://localhost:8080
 - `POST /api/works/orderworks/print-job`
   with:
   `{"file_path":"/cache/model.3mf","plate_gcode":"Metadata/plate_1.gcode","use_ams":true,"ams_mapping":[0]}`
+  (optional query: `?printer_id={printer_id}`)
 
 ## Works integration config
 

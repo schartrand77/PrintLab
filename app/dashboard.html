@@ -54,6 +54,27 @@
       backdrop-filter: blur(18px) saturate(130%);
       -webkit-backdrop-filter: blur(18px) saturate(130%);
     }
+    .top-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      gap: 8px;
+    }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      color: #2a4f73;
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      background: rgba(255, 255, 255, 0.54);
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .back-link:hover { filter: brightness(1.03); }
 
     .print-top {
       display: grid;
@@ -466,6 +487,9 @@
 <body>
   <main>
     <section class="card">
+      <div class="top-nav">
+        <a class="back-link" href="/">&#8592; Printers</a>
+      </div>
       <div class="print-top">
         <div>
           <div class="camera-pane">
@@ -540,6 +564,19 @@
   </div>
 
   <script>
+    const PRINTER_ID = window.PRINTER_ID || "printer-1";
+    const API_BASE = `/api/printers/${encodeURIComponent(PRINTER_ID)}`;
+    function apiPath(path) {
+      if (!path) return API_BASE;
+      if (path.startsWith("http://") || path.startsWith("https://")) return path;
+      if (path.startsWith(API_BASE)) return path;
+      if (path.startsWith("/api/")) return `${API_BASE}${path.slice(4)}`;
+      return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+    }
+    if (window.PRINTER_NAME) {
+      document.title = `PrintLab - ${window.PRINTER_NAME}`;
+    }
+
     let viewMode = "photo";
     let modelSearchTimer = null;
     let swRegistration = null;
@@ -629,7 +666,7 @@
         printerEventSource.close();
         printerEventSource = null;
       }
-      printerEventSource = new EventSource("/api/events");
+      printerEventSource = new EventSource(apiPath("/api/events"));
       printerEventSource.addEventListener("printer", (evt) => {
         try {
           const payload = JSON.parse(evt.data || "{}");
@@ -647,7 +684,7 @@
     }
 
     async function post(url, body) {
-      await fetch(url, {
+      await fetch(apiPath(url), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: body ? JSON.stringify(body) : null
@@ -695,7 +732,7 @@
         setLiveBadge("NO SIGNAL", "err");
         if (!started) img.src = liveUnavailableThumb;
       };
-      img.src = `/api/live/stream.mjpg?t=${Date.now()}`;
+      img.src = `${apiPath("/api/live/stream.mjpg")}?t=${Date.now()}`;
     }
 
     function stopLiveFeed() {
@@ -750,7 +787,7 @@
       const q = (document.getElementById("modelSearch").value || "").trim();
       grid.innerHTML = "<div class='model-meta'>Loading...</div>";
       try {
-        const res = await fetch(`/api/sd/models?query=${encodeURIComponent(q)}`);
+        const res = await fetch(`${apiPath("/api/sd/models")}?query=${encodeURIComponent(q)}`);
         const data = await res.json();
         const items = data.items || [];
         count.textContent = String(items.length);
@@ -816,7 +853,7 @@
     }
 
     async function load() {
-      const r = await fetch("/api/state");
+      const r = await fetch(apiPath("/api/state"));
       const s = await r.json();
       const progress = Number(s.job?.progress_percent ?? 0);
       const layer = s.job?.current_layer ?? 0;

@@ -38,6 +38,57 @@ def parse_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def build_default_printer_config() -> dict[str, Any]:
+    return {
+        "name": os.getenv("PRINTER_NAME", "").strip(),
+        "host": os.getenv("PRINTER_HOST", "").strip(),
+        "serial": os.getenv("PRINTER_SERIAL", "").strip(),
+        "access_code": os.getenv("PRINTER_ACCESS_CODE", "").strip(),
+        "device_type": os.getenv("PRINTER_DEVICE_TYPE", "unknown"),
+        "local_mqtt": parse_bool("PRINTER_LOCAL_MQTT", True),
+        "enable_camera": parse_bool("PRINTER_ENABLE_CAMERA", True),
+        "disable_ssl_verify": parse_bool("PRINTER_DISABLE_SSL_VERIFY", False),
+        "user_language": os.getenv("USER_LANGUAGE", "en"),
+        "file_cache_path": os.getenv("FILE_CACHE_PATH", "/data/cache"),
+        "print_cache_count": int(os.getenv("PRINT_CACHE_COUNT", "1")),
+        "timelapse_cache_count": int(os.getenv("TIMELAPSE_CACHE_COUNT", "0")),
+        "usage_hours": float(os.getenv("USAGE_HOURS", "0")),
+        "force_ip": parse_bool("FORCE_IP", False),
+        "region": os.getenv("BAMBU_REGION", ""),
+        "email": os.getenv("BAMBU_EMAIL", ""),
+        "username": os.getenv("BAMBU_USERNAME", ""),
+        "auth_token": os.getenv("BAMBU_AUTH_TOKEN", ""),
+    }
+
+
+def load_printer_definitions() -> list[dict[str, Any]]:
+    raw = os.getenv("PRINTERS_JSON", "").strip()
+    default_cfg = build_default_printer_config()
+    if not raw:
+        return [{"id": "printer-1", "name": default_cfg.get("name") or default_cfg.get("serial") or "Printer 1", "config": default_cfg}]
+
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, list):
+            raise ValueError("PRINTERS_JSON must be a JSON array.")
+        items: list[dict[str, Any]] = []
+        for i, entry in enumerate(data, start=1):
+            if not isinstance(entry, dict):
+                continue
+            merged = {**default_cfg, **entry}
+            printer_id = str(entry.get("id") or f"printer-{i}").strip()
+            if not printer_id:
+                printer_id = f"printer-{i}"
+            display_name = str(entry.get("name") or merged.get("name") or merged.get("serial") or f"Printer {i}")
+            items.append({"id": printer_id, "name": display_name, "config": merged})
+        if items:
+            return items
+    except Exception as exc:
+        LOGGER.warning("Invalid PRINTERS_JSON, falling back to single printer config: %s", exc)
+
+    return [{"id": "printer-1", "name": default_cfg.get("name") or default_cfg.get("serial") or "Printer 1", "config": default_cfg}]
+
+
 class FanRequest(BaseModel):
     fan: str = Field(pattern="^(part_cooling|auxiliary|chamber|heatbreak|secondary_auxiliary)$")
     percent: int = Field(ge=0, le=100)
@@ -50,6 +101,10 @@ class TemperatureRequest(BaseModel):
 
 class ChamberLightRequest(BaseModel):
     on: bool
+
+
+class PrinterNameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
 
 
 class WorksRequest(BaseModel):
@@ -182,7 +237,10 @@ class WorksService:
 
 
 class PrinterService:
-    def __init__(self) -> None:
+    def __init__(self, config: dict[str, Any], printer_id: str, display_name: str | None = None) -> None:
+        self.printer_id = printer_id
+        self.display_name = display_name or printer_id
+        self._configured_settings = config
         self.client: BambuClient | None = None
         self.last_event = "init"
         self.last_error: str | None = None
@@ -196,32 +254,13 @@ class PrinterService:
         self._main_loop: asyncio.AbstractEventLoop | None = None
 
     def _config(self) -> dict[str, Any]:
-        host = os.getenv("PRINTER_HOST", "").strip()
-        serial = os.getenv("PRINTER_SERIAL", "").strip()
-        access_code = os.getenv("PRINTER_ACCESS_CODE", "").strip()
-
+        cfg = dict(self._configured_settings)
+        host = str(cfg.get("host", "")).strip()
+        serial = str(cfg.get("serial", "")).strip()
+        access_code = str(cfg.get("access_code", "")).strip()
         if not host or not serial or not access_code:
             raise ValueError("PRINTER_HOST, PRINTER_SERIAL, and PRINTER_ACCESS_CODE are required.")
-
-        return {
-            "host": host,
-            "serial": serial,
-            "access_code": access_code,
-            "device_type": os.getenv("PRINTER_DEVICE_TYPE", "unknown"),
-            "local_mqtt": parse_bool("PRINTER_LOCAL_MQTT", True),
-            "enable_camera": parse_bool("PRINTER_ENABLE_CAMERA", True),
-            "disable_ssl_verify": parse_bool("PRINTER_DISABLE_SSL_VERIFY", False),
-            "user_language": os.getenv("USER_LANGUAGE", "en"),
-            "file_cache_path": os.getenv("FILE_CACHE_PATH", "/data/cache"),
-            "print_cache_count": int(os.getenv("PRINT_CACHE_COUNT", "1")),
-            "timelapse_cache_count": int(os.getenv("TIMELAPSE_CACHE_COUNT", "0")),
-            "usage_hours": float(os.getenv("USAGE_HOURS", "0")),
-            "force_ip": parse_bool("FORCE_IP", False),
-            "region": os.getenv("BAMBU_REGION", ""),
-            "email": os.getenv("BAMBU_EMAIL", ""),
-            "username": os.getenv("BAMBU_USERNAME", ""),
-            "auth_token": os.getenv("BAMBU_AUTH_TOKEN", ""),
-        }
+        return cfg
 
     def _mark_event(self, event: str) -> None:
         self.last_event = event
@@ -824,28 +863,222 @@ class PrinterService:
                 return base
 
 
+class MultiPrinterManager:
+    def __init__(self, definitions: list[dict[str, Any]]) -> None:
+        self._services: dict[str, PrinterService] = {}
+        self._default_id: str | None = None
+        self._names_file = Path("/data/printer_names.json")
+        self._name_overrides = self._load_name_overrides()
+        for entry in definitions:
+            printer_id = str(entry.get("id", "")).strip()
+            if not printer_id:
+                continue
+            config = dict(entry.get("config") or {})
+            name = str(entry.get("name") or printer_id)
+            self._services[printer_id] = PrinterService(config=config, printer_id=printer_id, display_name=name)
+            saved_name = self._name_overrides.get(printer_id, "").strip()
+            if saved_name:
+                self._services[printer_id].display_name = saved_name
+            if self._default_id is None:
+                self._default_id = printer_id
+
+        if self._default_id is None:
+            raise RuntimeError("No printers configured.")
+
+    @property
+    def default_id(self) -> str:
+        assert self._default_id is not None
+        return self._default_id
+
+    def get(self, printer_id: str | None = None) -> PrinterService:
+        resolved = printer_id or self.default_id
+        service = self._services.get(resolved)
+        if service is None:
+            raise KeyError(f"Unknown printer: {resolved}")
+        return service
+
+    def list_items(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": service.printer_id,
+                "name": service.display_name,
+            }
+            for service in self._services.values()
+        ]
+
+    def _load_name_overrides(self) -> dict[str, str]:
+        try:
+            if self._names_file.exists():
+                data = json.loads(self._names_file.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return {str(k): str(v) for k, v in data.items()}
+        except Exception as exc:
+            LOGGER.warning("Failed to load printer names file: %s", exc)
+        return {}
+
+    def _save_name_overrides(self) -> None:
+        try:
+            self._names_file.parent.mkdir(parents=True, exist_ok=True)
+            self._names_file.write_text(json.dumps(self._name_overrides, indent=2), encoding="utf-8")
+        except Exception as exc:
+            LOGGER.warning("Failed to save printer names file: %s", exc)
+
+    def rename(self, printer_id: str, new_name: str) -> dict[str, str]:
+        service = self.get(printer_id)
+        clean = new_name.strip()
+        if not clean:
+            raise ValueError("Printer name cannot be empty.")
+        service.display_name = clean
+        self._name_overrides[printer_id] = clean
+        self._save_name_overrides()
+        return {"id": service.printer_id, "name": service.display_name}
+
+    async def start(self) -> None:
+        for service in self._services.values():
+            await service.start()
+
+    async def stop(self) -> None:
+        for service in self._services.values():
+            await service.stop()
+
+
 app = FastAPI(title="PrintLab", version="0.1.0")
-service = PrinterService()
+printer_manager = MultiPrinterManager(load_printer_definitions())
 works_service = WorksService()
-dashboard_html = (Path(__file__).with_name("dashboard.html")).read_text(encoding="utf-8")
+dashboard_html_template = (Path(__file__).with_name("dashboard.html")).read_text(encoding="utf-8")
 static_dir = Path(__file__).with_name("static")
 app.mount("/data", StaticFiles(directory="/data"), name="data")
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
+def _service_or_404(printer_id: str | None = None) -> PrinterService:
+    try:
+        return printer_manager.get(printer_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _render_gallery_html() -> str:
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PrintLab - Printers</title>
+  <style>
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif; background:#e6f0fb; color:#213245; }
+    .wrap { max-width:1100px; margin:26px auto; padding:0 16px; }
+    h1 { margin:0 0 16px; font-size:28px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:16px; }
+    .card { background:rgba(255,255,255,.66); border:1px solid rgba(255,255,255,.75); border-radius:16px; padding:14px; box-shadow:0 10px 30px rgba(42,90,138,.16); backdrop-filter:blur(12px); }
+    .card-link { text-decoration:none; color:inherit; display:block; }
+    .card:hover { transform:translateY(-2px); transition:all .14s ease; }
+    .name-row { margin-top:8px; display:flex; align-items:center; gap:8px; }
+    .name { margin:0; font-size:17px; font-weight:700; }
+    .meta { margin-top:6px; font-size:13px; color:#5d738a; }
+    .badge { display:inline-block; margin-top:8px; padding:4px 8px; border-radius:999px; font-size:12px; border:1px solid rgba(128,165,198,.3); }
+    .ok { background:#e5f7ee; color:#2f8b56; }
+    .bad { background:#fdeceb; color:#a0413b; }
+    .printer-art { width:100%; height:150px; object-fit:contain; background:rgba(255,255,255,.72); border-radius:12px; display:block; }
+    .rename-icon { border:0; background:transparent; color:#3e6387; cursor:pointer; font-size:15px; line-height:1; padding:0; opacity:.86; }
+    .rename-icon:hover { opacity:1; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Printers</h1>
+    <div id="cards" class="grid"></div>
+  </div>
+  <script>
+    function printerSvg() {
+      return '<img class="printer-art" src="/static/printers/x1c.jpg" alt="Bambu Lab X1 Carbon">';
+    }
+    async function loadPrinters() {
+      const cards = document.getElementById('cards');
+      try {
+        const r = await fetch('/api/printers');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const s = await r.json();
+        const items = s.items || [];
+        if (!items.length) {
+          cards.innerHTML = '<div class="card"><div class="name">No printers configured</div><div class="meta">Set PRINTER_* or PRINTERS_JSON in .env</div></div>';
+          return;
+        }
+        cards.innerHTML = items.map(p => {
+          const ok = p.connected ? 'ok' : 'bad';
+          const label = p.connected ? 'Connected' : 'Disconnected';
+          return `<article class="card">
+            <a class="card-link" href="/printer/${encodeURIComponent(p.id)}">
+              ${printerSvg()}
+              <div class="name-row">
+                <div class="name">${p.name || p.id}</div>
+                <button type="button" class="rename-icon" data-id="${p.id}" data-name="${(p.name || p.id).replace(/"/g, '&quot;')}" title="Rename printer">✎</button>
+              </div>
+              <div class="meta">Serial: ${p.serial || '-'}</div>
+              <span class="badge ${ok}">${label}</span>
+            </a>
+          </article>`;
+        }).join('');
+        document.querySelectorAll('.rename-icon').forEach((btn) => {
+          btn.addEventListener('click', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const id = btn.getAttribute('data-id');
+            const current = btn.getAttribute('data-name') || '';
+            const next = prompt('Printer name', current);
+            if (!next || !next.trim()) return;
+            const res = await fetch(`/api/printers/${encodeURIComponent(id)}/name`, {
+              method: 'POST',
+              headers: {'content-type': 'application/json'},
+              body: JSON.stringify({name: next.trim()})
+            });
+            if (res.ok) {
+              loadPrinters();
+            } else {
+              const txt = await res.text();
+              alert(`Rename failed: ${txt}`);
+            }
+          });
+        });
+      } catch (err) {
+        cards.innerHTML = `<div class="card"><div class="name">Failed to load printers</div><div class="meta">${String(err)}</div></div>`;
+      }
+    }
+    loadPrinters();
+  </script>
+</body>
+</html>"""
+
+
+def _render_printer_dashboard(printer_id: str) -> str:
+    service = _service_or_404(printer_id)
+    injected = (
+        "<script>"
+        f"window.PRINTER_ID={json.dumps(printer_id)};"
+        f"window.PRINTER_NAME={json.dumps(service.display_name)};"
+        "</script>"
+    )
+    return dashboard_html_template.replace("<script>", f"{injected}<script>", 1)
+
+
 @app.on_event("startup")
 async def startup() -> None:
-    await service.start()
+    await printer_manager.start()
 
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
-    await service.stop()
+    await printer_manager.stop()
 
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard() -> str:
-    return dashboard_html
+async def dashboard_root() -> str:
+    return _render_gallery_html()
+
+
+@app.get("/printer/{printer_id}", response_class=HTMLResponse)
+async def printer_dashboard(printer_id: str) -> str:
+    return _render_printer_dashboard(printer_id)
 
 
 @app.get("/manifest.webmanifest")
@@ -865,9 +1098,14 @@ async def service_worker() -> FileResponse:
     )
 
 
+@app.get("/favicon.ico")
+async def favicon() -> FileResponse:
+    return FileResponse(static_dir / "icons" / "icon-192.png", media_type="image/png")
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    state = await service.state()
+    state = await _service_or_404().state()
     return {
         "ok": state["configured"],
         "configured": state["configured"],
@@ -876,9 +1114,43 @@ async def health() -> dict[str, Any]:
     }
 
 
+@app.get("/api/printers")
+async def list_printers() -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    for entry in printer_manager.list_items():
+        svc = _service_or_404(entry["id"])
+        state = await svc.state()
+        items.append(
+            {
+                "id": entry["id"],
+                "name": entry["name"],
+                "connected": state.get("connected"),
+                "configured": state.get("configured"),
+                "serial": (state.get("printer") or {}).get("serial"),
+                "device_type": (state.get("printer") or {}).get("device_type"),
+                "last_error": state.get("last_error"),
+            }
+        )
+    return {"default_id": printer_manager.default_id, "items": items}
+
+
+@app.post("/api/printers/{printer_id}/name")
+async def rename_printer(printer_id: str, request: PrinterNameRequest) -> dict[str, Any]:
+    try:
+        printer = printer_manager.rename(printer_id, request.name)
+        return {"ok": True, "printer": printer}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/state")
 async def get_state() -> dict[str, Any]:
-    return await service.state()
+    return await _service_or_404().state()
+
+
+@app.get("/api/printers/{printer_id}/state")
+async def get_state_by_printer(printer_id: str) -> dict[str, Any]:
+    return await _service_or_404(printer_id).state()
 
 
 @app.get("/api/works/services")
@@ -887,38 +1159,38 @@ async def works_services() -> dict[str, Any]:
 
 
 @app.get("/api/works/{service_name}/health")
-async def works_health(service_name: str, path: str = "/health") -> dict[str, Any]:
+async def works_health(service_name: str, path: str = "/health", printer_id: str | None = None) -> dict[str, Any]:
     try:
         result = await works_service.health(service_name, path=path)
         if service_name.lower() == "stockworks":
-            result["printer_filament"] = service.filament_snapshot()
+            result["printer_filament"] = _service_or_404(printer_id).filament_snapshot()
         return result
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/works/{service_name}/request")
-async def works_request(service_name: str, request: WorksRequest) -> dict[str, Any]:
+async def works_request(service_name: str, request: WorksRequest, printer_id: str | None = None) -> dict[str, Any]:
     try:
         result = await works_service.request(service_name, request)
         if service_name.lower() == "stockworks":
-            result["printer_filament"] = service.filament_snapshot()
+            result["printer_filament"] = _service_or_404(printer_id).filament_snapshot()
         return result
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/works/orderworks/print-job")
-async def orderworks_print_job(request: OrderworksPrintJobRequest) -> dict[str, Any]:
+async def orderworks_print_job(request: OrderworksPrintJobRequest, printer_id: str | None = None) -> dict[str, Any]:
     try:
-        return await service.start_orderworks_print_job(request)
+        return await _service_or_404(printer_id).start_orderworks_print_job(request)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/events")
 async def event_stream(request: Request) -> StreamingResponse:
-    queue = service.subscribe_events()
+    queue = _service_or_404().subscribe_events()
 
     async def event_generator():
         try:
@@ -931,7 +1203,36 @@ async def event_stream(request: Request) -> StreamingResponse:
                 except TimeoutError:
                     yield ": keepalive\n\n"
         finally:
-            service.unsubscribe_events(queue)
+            _service_or_404().unsubscribe_events(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/printers/{printer_id}/events")
+async def event_stream_by_printer(request: Request, printer_id: str) -> StreamingResponse:
+    svc = _service_or_404(printer_id)
+    queue = svc.subscribe_events()
+
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f"event: printer\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            svc.unsubscribe_events(queue)
 
     return StreamingResponse(
         event_generator(),
@@ -947,7 +1248,16 @@ async def event_stream(request: Request) -> StreamingResponse:
 @app.get("/api/sd/models")
 async def sd_models(query: str | None = None) -> dict[str, Any]:
     try:
-        models = await service.list_sd_models(query=query)
+        models = await _service_or_404().list_sd_models(query=query)
+        return {"items": models, "count": len(models)}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/printers/{printer_id}/sd/models")
+async def sd_models_by_printer(printer_id: str, query: str | None = None) -> dict[str, Any]:
+    try:
+        models = await _service_or_404(printer_id).list_sd_models(query=query)
         return {"items": models, "count": len(models)}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -956,7 +1266,24 @@ async def sd_models(query: str | None = None) -> dict[str, Any]:
 @app.get("/api/sd/thumbnail")
 async def sd_thumbnail(path: str) -> Response:
     try:
-        content, mime = await service.get_sd_thumbnail(path)
+        content, mime = await _service_or_404().get_sd_thumbnail(path)
+        if not content or not mime:
+            raise HTTPException(status_code=404, detail="Thumbnail not found.")
+        return Response(
+            content=content,
+            media_type=mime,
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/printers/{printer_id}/sd/thumbnail")
+async def sd_thumbnail_by_printer(printer_id: str, path: str) -> Response:
+    try:
+        content, mime = await _service_or_404(printer_id).get_sd_thumbnail(path)
         if not content or not mime:
             raise HTTPException(status_code=404, detail="Thumbnail not found.")
         return Response(
@@ -973,7 +1300,7 @@ async def sd_thumbnail(path: str) -> Response:
 @app.get("/api/live/chamber.jpg")
 async def chamber_image() -> Response:
     try:
-        content, mime = await service.get_live_frame()
+        content, mime = await _service_or_404().get_live_frame()
         if not content or not mime:
             return Response(status_code=204)
         return Response(
@@ -987,6 +1314,27 @@ async def chamber_image() -> Response:
 
 @app.get("/api/live/stream.mjpg")
 async def chamber_stream() -> StreamingResponse:
+    return await chamber_stream_by_printer(printer_manager.default_id)
+
+
+@app.get("/api/printers/{printer_id}/live/chamber.jpg")
+async def chamber_image_by_printer(printer_id: str) -> Response:
+    try:
+        content, mime = await _service_or_404(printer_id).get_live_frame()
+        if not content or not mime:
+            return Response(status_code=204)
+        return Response(
+            content=content,
+            media_type=mime,
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/printers/{printer_id}/live/stream.mjpg")
+async def chamber_stream_by_printer(printer_id: str) -> StreamingResponse:
+    service = _service_or_404(printer_id)
     boundary = "frame"
 
     async def frame_generator():
@@ -1110,17 +1458,8 @@ async def chamber_stream() -> StreamingResponse:
 @app.post("/api/actions/refresh")
 async def refresh() -> dict[str, bool]:
     try:
-        await service.refresh()
+        await _service_or_404().refresh()
         return {"ok": True}
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.post("/api/actions/{action}")
-async def action(action: str) -> dict[str, bool]:
-    try:
-        ok = await service.action(action)
-        return {"ok": ok}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1128,7 +1467,7 @@ async def action(action: str) -> dict[str, bool]:
 @app.post("/api/actions/chamber-light")
 async def chamber_light(request: ChamberLightRequest) -> dict[str, bool]:
     try:
-        await service.set_chamber_light(request.on)
+        await _service_or_404().set_chamber_light(request.on)
         return {"ok": True}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1137,7 +1476,7 @@ async def chamber_light(request: ChamberLightRequest) -> dict[str, bool]:
 @app.post("/api/actions/temperature")
 async def temperature(request: TemperatureRequest) -> dict[str, bool]:
     try:
-        await service.set_temperature(request)
+        await _service_or_404().set_temperature(request)
         return {"ok": True}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1146,7 +1485,61 @@ async def temperature(request: TemperatureRequest) -> dict[str, bool]:
 @app.post("/api/actions/fan")
 async def fan(request: FanRequest) -> dict[str, bool]:
     try:
-        await service.set_fan(request)
+        await _service_or_404().set_fan(request)
         return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/actions/{action}")
+async def action(action: str) -> dict[str, bool]:
+    try:
+        ok = await _service_or_404().action(action)
+        return {"ok": ok}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/printers/{printer_id}/actions/refresh")
+async def refresh_by_printer(printer_id: str) -> dict[str, bool]:
+    try:
+        await _service_or_404(printer_id).refresh()
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/printers/{printer_id}/actions/chamber-light")
+async def chamber_light_by_printer(printer_id: str, request: ChamberLightRequest) -> dict[str, bool]:
+    try:
+        await _service_or_404(printer_id).set_chamber_light(request.on)
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/printers/{printer_id}/actions/temperature")
+async def temperature_by_printer(printer_id: str, request: TemperatureRequest) -> dict[str, bool]:
+    try:
+        await _service_or_404(printer_id).set_temperature(request)
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/printers/{printer_id}/actions/fan")
+async def fan_by_printer(printer_id: str, request: FanRequest) -> dict[str, bool]:
+    try:
+        await _service_or_404(printer_id).set_fan(request)
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/printers/{printer_id}/actions/{action}")
+async def action_by_printer(printer_id: str, action: str) -> dict[str, bool]:
+    try:
+        ok = await _service_or_404(printer_id).action(action)
+        return {"ok": ok}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
