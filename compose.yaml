@@ -27,6 +27,8 @@ services:
       BAMBU_EMAIL: ${BAMBU_EMAIL:-}
       BAMBU_USERNAME: ${BAMBU_USERNAME:-}
       BAMBU_AUTH_TOKEN: ${BAMBU_AUTH_TOKEN:-}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     ports:
       - "${APP_PORT:-8080}:8080"
     volumes:

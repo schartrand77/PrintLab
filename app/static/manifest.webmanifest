@@ -1,9 +1,11 @@
 {
   "name": "PrintLab",
   "short_name": "PrintLab",
+  "id": "/",
   "description": "Monitor and control your printer from a mobile home app.",
   "start_url": "/",
   "scope": "/",
+  "display_override": ["standalone", "minimal-ui"],
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#dfeaf8",

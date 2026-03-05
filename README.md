@@ -10,6 +10,7 @@ This is **not** Home Assistant. It runs as a direct web/API service.
 - Direct MQTT connection to your printer (LAN mode / local MQTT by default).
 - Multi-printer gallery dashboard at `http://localhost:8080`.
 - Printer detail dashboard at `http://localhost:8080/printer/{printer_id}`.
+- Optional admin password protection for all UI/API routes.
 - REST API for status and control actions.
 - Pause / resume / stop, refresh state, chamber light control, fan and temperature control.
 
@@ -18,11 +19,14 @@ This is **not** Home Assistant. It runs as a direct web/API service.
 1. Copy `.env.example` to `.env` and fill in either:
    - single-printer `PRINTER_HOST` / `PRINTER_SERIAL` / `PRINTER_ACCESS_CODE`
    - or `PRINTERS_JSON` with multiple printers
-2. If using single-printer mode, fill in:
+2. Set admin credentials (recommended):
+   - `ADMIN_USERNAME` (default: `admin`)
+   - `ADMIN_PASSWORD` (if empty, auth is disabled)
+3. If using single-printer mode, fill in:
    - `PRINTER_HOST`
    - `PRINTER_SERIAL`
    - `PRINTER_ACCESS_CODE`
-3. Build and run:
+4. Build and run:
 
 ```bash
 docker compose up -d --build
@@ -38,6 +42,9 @@ http://localhost:8080
 
 - `GET /health`
 - `GET /api/printers`
+- `POST /api/printers`
+  with:
+  `{"name":"X1C-002","host":"192.168.1.67","serial":"SERIAL","access_code":"CODE","id":"x1c-002"}`
 - `GET /api/state`
 - `GET /api/printers/{printer_id}/state`
 - `POST /api/actions/pause`
@@ -80,3 +87,4 @@ Stockworks enrichment:
 
 - Image build pulls `pybambu` from `ha-bambulab` at build time.
 - The UI is intentionally minimal; use the API for automation and advanced control.
+- Printers added from the UI/API are persisted to `/data/printers_added.json`.

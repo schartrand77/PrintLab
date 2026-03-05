@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import copy
 import io
 import hashlib
+import hmac
 import json
 import re
 import logging
@@ -29,6 +32,12 @@ from pybambu.const import FansEnum, TempEnum
 
 LOGGER = logging.getLogger("printlab")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
+if ADMIN_PASSWORD:
+    LOGGER.info("Admin password protection enabled.")
+else:
+    LOGGER.warning("Admin password protection is disabled (ADMIN_PASSWORD not set).")
 
 
 def parse_bool(name: str, default: bool) -> bool:
@@ -105,6 +114,18 @@ class ChamberLightRequest(BaseModel):
 
 class PrinterNameRequest(BaseModel):
     name: str = Field(min_length=1, max_length=64)
+
+
+class AddPrinterRequest(BaseModel):
+    id: str | None = Field(default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    name: str = Field(min_length=1, max_length=64)
+    host: str = Field(min_length=1, max_length=255)
+    serial: str = Field(min_length=1, max_length=128)
+    access_code: str = Field(min_length=1, max_length=128)
+    device_type: str = Field(default="unknown", max_length=64)
+    local_mqtt: bool = True
+    enable_camera: bool = True
+    disable_ssl_verify: bool = False
 
 
 class WorksRequest(BaseModel):
@@ -680,11 +701,12 @@ class PrinterService:
         try:
             device = self.client.get_device()
             ams = self._serialize_ams(device)
-            slots = ams.get("slots", [])
+            slots = ams.get("all_slots", []) or ams.get("slots", [])
             loaded = next((slot for slot in slots if slot.get("active")), None)
             loaded_filament = None
             if loaded:
                 loaded_filament = {
+                    "ams_index": loaded.get("ams_index"),
                     "slot_index": loaded.get("index"),
                     "type": loaded.get("type"),
                     "color_hex": loaded.get("color_hex"),
@@ -692,6 +714,7 @@ class PrinterService:
                 }
             remaining = [
                 {
+                    "ams_index": slot.get("ams_index"),
                     "slot_index": slot.get("index"),
                     "type": slot.get("type"),
                     "color_hex": slot.get("color_hex"),
@@ -755,51 +778,76 @@ class PrinterService:
         if not isinstance(ams_data, dict) or not ams_data:
             return {
                 "present": False,
+                "total_ams_count": 0,
                 "ams_index": None,
                 "active_ams_index": None,
                 "active_tray_index": None,
                 "humidity_pct": None,
                 "temperature_c": None,
+                "all_slots": [],
+                "ams_units": [],
                 "slots": [],
             }
 
         active_ams_index = getattr(ams, "active_ams_index", None)
         active_tray_index = getattr(ams, "active_tray_index", None)
+        def _sort_key(value: Any) -> tuple[int, Any]:
+            try:
+                return (0, int(value))
+            except Exception:
+                return (1, str(value))
 
-        if active_ams_index in ams_data:
-            selected_ams_index = active_ams_index
-        else:
-            selected_ams_index = sorted(ams_data.keys())[0]
-
-        selected = ams_data[selected_ams_index]
-        trays = list(getattr(selected, "tray", []) or [])
-        slots: list[dict[str, Any]] = []
-        for tray_idx in range(4):
-            tray = trays[tray_idx] if tray_idx < len(trays) else None
-            is_empty = bool(getattr(tray, "empty", True)) if tray is not None else True
-            tray_type = (getattr(tray, "type", "") or "").strip() if tray is not None else ""
-            slots.append(
-                {
+        all_slots: list[dict[str, Any]] = []
+        ams_units: list[dict[str, Any]] = []
+        for ams_index in sorted(ams_data.keys(), key=_sort_key):
+            unit = ams_data[ams_index]
+            trays = list(getattr(unit, "tray", []) or [])
+            slot_count = max(4, len(trays))
+            unit_slots: list[dict[str, Any]] = []
+            for tray_idx in range(slot_count):
+                tray = trays[tray_idx] if tray_idx < len(trays) else None
+                is_empty = bool(getattr(tray, "empty", True)) if tray is not None else True
+                tray_type = (getattr(tray, "type", "") or "").strip() if tray is not None else ""
+                slot = {
+                    "ams_index": ams_index,
                     "index": tray_idx,
-                    "active": bool(getattr(tray, "active", False)) if tray is not None else False,
+                    "active": (
+                        bool(getattr(tray, "active", False))
+                        if tray is not None
+                        else (ams_index == active_ams_index and tray_idx == active_tray_index)
+                    ),
                     "empty": is_empty,
                     "type": tray_type if tray_type else ("Empty" if is_empty else "-"),
                     "name": (getattr(tray, "name", "") or "").strip() if tray is not None else "",
                     "color_hex": self._normalize_ams_color(getattr(tray, "color", None)) if tray is not None else "#2f343c",
                     "remain_percent": getattr(tray, "remain", None) if tray is not None else None,
                 }
+                unit_slots.append(slot)
+                all_slots.append(slot)
+
+            humidity = getattr(unit, "humidity", None)
+            temperature = getattr(unit, "temperature", None)
+            ams_units.append(
+                {
+                    "ams_index": ams_index,
+                    "humidity_pct": humidity if isinstance(humidity, (int, float)) and humidity >= 0 else None,
+                    "temperature_c": temperature if isinstance(temperature, (int, float)) and temperature >= 0 else None,
+                    "slots": unit_slots,
+                }
             )
 
-        humidity = getattr(selected, "humidity", None)
-        temperature = getattr(selected, "temperature", None)
+        selected = next((item for item in ams_units if item.get("ams_index") == active_ams_index), ams_units[0])
         return {
             "present": True,
-            "ams_index": selected_ams_index,
+            "total_ams_count": len(ams_units),
+            "ams_index": selected.get("ams_index"),
             "active_ams_index": active_ams_index,
             "active_tray_index": active_tray_index,
-            "humidity_pct": humidity if isinstance(humidity, (int, float)) and humidity >= 0 else None,
-            "temperature_c": temperature if isinstance(temperature, (int, float)) and temperature >= 0 else None,
-            "slots": slots,
+            "humidity_pct": selected.get("humidity_pct"),
+            "temperature_c": selected.get("temperature_c"),
+            "all_slots": all_slots,
+            "ams_units": ams_units,
+            "slots": selected.get("slots", []),
         }
 
     async def state(self) -> dict[str, Any]:
@@ -868,19 +916,13 @@ class MultiPrinterManager:
         self._services: dict[str, PrinterService] = {}
         self._default_id: str | None = None
         self._names_file = Path("/data/printer_names.json")
+        self._added_printers_file = Path("/data/printers_added.json")
+        self._added_printers = self._load_added_printers()
         self._name_overrides = self._load_name_overrides()
         for entry in definitions:
-            printer_id = str(entry.get("id", "")).strip()
-            if not printer_id:
-                continue
-            config = dict(entry.get("config") or {})
-            name = str(entry.get("name") or printer_id)
-            self._services[printer_id] = PrinterService(config=config, printer_id=printer_id, display_name=name)
-            saved_name = self._name_overrides.get(printer_id, "").strip()
-            if saved_name:
-                self._services[printer_id].display_name = saved_name
-            if self._default_id is None:
-                self._default_id = printer_id
+            self._register_service(entry)
+        for entry in self._added_printers.values():
+            self._register_service(entry, allow_existing=True)
 
         if self._default_id is None:
             raise RuntimeError("No printers configured.")
@@ -923,6 +965,51 @@ class MultiPrinterManager:
         except Exception as exc:
             LOGGER.warning("Failed to save printer names file: %s", exc)
 
+    def _load_added_printers(self) -> dict[str, dict[str, Any]]:
+        try:
+            if self._added_printers_file.exists():
+                data = json.loads(self._added_printers_file.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    items: dict[str, dict[str, Any]] = {}
+                    for raw in data:
+                        if not isinstance(raw, dict):
+                            continue
+                        printer_id = str(raw.get("id", "")).strip()
+                        name = str(raw.get("name", "")).strip()
+                        config = raw.get("config")
+                        if not printer_id or not name or not isinstance(config, dict):
+                            continue
+                        items[printer_id] = {"id": printer_id, "name": name, "config": dict(config)}
+                    return items
+        except Exception as exc:
+            LOGGER.warning("Failed to load added printers file: %s", exc)
+        return {}
+
+    def _save_added_printers(self) -> None:
+        try:
+            self._added_printers_file.parent.mkdir(parents=True, exist_ok=True)
+            self._added_printers_file.write_text(json.dumps(list(self._added_printers.values()), indent=2), encoding="utf-8")
+        except Exception as exc:
+            LOGGER.warning("Failed to save added printers file: %s", exc)
+
+    def _register_service(self, entry: dict[str, Any], allow_existing: bool = False) -> None:
+        printer_id = str(entry.get("id", "")).strip()
+        if not printer_id:
+            return
+        if printer_id in self._services:
+            if allow_existing:
+                return
+            raise ValueError(f"Printer id already exists: {printer_id}")
+
+        config = dict(entry.get("config") or {})
+        name = str(entry.get("name") or printer_id)
+        self._services[printer_id] = PrinterService(config=config, printer_id=printer_id, display_name=name)
+        saved_name = self._name_overrides.get(printer_id, "").strip()
+        if saved_name:
+            self._services[printer_id].display_name = saved_name
+        if self._default_id is None:
+            self._default_id = printer_id
+
     def rename(self, printer_id: str, new_name: str) -> dict[str, str]:
         service = self.get(printer_id)
         clean = new_name.strip()
@@ -931,6 +1018,40 @@ class MultiPrinterManager:
         service.display_name = clean
         self._name_overrides[printer_id] = clean
         self._save_name_overrides()
+        return {"id": service.printer_id, "name": service.display_name}
+
+    async def add(self, request: AddPrinterRequest) -> dict[str, str]:
+        requested_id = (request.id or "").strip()
+        if not requested_id:
+            base = re.sub(r"[^a-z0-9]+", "-", request.name.strip().lower()).strip("-") or "printer"
+            requested_id = base
+            suffix = 2
+            while requested_id in self._services:
+                requested_id = f"{base}-{suffix}"
+                suffix += 1
+
+        if requested_id in self._services:
+            raise ValueError(f"Printer id already exists: {requested_id}")
+
+        default_cfg = build_default_printer_config()
+        config = {
+            **default_cfg,
+            "name": request.name.strip(),
+            "host": request.host.strip(),
+            "serial": request.serial.strip(),
+            "access_code": request.access_code.strip(),
+            "device_type": request.device_type.strip() or "unknown",
+            "local_mqtt": request.local_mqtt,
+            "enable_camera": request.enable_camera,
+            "disable_ssl_verify": request.disable_ssl_verify,
+        }
+        entry = {"id": requested_id, "name": request.name.strip(), "config": config}
+        self._register_service(entry)
+        self._added_printers[requested_id] = entry
+        self._save_added_printers()
+
+        service = self.get(requested_id)
+        await service.start()
         return {"id": service.printer_id, "name": service.display_name}
 
     async def start(self) -> None:
@@ -951,6 +1072,45 @@ app.mount("/data", StaticFiles(directory="/data"), name="data")
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
+def _parse_basic_auth(authorization: str | None) -> tuple[str, str] | None:
+    if not authorization:
+        return None
+    if not authorization.lower().startswith("basic "):
+        return None
+    token = authorization[6:].strip()
+    if not token:
+        return None
+    try:
+        decoded = base64.b64decode(token, validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return None
+    if ":" not in decoded:
+        return None
+    username, password = decoded.split(":", 1)
+    return username, password
+
+
+@app.middleware("http")
+async def admin_auth_middleware(request: Request, call_next):
+    if not ADMIN_PASSWORD:
+        return await call_next(request)
+
+    credentials = _parse_basic_auth(request.headers.get("authorization"))
+    if credentials is not None:
+        username, password = credentials
+        if hmac.compare_digest(username, ADMIN_USERNAME) and hmac.compare_digest(password, ADMIN_PASSWORD):
+            return await call_next(request)
+
+    return Response(
+        content="Unauthorized",
+        status_code=401,
+        headers={
+            "WWW-Authenticate": 'Basic realm="PrintLab Admin"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 def _service_or_404(printer_id: str | None = None) -> PrinterService:
     try:
         return printer_manager.get(printer_id)
@@ -964,11 +1124,34 @@ def _render_gallery_html() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#cfe2f7">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="PrintLab">
+  <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
   <title>PrintLab - Printers</title>
   <style>
     body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif; background:#e6f0fb; color:#213245; }
-    .wrap { max-width:1100px; margin:26px auto; padding:0 16px; }
-    h1 { margin:0 0 16px; font-size:28px; }
+    .wrap { max-width:1100px; margin:26px auto; padding:0 16px 40px; }
+    h1 { margin:0 0 6px; font-size:28px; }
+    .top-row { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:14px; gap:10px; }
+    .title-block { display:flex; flex-direction:column; align-items:flex-start; gap:8px; }
+    .helper { color:#5d738a; font-size:13px; }
+    .top-actions { display:flex; align-items:center; gap:8px; }
+    .install-btn {
+      border: 1px solid rgba(255,255,255,.74);
+      background: rgba(255,255,255,.62);
+      color: #2a4f73;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .install-btn[hidden] { display:none !important; }
+    .status { min-height:20px; margin:0 0 14px; font-size:13px; color:#3a5977; }
     .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:16px; }
     .card { background:rgba(255,255,255,.66); border:1px solid rgba(255,255,255,.75); border-radius:16px; padding:14px; box-shadow:0 10px 30px rgba(42,90,138,.16); backdrop-filter:blur(12px); }
     .card-link { text-decoration:none; color:inherit; display:block; }
@@ -980,19 +1163,252 @@ def _render_gallery_html() -> str:
     .ok { background:#e5f7ee; color:#2f8b56; }
     .bad { background:#fdeceb; color:#a0413b; }
     .printer-art { width:100%; height:150px; object-fit:contain; background:rgba(255,255,255,.72); border-radius:12px; display:block; }
-    .rename-icon { border:0; background:transparent; color:#3e6387; cursor:pointer; font-size:15px; line-height:1; padding:0; opacity:.86; }
+    .rename-icon { border:0; background:transparent; color:#3e6387; cursor:pointer; font-size:13px; line-height:1; padding:0; opacity:.86; text-decoration:underline; }
     .rename-icon:hover { opacity:1; }
+    .hamburger {
+      border:0; border-radius:10px; background:#1f4f7b; color:#fff; cursor:pointer;
+      width:42px; height:34px; display:grid; place-items:center; box-shadow:0 8px 22px rgba(22,54,86,.34);
+    }
+    .hamburger-lines { width:16px; height:12px; position:relative; }
+    .hamburger-lines::before, .hamburger-lines::after, .hamburger-lines span {
+      content:""; position:absolute; left:0; right:0; height:2px; background:#fff; border-radius:2px;
+    }
+    .hamburger-lines::before { top:0; }
+    .hamburger-lines span { top:5px; }
+    .hamburger-lines::after { top:10px; }
+    .hamburger-label { font-size:11px; color:#1f4f7b; margin-left:6px; }
+    .hamburger-row { display:flex; align-items:center; }
+    .hamburger-wrap { display:flex; align-items:center; }
+    .hamburger:hover { filter:brightness(1.05); }
+    .sidebar-close {
+      border:0; background:transparent; color:#365877; cursor:pointer; font-size:20px; line-height:1; padding:2px 4px;
+    }
+    .sidebar {
+      position:fixed; z-index:35; top:0; left:0; height:100vh; width:320px; max-width:85vw;
+      background:linear-gradient(180deg, #f4f8fc 0%, #eaf2fb 100%);
+      border-right:1px solid #cfe0f3; box-shadow:18px 0 30px rgba(21,50,80,.18);
+      transform:translateX(-101%); transition:transform .18s ease; padding:18px 14px 16px; overflow:auto;
+    }
+    .sidebar.open { transform:translateX(0); }
+    .sidebar-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+    .sidebar h2 { margin:0; font-size:20px; }
+    .sidebar-tabs { display:flex; gap:8px; margin:0 0 12px; }
+    .sidebar-tab {
+      border:1px solid #bdd2e8; background:#edf4fb; color:#375a79; border-radius:999px; padding:6px 10px; cursor:pointer; font-size:12px;
+    }
+    .sidebar-tab.active { background:#1f4f7b; border-color:#1f4f7b; color:#fff; }
+    .tab-panel { display:none; }
+    .tab-panel.active { display:block; }
+    .field { margin-bottom:9px; }
+    .field label { display:block; font-size:12px; color:#496986; margin-bottom:3px; }
+    .field input { width:100%; box-sizing:border-box; border:1px solid #c4d9ee; border-radius:10px; padding:8px 9px; font-size:14px; background:#fff; }
+    .check { display:flex; align-items:center; gap:8px; margin:7px 0; font-size:13px; color:#2f4f6d; }
+    .actions { display:flex; gap:8px; margin-top:12px; }
+    .btn { border:0; border-radius:10px; padding:9px 12px; cursor:pointer; font-weight:600; }
+    .btn-primary { background:#1f4f7b; color:#fff; }
+    .btn-light { background:#dbe9f7; color:#244563; }
+    .sidebar-note { color:#5f7892; font-size:12px; margin-top:8px; }
+    @media (max-width: 760px) {
+      .sidebar { width:100%; max-width:100%; }
+      .top-row { flex-direction:column; align-items:flex-start; }
+    }
   </style>
 </head>
 <body>
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-head">
+      <h2>Printer Tools</h2>
+      <button id="closeSidebar" class="sidebar-close" type="button" aria-label="Close sidebar">x</button>
+    </div>
+    <div class="sidebar-tabs">
+      <button class="sidebar-tab active" type="button" data-tab="add-printer">Add Printer</button>
+    </div>
+    <div class="tab-panel active" data-panel="add-printer">
+      <form id="addPrinterForm">
+      <div class="field">
+        <label for="printerName">Name</label>
+        <input id="printerName" name="name" required maxlength="64" placeholder="X1C-002">
+      </div>
+      <div class="field">
+        <label for="printerId">ID (optional)</label>
+        <input id="printerId" name="id" maxlength="64" pattern="[A-Za-z0-9_-]+" placeholder="x1c-002">
+      </div>
+      <div class="field">
+        <label for="printerHost">Host / IP</label>
+        <input id="printerHost" name="host" required maxlength="255" placeholder="192.168.1.67">
+      </div>
+      <div class="field">
+        <label for="printerSerial">Serial</label>
+        <input id="printerSerial" name="serial" required maxlength="128">
+      </div>
+      <div class="field">
+        <label for="printerAccessCode">Access Code</label>
+        <input id="printerAccessCode" name="access_code" required maxlength="128">
+      </div>
+      <div class="field">
+        <label for="deviceType">Device Type</label>
+        <input id="deviceType" name="device_type" maxlength="64" value="unknown">
+      </div>
+      <label class="check"><input type="checkbox" name="local_mqtt" checked> Local MQTT</label>
+      <label class="check"><input type="checkbox" name="enable_camera" checked> Enable camera</label>
+      <label class="check"><input type="checkbox" name="disable_ssl_verify"> Disable SSL verify</label>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Save</button>
+        <button class="btn btn-light" type="button" id="collapseSidebar">Collapse</button>
+      </div>
+      <div class="sidebar-note">Saved printers persist in <code>/data/printers_added.json</code>.</div>
+      </form>
+    </div>
+  </aside>
   <div class="wrap">
-    <h1>Printers</h1>
+    <div class="top-row">
+      <div class="title-block">
+        <h1>Printers</h1>
+        <div class="hamburger-row">
+          <button id="sidebarToggle" class="hamburger" type="button" aria-label="Open sidebar">
+            <span class="hamburger-lines"><span></span></span>
+          </button>
+          <span class="hamburger-label">Menu</span>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button id="installBtn" class="install-btn" type="button" hidden>Install App</button>
+        <div class="helper">Use the sidebar to add printers without editing .env</div>
+      </div>
+    </div>
+    <div id="status" class="status"></div>
     <div id="cards" class="grid"></div>
   </div>
   <script>
+    const sidebar = document.getElementById('sidebar');
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const closeSidebar = document.getElementById('closeSidebar');
+    const collapseSidebar = document.getElementById('collapseSidebar');
+    const addPrinterForm = document.getElementById('addPrinterForm');
+    const tabs = Array.from(document.querySelectorAll('.sidebar-tab'));
+    const panels = Array.from(document.querySelectorAll('.tab-panel'));
+    const statusEl = document.getElementById('status');
+    let deferredInstallPrompt = null;
+
+    function setStatus(message, isError = false) {
+      statusEl.textContent = message || '';
+      statusEl.style.color = isError ? '#a0413b' : '#3a5977';
+    }
+
+    function closeSidebarPanel() {
+      sidebar.classList.remove('open');
+    }
+
+    sidebarToggle.addEventListener('click', () => {
+      if (sidebar.classList.contains('open')) closeSidebarPanel();
+      else sidebar.classList.add('open');
+    });
+    closeSidebar.addEventListener('click', closeSidebarPanel);
+    collapseSidebar.addEventListener('click', closeSidebarPanel);
+
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const tabId = tab.getAttribute('data-tab');
+        tabs.forEach((t) => t.classList.toggle('active', t === tab));
+        panels.forEach((panel) => {
+          panel.classList.toggle('active', panel.getAttribute('data-panel') === tabId);
+        });
+      });
+    });
+
+    async function initPwa() {
+      if (!("serviceWorker" in navigator)) return;
+      try {
+        await navigator.serviceWorker.register("/sw.js");
+      } catch (_e) {}
+      setupInstallPrompt();
+    }
+
+    function setupInstallPrompt() {
+      const installBtn = document.getElementById("installBtn");
+      if (!installBtn) return;
+
+      window.addEventListener("beforeinstallprompt", (event) => {
+        event.preventDefault();
+        deferredInstallPrompt = event;
+        installBtn.hidden = false;
+        installBtn.textContent = "Install App";
+      });
+
+      installBtn.addEventListener("click", async () => {
+        if (deferredInstallPrompt) {
+          deferredInstallPrompt.prompt();
+          await deferredInstallPrompt.userChoice.catch(() => null);
+          deferredInstallPrompt = null;
+          installBtn.hidden = true;
+          return;
+        }
+        if (isIosStandaloneCandidate()) {
+          installBtn.textContent = "Use Share > Add to Home Screen";
+          installBtn.hidden = false;
+        }
+      });
+
+      if (isIosStandaloneCandidate()) {
+        installBtn.hidden = false;
+        installBtn.textContent = "Add to Home Screen";
+      }
+
+      window.addEventListener("appinstalled", () => {
+        installBtn.hidden = true;
+        deferredInstallPrompt = null;
+      });
+    }
+
+    function isIosStandaloneCandidate() {
+      const ua = window.navigator.userAgent.toLowerCase();
+      const isIos = /iphone|ipad|ipod/.test(ua);
+      const inStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+      return isIos && !inStandalone;
+    }
+
+    addPrinterForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const fd = new FormData(addPrinterForm);
+      const payload = {
+        name: String(fd.get('name') || '').trim(),
+        host: String(fd.get('host') || '').trim(),
+        serial: String(fd.get('serial') || '').trim(),
+        access_code: String(fd.get('access_code') || '').trim(),
+        device_type: String(fd.get('device_type') || '').trim() || 'unknown',
+        local_mqtt: Boolean(fd.get('local_mqtt')),
+        enable_camera: Boolean(fd.get('enable_camera')),
+        disable_ssl_verify: Boolean(fd.get('disable_ssl_verify'))
+      };
+      const idValue = String(fd.get('id') || '').trim();
+      if (idValue) payload.id = idValue;
+
+      try {
+        const res = await fetch('/api/printers', {
+          method: 'POST',
+          headers: {'content-type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          const errorBody = await res.json().catch(() => ({}));
+          throw new Error(errorBody.detail || `HTTP ${res.status}`);
+        }
+        setStatus(`Added printer: ${payload.name}`);
+        addPrinterForm.reset();
+        document.getElementById('deviceType').value = 'unknown';
+        document.querySelector('input[name="local_mqtt"]').checked = true;
+        document.querySelector('input[name="enable_camera"]').checked = true;
+        closeSidebarPanel();
+        loadPrinters();
+      } catch (err) {
+        setStatus(`Add printer failed: ${String(err)}`, true);
+      }
+    });
+
     function printerSvg() {
       return '<img class="printer-art" src="/static/printers/x1c.jpg" alt="Bambu Lab X1 Carbon">';
     }
+
     async function loadPrinters() {
       const cards = document.getElementById('cards');
       try {
@@ -1001,7 +1417,7 @@ def _render_gallery_html() -> str:
         const s = await r.json();
         const items = s.items || [];
         if (!items.length) {
-          cards.innerHTML = '<div class="card"><div class="name">No printers configured</div><div class="meta">Set PRINTER_* or PRINTERS_JSON in .env</div></div>';
+          cards.innerHTML = '<div class="card"><div class="name">No printers configured</div><div class="meta">Use Add Printer to create one.</div></div>';
           return;
         }
         cards.innerHTML = items.map(p => {
@@ -1012,13 +1428,14 @@ def _render_gallery_html() -> str:
               ${printerSvg()}
               <div class="name-row">
                 <div class="name">${p.name || p.id}</div>
-                <button type="button" class="rename-icon" data-id="${p.id}" data-name="${(p.name || p.id).replace(/"/g, '&quot;')}" title="Rename printer">✎</button>
+                <button type="button" class="rename-icon" data-id="${p.id}" data-name="${(p.name || p.id).replace(/"/g, '&quot;')}" title="Rename printer">Edit</button>
               </div>
               <div class="meta">Serial: ${p.serial || '-'}</div>
               <span class="badge ${ok}">${label}</span>
             </a>
           </article>`;
         }).join('');
+
         document.querySelectorAll('.rename-icon').forEach((btn) => {
           btn.addEventListener('click', async (event) => {
             event.preventDefault();
@@ -1033,10 +1450,11 @@ def _render_gallery_html() -> str:
               body: JSON.stringify({name: next.trim()})
             });
             if (res.ok) {
+              setStatus(`Renamed printer: ${next.trim()}`);
               loadPrinters();
             } else {
               const txt = await res.text();
-              alert(`Rename failed: ${txt}`);
+              setStatus(`Rename failed: ${txt}`, true);
             }
           });
         });
@@ -1044,11 +1462,12 @@ def _render_gallery_html() -> str:
         cards.innerHTML = `<div class="card"><div class="name">Failed to load printers</div><div class="meta">${String(err)}</div></div>`;
       }
     }
+
+    initPwa();
     loadPrinters();
   </script>
 </body>
 </html>"""
-
 
 def _render_printer_dashboard(printer_id: str) -> str:
     service = _service_or_404(printer_id)
@@ -1132,6 +1551,15 @@ async def list_printers() -> dict[str, Any]:
             }
         )
     return {"default_id": printer_manager.default_id, "items": items}
+
+
+@app.post("/api/printers")
+async def add_printer(request: AddPrinterRequest) -> dict[str, Any]:
+    try:
+        printer = await printer_manager.add(request)
+        return {"ok": True, "printer": printer}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/printers/{printer_id}/name")

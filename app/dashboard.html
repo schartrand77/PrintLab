@@ -8,6 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="PrintLab">
+  <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
   <title>PrintLab</title>
@@ -75,6 +76,18 @@
       font-weight: 700;
     }
     .back-link:hover { filter: brightness(1.03); }
+    .top-actions { display: inline-flex; gap: 8px; align-items: center; }
+    .install-btn {
+      border: 1px solid rgba(255,255,255,.7);
+      background: rgba(255,255,255,.54);
+      color: #2a4f73;
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .install-btn[hidden] { display: none !important; }
 
     .print-top {
       display: grid;
@@ -390,9 +403,16 @@
     }
     .ams-top {
       display: flex;
-      justify-content: flex-end;
+      justify-content: space-between;
       gap: 8px;
       margin-bottom: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .ams-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #2a4056;
     }
     .ams-chip {
       border-radius: 6px;
@@ -402,6 +422,24 @@
       font-size: 14px;
       padding: 6px 12px;
       border: 1px solid rgba(255, 255, 255, 0.64);
+    }
+    .ams-units {
+      display: grid;
+      gap: 10px;
+    }
+    .ams-unit-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 6px;
+      flex-wrap: wrap;
+    }
+    .ams-unit-meta {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
     }
     .ams-body {
       height: 184px;
@@ -489,6 +527,9 @@
     <section class="card">
       <div class="top-nav">
         <a class="back-link" href="/">&#8592; Printers</a>
+        <div class="top-actions">
+          <button id="installBtn" class="install-btn" type="button" hidden>Install App</button>
+        </div>
       </div>
       <div class="print-top">
         <div>
@@ -523,6 +564,9 @@
         <button class="btn red" title="Stop" onclick="post('/api/actions/stop')">&#9632;</button>
         <button class="btn" title="Resume" onclick="post('/api/actions/resume')">&#8596;</button>
       </div>
+      <div class="meta">
+        <span class="chip">Remaining: <span id="remainingTime">-</span></span>
+      </div>
 
       <div class="meta">
         <span class="chip">Serial: <span id="serial">-</span></span>
@@ -536,15 +580,10 @@
     <section class="card">
       <div class="ams-wrap">
         <div class="ams-top">
-          <div class="ams-chip">&#128167; <span id="humidity">10%</span></div>
-          <div class="ams-chip">&#127777; <span id="amsTemp">32&#176;C</span></div>
+          <div class="ams-title">AMS Units: <span id="amsCount">0</span></div>
+          <div class="ams-chip">Active AMS: <span id="activeAms">-</span></div>
         </div>
-        <div class="ams-body">
-          <div class="slot"><div class="dot"></div><div class="fil">Empty</div><div class="rem">-</div></div>
-          <div class="slot"><div class="dot"></div><div class="fil">Empty</div><div class="rem">-</div></div>
-          <div class="slot"><div class="dot"></div><div class="fil">Empty</div><div class="rem">-</div></div>
-          <div class="slot"><div class="dot"></div><div class="fil">Empty</div><div class="rem">-</div></div>
-        </div>
+        <div id="amsUnits" class="ams-units"></div>
       </div>
     </section>
   </main>
@@ -580,6 +619,7 @@
     let viewMode = "photo";
     let modelSearchTimer = null;
     let swRegistration = null;
+    let deferredInstallPrompt = null;
     let printerEventSource = null;
     let printerEventRetryTimer = null;
     const notifyState = {
@@ -603,7 +643,51 @@
       } catch (_e) {
         swRegistration = null;
       }
+      setupInstallPrompt();
       await ensureNativeNotifications();
+    }
+
+    function setupInstallPrompt() {
+      const installBtn = document.getElementById("installBtn");
+      if (!installBtn) return;
+
+      window.addEventListener("beforeinstallprompt", (event) => {
+        event.preventDefault();
+        deferredInstallPrompt = event;
+        installBtn.hidden = false;
+        installBtn.textContent = "Install App";
+      });
+
+      installBtn.addEventListener("click", async () => {
+        if (deferredInstallPrompt) {
+          deferredInstallPrompt.prompt();
+          await deferredInstallPrompt.userChoice.catch(() => null);
+          deferredInstallPrompt = null;
+          installBtn.hidden = true;
+          return;
+        }
+        if (isIosStandaloneCandidate()) {
+          installBtn.textContent = "Use Share > Add to Home Screen";
+          installBtn.hidden = false;
+        }
+      });
+
+      if (isIosStandaloneCandidate()) {
+        installBtn.hidden = false;
+        installBtn.textContent = "Add to Home Screen";
+      }
+
+      window.addEventListener("appinstalled", () => {
+        installBtn.hidden = true;
+        deferredInstallPrompt = null;
+      });
+    }
+
+    function isIosStandaloneCandidate() {
+      const ua = window.navigator.userAgent.toLowerCase();
+      const isIos = /iphone|ipad|ipod/.test(ua);
+      const inStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+      return isIos && !inStandalone;
     }
 
     async function ensureNativeNotifications() {
@@ -819,37 +903,75 @@
       return `${v} C`;
     }
 
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
     function renderAms(amsState) {
-      const humidityEl = document.getElementById("humidity");
-      const tempEl = document.getElementById("amsTemp");
-      const slots = document.querySelectorAll(".ams-body .slot");
+      const unitsEl = document.getElementById("amsUnits");
+      const countEl = document.getElementById("amsCount");
+      const activeAmsEl = document.getElementById("activeAms");
+      const units = Array.isArray(amsState?.ams_units) && amsState.ams_units.length
+        ? amsState.ams_units
+        : [{ ams_index: 0, humidity_pct: null, temperature_c: null, slots: Array.isArray(amsState?.slots) ? amsState.slots : [] }];
 
-      const humidity = amsState?.humidity_pct;
-      const amsTemp = amsState?.temperature_c;
-      humidityEl.textContent = Number.isFinite(humidity) ? `${Math.round(humidity)}%` : "-";
-      tempEl.textContent = Number.isFinite(amsTemp) ? `${Math.round(amsTemp)} C` : "-";
+      countEl.textContent = String(amsState?.total_ams_count ?? units.length ?? 0);
+      const activeAms = amsState?.active_ams_index;
+      activeAmsEl.textContent = activeAms === null || activeAms === undefined ? "-" : `AMS ${Number(activeAms) + 1}`;
 
-      const stateSlots = Array.isArray(amsState?.slots) ? amsState.slots : [];
-      slots.forEach((slotEl, idx) => {
-        const slot = stateSlots[idx];
-        const dot = slotEl.querySelector(".dot");
-        const fil = slotEl.querySelector(".fil");
-        const rem = slotEl.querySelector(".rem");
-        const isActive = !!slot?.active;
-        const isEmpty = slot?.empty !== false;
-        const label = (slot?.type || "").trim() || (isEmpty ? "Empty" : "-");
-        const color = slot?.color_hex || "#2f343c";
-        const remain = Number(slot?.remain_percent);
-        const remainText = Number.isFinite(remain) && remain >= 0 ? `${Math.round(remain)}% left` : "-";
+      const html = units.map((unit) => {
+        const unitSlots = Array.isArray(unit?.slots) && unit.slots.length ? unit.slots : [
+          { index: 0, type: "Empty", empty: true },
+          { index: 1, type: "Empty", empty: true },
+          { index: 2, type: "Empty", empty: true },
+          { index: 3, type: "Empty", empty: true }
+        ];
+        const humidity = Number(unit?.humidity_pct);
+        const temperature = Number(unit?.temperature_c);
+        const unitLabel = Number(unit?.ams_index);
+        const unitName = Number.isFinite(unitLabel) ? `AMS ${unitLabel + 1}` : "AMS";
+        const slotsHtml = unitSlots.map((slot) => {
+          const isActive = !!slot?.active;
+          const isEmpty = slot?.empty !== false;
+          const label = (slot?.type || "").trim() || (isEmpty ? "Empty" : "-");
+          const color = slot?.color_hex || "#2f343c";
+          const remain = Number(slot?.remain_percent);
+          const remainText = Number.isFinite(remain) && remain >= 0 ? `${Math.round(remain)}% left` : "-";
+          return `<div class="slot ${isActive ? "active" : ""}">
+            <div class="dot" style="background:${escapeHtml(color)};border-color:${isEmpty ? "#525a66" : escapeHtml(color)}"></div>
+            <div class="fil" style="opacity:${isEmpty ? "0.7" : "1"}">${escapeHtml(label)}</div>
+            <div class="rem" style="opacity:${isEmpty ? "0.7" : "1"}">${escapeHtml(remainText)}</div>
+          </div>`;
+        }).join("");
+        return `<section class="ams-unit">
+          <div class="ams-unit-head">
+            <div class="ams-chip">${escapeHtml(unitName)}</div>
+            <div class="ams-unit-meta">
+              <div class="ams-chip">&#128167; ${Number.isFinite(humidity) ? Math.round(humidity) + "%" : "-"}</div>
+              <div class="ams-chip">&#127777; ${Number.isFinite(temperature) ? Math.round(temperature) + " C" : "-"}</div>
+            </div>
+          </div>
+          <div class="ams-body">${slotsHtml}</div>
+        </section>`;
+      }).join("");
+      unitsEl.innerHTML = html;
+    }
 
-        slotEl.classList.toggle("active", isActive);
-        dot.style.background = color;
-        dot.style.borderColor = isEmpty ? "#525a66" : color;
-        fil.textContent = label;
-        fil.style.opacity = isEmpty ? "0.7" : "1";
-        rem.textContent = remainText;
-        rem.style.opacity = isEmpty ? "0.7" : "1";
-      });
+    function formatRemainingMinutes(value) {
+      const minutes = Number(value);
+      if (!Number.isFinite(minutes) || minutes < 0) return "-";
+      if (minutes < 1) return "<1m";
+      const rounded = Math.round(minutes);
+      const hours = Math.floor(rounded / 60);
+      const mins = rounded % 60;
+      if (hours <= 0) return `${mins}m`;
+      if (mins === 0) return `${hours}h`;
+      return `${hours}h ${mins}m`;
     }
 
     async function load() {
@@ -872,6 +994,7 @@
       document.getElementById("model").textContent = s.printer?.device_type ?? "-";
       document.getElementById("ip").textContent = s.printer?.ip_address ?? "-";
       document.getElementById("state").textContent = s.connected ? "Connected" : "Disconnected";
+      document.getElementById("remainingTime").textContent = formatRemainingMinutes(s.job?.remaining_minutes);
       if (viewMode === "photo") {
         const img = document.getElementById("previewImage");
         img.onerror = () => { img.src = placeholderThumb; };
