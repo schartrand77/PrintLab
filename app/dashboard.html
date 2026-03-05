@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PrintLab</title>
+  <style>
+    :root {
+      --bg: #050608;
+      --card: #1a1d22;
+      --card-edge: #343941;
+      --panel: #2f343c;
+      --line: #3a3f46;
+      --text: #eceff2;
+      --muted: #9ca3ad;
+      --ok: #50b56b;
+      --amber: #f2a100;
+      --red: #ff4538;
+      --btn: #343941;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #050608;
+      color: var(--text);
+      font-family: "Segoe UI", Roboto, Arial, sans-serif;
+    }
+    main {
+      max-width: 580px;
+      margin: 18px auto;
+      padding: 0 12px 16px;
+      display: grid;
+      gap: 22px;
+    }
+    .card {
+      background: linear-gradient(180deg, #1c2026, #181b20);
+      border: 1px solid var(--card-edge);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 8px 26px rgba(0, 0, 0, .45);
+    }
+
+    .print-top {
+      display: grid;
+      grid-template-columns: 1fr 90px;
+      gap: 10px;
+    }
+    .camera-pane {
+      min-height: 184px;
+      border-radius: 10px;
+      border: 1px solid #2b3037;
+      background: #12151a;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .camera-pane img {
+      width: 175px;
+      height: 175px;
+      object-fit: contain;
+      filter: drop-shadow(0 8px 10px rgba(0,0,0,.45));
+    }
+    .cam-toggle {
+      position: absolute;
+      left: 10px;
+      top: 10px;
+      z-index: 2;
+      display: inline-flex;
+      gap: 4px;
+      background: rgba(8, 10, 13, .72);
+      border: 1px solid #3f4651;
+      border-radius: 999px;
+      padding: 4px;
+    }
+    .cam-toggle button {
+      border: 0;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #d8dde4;
+      background: transparent;
+      cursor: pointer;
+    }
+    .cam-toggle button.active {
+      background: #1f8dd6;
+      color: #fff;
+    }
+    .live-badge {
+      position: absolute;
+      right: 10px;
+      top: 10px;
+      z-index: 2;
+      border-radius: 999px;
+      border: 1px solid #3f4651;
+      background: rgba(8, 10, 13, .72);
+      color: #d8dde4;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 9px;
+      display: none;
+    }
+    .live-badge.ok {
+      color: #8ee39f;
+      border-color: #2d6f3c;
+    }
+    .live-badge.err {
+      color: #ff9d96;
+      border-color: #81403b;
+    }
+
+    .right-rail {
+      background: var(--panel);
+      border-radius: 6px;
+      padding: 7px 8px;
+      display: grid;
+      align-content: start;
+      gap: 7px;
+    }
+    .rail-item {
+      border-bottom: 1px solid #444a54;
+      padding-bottom: 6px;
+    }
+    .rail-item:last-child { border-bottom: 0; padding-bottom: 0; }
+    .rk {
+      color: #c7ccd3;
+      opacity: .72;
+      font-size: 12px;
+      line-height: 1;
+    }
+    .rv {
+      margin-top: 3px;
+      font-size: 31px;
+      font-weight: 600;
+      line-height: 1;
+      letter-spacing: -.5px;
+    }
+    .rv.small {
+      font-size: 30px;
+    }
+
+    .prog {
+      margin-top: 12px;
+    }
+    .bar {
+      height: 4px;
+      background: #343940;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .fill {
+      height: 100%;
+      width: 0;
+      background: var(--ok);
+    }
+    .prog-meta {
+      margin-top: 5px;
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 23px;
+      font-weight: 500;
+      line-height: 1;
+    }
+    .prog-meta small {
+      font-size: 24px;
+      color: #8f96a1;
+      opacity: .85;
+    }
+
+    .actions {
+      margin-top: 11px;
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 5px;
+    }
+    .btn {
+      border: 0;
+      border-radius: 5px;
+      height: 50px;
+      background: var(--btn);
+      color: #fff;
+      font-size: 24px;
+      cursor: pointer;
+    }
+    .btn:hover { filter: brightness(1.08); }
+    .btn.yellow { background: var(--amber); }
+    .btn.red { background: var(--red); }
+    .btn.cyan { background: #0f95bf; }
+
+    .meta {
+      margin-top: 9px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .chip {
+      border-radius: 6px;
+      background: #353a42;
+      color: #d7dce3;
+      padding: 4px 8px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .errors {
+      margin-top: 9px;
+      border-radius: 8px;
+      border: 1px solid #31363e;
+      background: rgba(0,0,0,.2);
+      color: #c8cdd5;
+      min-height: 40px;
+      font-size: 12px;
+      padding: 8px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, .58);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      padding: 12px;
+    }
+    .modal.open { display: flex; }
+    .modal-panel {
+      width: min(980px, 100%);
+      max-height: 88vh;
+      overflow: auto;
+      background: linear-gradient(180deg, #1f2329, #181b20);
+      border: 1px solid #3b414a;
+      border-radius: 12px;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, .5);
+    }
+    .modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid #343a43;
+      position: sticky;
+      top: 0;
+      background: #1e2228;
+      z-index: 1;
+    }
+    .modal-title {
+      font-size: 28px;
+      font-weight: 600;
+      color: #18baf4;
+    }
+    .close {
+      border: 0;
+      background: transparent;
+      color: #c8ced7;
+      font-size: 42px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .modal-tools {
+      padding: 12px 14px;
+      border-bottom: 1px solid #343a43;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .search {
+      background: #1a1e24;
+      border: 1px solid #39404a;
+      border-radius: 6px;
+      color: #eaf0f8;
+      padding: 8px 10px;
+      min-width: 260px;
+      font-size: 20px;
+    }
+    .model-grid {
+      padding: 12px 14px 16px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(245px, 1fr));
+      gap: 10px;
+    }
+    .model-card {
+      border: 1px solid #3d434d;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #242930;
+    }
+    .model-preview {
+      height: 175px;
+      background: #3a3e44;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .model-preview img {
+      max-width: 92%;
+      max-height: 92%;
+      object-fit: contain;
+    }
+    .model-body {
+      padding: 9px;
+      display: grid;
+      gap: 4px;
+    }
+    .model-name {
+      font-size: 31px;
+      line-height: 1.1;
+      font-weight: 600;
+      word-break: break-word;
+    }
+    .model-meta {
+      font-size: 22px;
+      color: #b3bbc6;
+    }
+    .print-btn {
+      margin-top: 4px;
+      border: 0;
+      border-radius: 5px;
+      background: #0e97c2;
+      color: #fff;
+      height: 41px;
+      font-size: 27px;
+      font-weight: 600;
+      cursor: not-allowed;
+      opacity: .75;
+    }
+
+    .ams-wrap {
+      min-height: 255px;
+      border-radius: 11px;
+      border: 1px solid #2b3037;
+      background: linear-gradient(180deg, #232830 0%, #1b1f26 45%, #171a21 100%);
+      padding: 12px;
+      position: relative;
+      overflow: hidden;
+    }
+    .ams-top {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .ams-chip {
+      border-radius: 6px;
+      background: #4a5059;
+      color: #f0f3f6;
+      font-weight: 700;
+      font-size: 17px;
+      padding: 6px 12px;
+    }
+    .ams-body {
+      height: 184px;
+      border-radius: 12px;
+      border: 1px solid #424852;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.1), rgba(0,0,0,.25)),
+        repeating-linear-gradient(90deg, rgba(255,255,255,.06) 0 1px, transparent 1px 6px),
+        linear-gradient(180deg, #434a53 0%, #232831 45%, #171b22 100%);
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      padding: 10px;
+      align-items: end;
+    }
+    .slot {
+      border-radius: 8px;
+      border: 1px solid #515863;
+      background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(0,0,0,.2));
+      height: 156px;
+      display: grid;
+      align-content: end;
+      justify-items: center;
+      padding: 8px 5px;
+      gap: 8px;
+      position: relative;
+    }
+    .slot::before {
+      content: "";
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      height: 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.08);
+    }
+    .dot {
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      background: rgba(8, 10, 13, .58);
+      border: 2px solid #525a66;
+    }
+    .slot.active .dot {
+      border-color: #00b5ff;
+      box-shadow: 0 0 0 2px rgba(0,181,255,.2) inset;
+    }
+    .fil {
+      padding: 8px 11px;
+      border-radius: 6px;
+      border: 1px solid #505762;
+      background: #2f353e;
+      font-size: 30px;
+      font-weight: 500;
+      line-height: 1;
+    }
+
+    @media (max-width: 560px) {
+      .print-top { grid-template-columns: 1fr; }
+      .right-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .rail-item { border-bottom: 0; border-right: 1px solid #444a54; padding-right: 8px; }
+      .rail-item:nth-child(2n) { border-right: 0; }
+      .actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .btn { height: 44px; font-size: 20px; }
+      .ams-body { grid-template-columns: repeat(2, minmax(0, 1fr)); height: auto; }
+      .slot { height: 132px; }
+      .fil { font-size: 22px; }
+      .search { min-width: 100%; }
+      .model-name { font-size: 24px; }
+      .model-meta { font-size: 16px; }
+      .print-btn { font-size: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card">
+      <div class="print-top">
+        <div>
+          <div class="camera-pane">
+            <div class="cam-toggle">
+              <button id="modePhoto" class="active" type="button" onclick="setViewMode('photo')">Photo</button>
+              <button id="modeLive" type="button" onclick="setViewMode('live')">Live</button>
+            </div>
+            <div id="liveBadge" class="live-badge">LIVE</div>
+            <img id="previewImage" src="/data/cache/prints/20906356-figurine_plate_2.gcode.png" alt="preview">
+          </div>
+          <div class="prog">
+            <div class="bar"><div id="progressFill" class="fill"></div></div>
+            <div class="prog-meta">
+              <span id="layerInfo">0%</span>
+              <small id="timeInfo">idle</small>
+            </div>
+          </div>
+        </div>
+        <aside class="right-rail">
+          <div class="rail-item"><div class="rk">Nozzle</div><div id="nozzle" class="rv">-</div></div>
+          <div class="rail-item"><div class="rk">Bed</div><div id="bed" class="rv small">-</div></div>
+          <div class="rail-item"><div class="rk">Progress</div><div id="progValue" class="rv small">-</div></div>
+          <div class="rail-item"><div class="rk">Chamber</div><div id="chamber" class="rv small">-</div></div>
+        </aside>
+      </div>
+
+      <div class="actions">
+        <button class="btn yellow" title="Light On" onclick="post('/api/actions/chamber-light',{on:true})">&#128161;</button>
+        <button class="btn cyan" title="SD Models" onclick="openModelsModal()">&#9776;</button>
+        <button class="btn" title="Pause" onclick="post('/api/actions/pause')">&#10074;&#10074;</button>
+        <button class="btn red" title="Stop" onclick="post('/api/actions/stop')">&#9632;</button>
+        <button class="btn" title="Resume" onclick="post('/api/actions/resume')">&#8596;</button>
+      </div>
+
+      <div class="meta">
+        <span class="chip">Serial: <span id="serial">-</span></span>
+        <span class="chip">Model: <span id="model">-</span></span>
+        <span class="chip">IP: <span id="ip">-</span></span>
+        <span class="chip">State: <span id="state">-</span></span>
+      </div>
+      <div id="errors" class="errors">-</div>
+    </section>
+
+    <section class="card">
+      <div class="ams-wrap">
+        <div class="ams-top">
+          <div class="ams-chip">&#128167; <span id="humidity">10%</span></div>
+          <div class="ams-chip">&#127777; <span id="amsTemp">32&#176;C</span></div>
+        </div>
+        <div class="ams-body">
+          <div class="slot active"><div class="dot"></div><div class="fil">PLA</div></div>
+          <div class="slot"><div class="dot"></div><div class="fil">PLA</div></div>
+          <div class="slot"><div class="dot"></div><div class="fil">PLA</div></div>
+          <div class="slot"><div class="dot"></div><div class="fil">PLA</div></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div id="modelsModal" class="modal" onclick="onModalBackdrop(event)">
+    <div class="modal-panel">
+      <div class="modal-head">
+        <div class="modal-title">SD Card Models</div>
+        <button class="close" title="Close" onclick="closeModelsModal()">&times;</button>
+      </div>
+      <div class="modal-tools">
+        <button class="btn" style="height:36px;font-size:16px;padding:0 12px" onclick="loadSdModels()">Refresh</button>
+        <input id="modelSearch" class="search" type="text" placeholder="Search by filename..." oninput="debouncedLoadModels()">
+        <div class="chip">Total: <span id="modelCount">0</span></div>
+      </div>
+      <div id="modelsGrid" class="model-grid"></div>
+    </div>
+  </div>
+
+  <script>
+    let viewMode = "photo";
+    let liveTimer = null;
+    let liveObjectUrl = null;
+    let modelSearchTimer = null;
+    const photoSrc = "/data/cache/prints/20906356-figurine_plate_2.gcode.png";
+    const placeholderThumb =
+      "data:image/svg+xml;utf8," +
+      encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='640' height='480'><rect width='100%' height='100%' fill='#33373d'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#9aa2ad' font-family='Segoe UI' font-size='24'>No Thumbnail</text></svg>");
+    const liveUnavailableThumb =
+      "data:image/svg+xml;utf8," +
+      encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='640' height='480'><rect width='100%' height='100%' fill='#2f343b'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#c2c8d0' font-family='Segoe UI' font-size='24'>Live feed unavailable</text></svg>");
+
+    async function post(url, body) {
+      await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: body ? JSON.stringify(body) : null
+      });
+      load();
+    }
+
+    function setViewMode(mode) {
+      viewMode = mode;
+      document.getElementById("modePhoto").classList.toggle("active", mode === "photo");
+      document.getElementById("modeLive").classList.toggle("active", mode === "live");
+      if (mode === "live") {
+        startLiveFeed();
+      } else {
+        stopLiveFeed();
+        setLiveBadge("", "");
+        const img = document.getElementById("previewImage");
+        img.onerror = () => { img.src = placeholderThumb; };
+        img.src = photoSrc;
+      }
+    }
+
+    function setLiveBadge(text, stateClass) {
+      const badge = document.getElementById("liveBadge");
+      badge.classList.remove("ok", "err");
+      if (!text) {
+        badge.style.display = "none";
+        badge.textContent = "";
+        return;
+      }
+      badge.textContent = text;
+      if (stateClass) badge.classList.add(stateClass);
+      badge.style.display = "inline-block";
+    }
+
+    async function refreshLiveFrame() {
+      const img = document.getElementById("previewImage");
+      try {
+        const res = await fetch(`/api/live/chamber.jpg?t=${Date.now()}`, { cache: "no-store" });
+        if (res.status === 204) {
+          throw new Error("No frame");
+        }
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const blob = await res.blob();
+        if (!blob || blob.size === 0) {
+          throw new Error("Empty frame");
+        }
+        if (liveObjectUrl) URL.revokeObjectURL(liveObjectUrl);
+        liveObjectUrl = URL.createObjectURL(blob);
+        img.src = liveObjectUrl;
+        setLiveBadge("LIVE", "ok");
+      } catch (_e) {
+        img.src = liveUnavailableThumb;
+        setLiveBadge("NO SIGNAL", "err");
+      }
+    }
+
+    function startLiveFeed() {
+      stopLiveFeed();
+      refreshLiveFrame();
+      liveTimer = setInterval(refreshLiveFrame, 1100);
+    }
+
+    function stopLiveFeed() {
+      if (liveTimer) {
+        clearInterval(liveTimer);
+        liveTimer = null;
+      }
+      if (liveObjectUrl) {
+        URL.revokeObjectURL(liveObjectUrl);
+        liveObjectUrl = null;
+      }
+    }
+
+    function formatBytes(bytes) {
+      if (!Number.isFinite(bytes)) return "-";
+      const units = ["B", "KB", "MB", "GB"];
+      let value = bytes;
+      let i = 0;
+      while (value >= 1024 && i < units.length - 1) {
+        value /= 1024;
+        i++;
+      }
+      return `${value.toFixed(value >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
+    }
+
+    function formatDate(iso) {
+      if (!iso) return "-";
+      const dt = new Date(iso);
+      if (Number.isNaN(dt.getTime())) return "-";
+      return dt.toLocaleDateString();
+    }
+
+    function openModelsModal() {
+      document.getElementById("modelsModal").classList.add("open");
+      loadSdModels();
+    }
+
+    function closeModelsModal() {
+      document.getElementById("modelsModal").classList.remove("open");
+    }
+
+    function onModalBackdrop(evt) {
+      if (evt.target.id === "modelsModal") {
+        closeModelsModal();
+      }
+    }
+
+    function debouncedLoadModels() {
+      if (modelSearchTimer) clearTimeout(modelSearchTimer);
+      modelSearchTimer = setTimeout(() => loadSdModels(), 260);
+    }
+
+    async function loadSdModels() {
+      const grid = document.getElementById("modelsGrid");
+      const count = document.getElementById("modelCount");
+      const q = (document.getElementById("modelSearch").value || "").trim();
+      grid.innerHTML = "<div class='model-meta'>Loading...</div>";
+      try {
+        const res = await fetch(`/api/sd/models?query=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        const items = data.items || [];
+        count.textContent = String(items.length);
+        if (!items.length) {
+          grid.innerHTML = "<div class='model-meta'>No models found on SD card.</div>";
+          return;
+        }
+
+        grid.innerHTML = items.map(item => `
+          <article class="model-card">
+            <div class="model-preview">
+              <img src="${item.thumbnail_url || placeholderThumb}" alt="model preview" onerror="this.onerror=null;this.src='${placeholderThumb}'">
+            </div>
+            <div class="model-body">
+              <div class="model-name">${item.name}</div>
+              <div class="model-meta">${formatBytes(item.size_bytes)} - ${formatDate(item.modified)}</div>
+              <div class="model-meta">${item.path}</div>
+              <button class="print-btn" title="Coming soon">Print Again</button>
+            </div>
+          </article>
+        `).join("");
+      } catch (e) {
+        grid.innerHTML = "<div class='model-meta'>Failed to load SD card models.</div>";
+      }
+    }
+
+    function temp(v) {
+      if (v === null || v === undefined || Number.isNaN(v)) return "-";
+      return `${v} C`;
+    }
+
+    async function load() {
+      const r = await fetch("/api/state");
+      const s = await r.json();
+      const progress = Number(s.job?.progress_percent ?? 0);
+      const layer = s.job?.current_layer ?? 0;
+      const total = s.job?.total_layers ?? 0;
+
+      document.getElementById("progressFill").style.width = `${Math.max(0, Math.min(100, progress))}%`;
+      document.getElementById("layerInfo").textContent = `${layer}/${total || "?"}`;
+      document.getElementById("timeInfo").textContent = s.job?.state ?? "idle";
+
+      document.getElementById("nozzle").textContent = temp(s.temperatures?.nozzle_current);
+      document.getElementById("bed").textContent = temp(s.temperatures?.bed_current);
+      document.getElementById("chamber").textContent = temp(s.temperatures?.chamber);
+      document.getElementById("progValue").textContent = `${progress}%`;
+
+      document.getElementById("serial").textContent = s.printer?.serial ?? "-";
+      document.getElementById("model").textContent = s.printer?.device_type ?? "-";
+      document.getElementById("ip").textContent = s.printer?.ip_address ?? "-";
+      document.getElementById("state").textContent = s.connected ? "Connected" : "Disconnected";
+      if (viewMode === "photo") {
+        const img = document.getElementById("previewImage");
+        img.onerror = () => { img.src = placeholderThumb; };
+        img.src = photoSrc;
+      }
+
+      const err = s.errors?.print_error || (s.errors?.hms?.Count ? s.errors.hms : null) || s.last_error || "-";
+      document.getElementById("errors").textContent = typeof err === "string" ? err : JSON.stringify(err, null, 2);
+    }
+
+    load();
+    setInterval(load, 3000);
+  </script>
+</body>
+</html>

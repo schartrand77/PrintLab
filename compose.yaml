@@ -1,0 +1,33 @@
+services:
+  printlab:
+    container_name: printlab
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        HA_BAMBULAB_REF: main
+    image: printlab-standalone:local
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: INFO
+      PRINTER_HOST: ${PRINTER_HOST:-}
+      PRINTER_SERIAL: ${PRINTER_SERIAL:-}
+      PRINTER_ACCESS_CODE: ${PRINTER_ACCESS_CODE:-}
+      PRINTER_DEVICE_TYPE: ${PRINTER_DEVICE_TYPE:-unknown}
+      PRINTER_LOCAL_MQTT: ${PRINTER_LOCAL_MQTT:-true}
+      PRINTER_ENABLE_CAMERA: ${PRINTER_ENABLE_CAMERA:-true}
+      PRINTER_DISABLE_SSL_VERIFY: ${PRINTER_DISABLE_SSL_VERIFY:-false}
+      USER_LANGUAGE: ${USER_LANGUAGE:-en}
+      FILE_CACHE_PATH: ${FILE_CACHE_PATH:-/data/cache}
+      PRINT_CACHE_COUNT: ${PRINT_CACHE_COUNT:-1}
+      TIMELAPSE_CACHE_COUNT: ${TIMELAPSE_CACHE_COUNT:-0}
+      USAGE_HOURS: ${USAGE_HOURS:-0}
+      FORCE_IP: ${FORCE_IP:-false}
+      BAMBU_REGION: ${BAMBU_REGION:-}
+      BAMBU_EMAIL: ${BAMBU_EMAIL:-}
+      BAMBU_USERNAME: ${BAMBU_USERNAME:-}
+      BAMBU_AUTH_TOKEN: ${BAMBU_AUTH_TOKEN:-}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      - ./data:/data

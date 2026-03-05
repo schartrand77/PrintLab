@@ -1,0 +1,7 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+paho-mqtt==2.1.0
+requests==2.32.5
+python-dateutil==2.9.0.post0
+Pillow==11.3.0
+beautifulsoup4==4.13.4

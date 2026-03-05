@@ -1,12 +1,27 @@
-FROM ghcr.io/home-assistant/home-assistant:stable
+FROM python:3.12-slim
 
-USER root
+ARG HA_BAMBULAB_REPO=https://github.com/greghesp/ha-bambulab.git
+ARG HA_BAMBULAB_REF=main
 
-RUN apk add --no-cache git
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/opt
 
-COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY docker/install-ha-bambulab.sh /usr/local/bin/install-ha-bambulab.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/install-ha-bambulab.sh
+WORKDIR /app
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD []
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch "${HA_BAMBULAB_REF}" "${HA_BAMBULAB_REPO}" /tmp/ha-bambulab \
+    && cp -a /tmp/ha-bambulab/custom_components/bambu_lab/pybambu /opt/pybambu \
+    && rm -rf /tmp/ha-bambulab
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY app /app/app
+
+EXPOSE 8080
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
