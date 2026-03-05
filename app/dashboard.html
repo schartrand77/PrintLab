@@ -241,6 +241,7 @@
       cursor: pointer;
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
     }
+    .btn[hidden] { display: none !important; }
     .btn:hover { filter: brightness(1.08); }
     .btn.yellow { background: linear-gradient(145deg, #ffc458, #ee9d2e); }
     .btn.red { background: linear-gradient(145deg, #ff7c73, #f14f45); }
@@ -560,9 +561,9 @@
       <div class="actions">
         <button class="btn yellow" title="Light On" onclick="post('/api/actions/chamber-light',{on:true})">&#128161;</button>
         <button class="btn cyan" title="SD Models" onclick="openModelsModal()">&#9776;</button>
-        <button class="btn" title="Pause" onclick="post('/api/actions/pause')">&#10074;&#10074;</button>
+        <button id="pauseBtn" class="btn" title="Pause" onclick="post('/api/actions/pause')">&#10074;&#10074;</button>
         <button class="btn red" title="Stop" onclick="post('/api/actions/stop')">&#9632;</button>
-        <button class="btn" title="Resume" onclick="post('/api/actions/resume')">&#8596;</button>
+        <button id="resumeBtn" class="btn" title="Resume" onclick="post('/api/actions/resume')" hidden>&#9654;</button>
       </div>
       <div class="meta">
         <span class="chip">Remaining: <span id="remainingTime">-</span></span>
@@ -782,12 +783,42 @@
     }
 
     async function post(url, body) {
-      await fetch(apiPath(url), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: body ? JSON.stringify(body) : null
-      });
-      load();
+      try {
+        const res = await fetch(apiPath(url), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: body ? JSON.stringify(body) : null
+        });
+        if (!res.ok) {
+          let msg = `HTTP ${res.status}`;
+          try {
+            const payload = await res.json();
+            if (payload?.detail) msg = String(payload.detail);
+          } catch (_e) {}
+          throw new Error(msg);
+        }
+        await load();
+      } catch (err) {
+        const errors = document.getElementById("errors");
+        if (errors) {
+          errors.textContent = `Action failed: ${String(err?.message || err)}`;
+        }
+      }
+    }
+
+    function updateActionButtons(jobStateRaw, connected) {
+      const pauseBtn = document.getElementById("pauseBtn");
+      const resumeBtn = document.getElementById("resumeBtn");
+      if (!pauseBtn || !resumeBtn) return;
+
+      const state = String(jobStateRaw || "").toUpperCase();
+      const isPaused = state.includes("PAUSE");
+      const canControl = !!connected;
+
+      pauseBtn.hidden = isPaused;
+      resumeBtn.hidden = !isPaused;
+      pauseBtn.disabled = !canControl || isPaused;
+      resumeBtn.disabled = !canControl || !isPaused;
     }
 
     function setViewMode(mode) {
@@ -1009,6 +1040,7 @@
       document.getElementById("ip").textContent = s.printer?.ip_address ?? "-";
       document.getElementById("state").textContent = s.connected ? "Connected" : "Disconnected";
       document.getElementById("remainingTime").textContent = formatRemainingMinutes(s.job?.remaining_minutes);
+      updateActionButtons(s.job?.state, s.connected);
       if (viewMode === "photo") {
         const img = document.getElementById("previewImage");
         img.onerror = () => { img.src = placeholderThumb; };
