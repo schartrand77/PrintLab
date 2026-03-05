@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import io
 import hashlib
+import json
 import re
 import logging
 import os
+import requests
 import subprocess
 import time
 from datetime import datetime, timezone, timedelta
@@ -14,13 +17,13 @@ from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 from zipfile import ZipFile
 
-from fastapi import FastAPI, HTTPException, Response
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from pybambu import BambuClient
-from pybambu.commands import PAUSE, RESUME, STOP
+from pybambu.commands import PAUSE, PRINT_PROJECT_FILE_TEMPLATE, RESUME, STOP
 from pybambu.const import FansEnum, TempEnum
 
 
@@ -49,6 +52,135 @@ class ChamberLightRequest(BaseModel):
     on: bool
 
 
+class WorksRequest(BaseModel):
+    method: str = Field(pattern="^(GET|POST|PUT|PATCH|DELETE)$")
+    path: str = Field(default="/")
+    query: dict[str, Any] | None = None
+    body: Any = None
+    headers: dict[str, str] | None = None
+    timeout_seconds: float = Field(default=20.0, ge=1.0, le=120.0)
+
+
+class OrderworksPrintJobRequest(BaseModel):
+    file_path: str = Field(min_length=1, description="Path to .3mf/.gcode.3mf on printer SD card, e.g. /cache/model.3mf")
+    plate_gcode: str = Field(default="Metadata/plate_1.gcode")
+    subtask_name: str | None = None
+    use_ams: bool = True
+    ams_mapping: list[int] | None = None
+    bed_type: str = "auto"
+    timelapse: bool = False
+    bed_leveling: bool = True
+    flow_cali: bool = True
+    vibration_cali: bool = True
+    layer_inspect: bool = True
+
+
+class WorksService:
+    def __init__(self) -> None:
+        self._service_env: dict[str, str] = {
+            "makerworks": "MAKERWORKS",
+            "orderworks": "ORDERWORKS",
+            "stockworks": "STOCKWORKS",
+        }
+
+    def _get_config(self, service: str) -> dict[str, Any]:
+        key = self._service_env.get(service.lower())
+        if key is None:
+            raise ValueError(f"Unknown integration service: {service}")
+
+        base_url = os.getenv(f"{key}_BASE_URL", "").strip()
+        api_key = os.getenv(f"{key}_API_KEY", "").strip()
+        bearer_token = os.getenv(f"{key}_BEARER_TOKEN", "").strip()
+        auth_header = os.getenv(f"{key}_AUTH_HEADER", "X-API-Key").strip() or "X-API-Key"
+        verify_ssl = parse_bool(f"{key}_VERIFY_SSL", True)
+
+        return {
+            "service": service.lower(),
+            "base_url": base_url,
+            "api_key": api_key,
+            "bearer_token": bearer_token,
+            "auth_header": auth_header,
+            "verify_ssl": verify_ssl,
+            "configured": bool(base_url),
+        }
+
+    def list_services(self) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for service in self._service_env:
+            cfg = self._get_config(service)
+            items.append(
+                {
+                    "service": cfg["service"],
+                    "configured": cfg["configured"],
+                    "base_url": cfg["base_url"],
+                }
+            )
+        return items
+
+    def _build_url(self, base_url: str, path: str) -> str:
+        if not base_url:
+            raise RuntimeError("Service is not configured (missing BASE_URL).")
+        raw_path = (path or "/").strip()
+        if raw_path.startswith("http://") or raw_path.startswith("https://"):
+            raise ValueError("Absolute URLs are not allowed in request path.")
+        if not raw_path.startswith("/"):
+            raw_path = f"/{raw_path}"
+        return f"{base_url.rstrip('/')}{raw_path}"
+
+    def request_sync(self, service: str, payload: WorksRequest) -> dict[str, Any]:
+        cfg = self._get_config(service)
+        url = self._build_url(cfg["base_url"], payload.path)
+
+        headers: dict[str, str] = {"Accept": "application/json"}
+        if cfg["api_key"]:
+            headers[cfg["auth_header"]] = cfg["api_key"]
+        if cfg["bearer_token"]:
+            headers["Authorization"] = f"Bearer {cfg['bearer_token']}"
+        if payload.headers:
+            headers.update(payload.headers)
+
+        response = requests.request(
+            method=payload.method,
+            url=url,
+            params=payload.query or None,
+            json=payload.body,
+            headers=headers,
+            timeout=payload.timeout_seconds,
+            verify=cfg["verify_ssl"],
+        )
+
+        content_type = response.headers.get("content-type", "")
+        parsed_body: Any
+        if "application/json" in content_type.lower():
+            try:
+                parsed_body = response.json()
+            except Exception:
+                parsed_body = response.text
+        else:
+            parsed_body = response.text
+
+        return {
+            "service": cfg["service"],
+            "url": url,
+            "ok": response.ok,
+            "status_code": response.status_code,
+            "content_type": content_type,
+            "headers": {
+                "content-type": response.headers.get("content-type"),
+                "location": response.headers.get("location"),
+            },
+            "body": parsed_body,
+        }
+
+    async def request(self, service: str, payload: WorksRequest) -> dict[str, Any]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.request_sync, service, payload)
+
+    async def health(self, service: str, path: str = "/health", timeout_seconds: float = 8.0) -> dict[str, Any]:
+        payload = WorksRequest(method="GET", path=path, timeout_seconds=timeout_seconds)
+        return await self.request(service, payload)
+
+
 class PrinterService:
     def __init__(self) -> None:
         self.client: BambuClient | None = None
@@ -60,6 +192,8 @@ class PrinterService:
         self._live_cache_bytes: bytes | None = None
         self._live_cache_mime: str | None = None
         self._live_cache_time: float = 0.0
+        self._event_subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
+        self._main_loop: asyncio.AbstractEventLoop | None = None
 
     def _config(self) -> dict[str, Any]:
         host = os.getenv("PRINTER_HOST", "").strip()
@@ -92,11 +226,46 @@ class PrinterService:
     def _mark_event(self, event: str) -> None:
         self.last_event = event
         self.last_update_utc = datetime.now(timezone.utc).isoformat()
+        self._broadcast_event(event)
 
     def _on_client_event(self, event: str) -> None:
         self._mark_event(event)
 
+    def _broadcast_event(self, event: str) -> None:
+        payload = {"event": event, "at": self.last_update_utc}
+
+        def _send() -> None:
+            for queue in list(self._event_subscribers):
+                try:
+                    if queue.full():
+                        queue.get_nowait()
+                    queue.put_nowait(payload)
+                except Exception:
+                    self._event_subscribers.discard(queue)
+
+        if self._main_loop and self._main_loop.is_running():
+            try:
+                running_loop = asyncio.get_running_loop()
+                if running_loop is self._main_loop:
+                    _send()
+                    return
+            except RuntimeError:
+                pass
+            self._main_loop.call_soon_threadsafe(_send)
+            return
+        _send()
+
+    def subscribe_events(self) -> asyncio.Queue[dict[str, Any]]:
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=40)
+        self._event_subscribers.add(queue)
+        queue.put_nowait({"event": self.last_event, "at": self.last_update_utc})
+        return queue
+
+    def unsubscribe_events(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
+        self._event_subscribers.discard(queue)
+
     async def start(self) -> None:
+        self._main_loop = asyncio.get_running_loop()
         try:
             cfg = self._config()
             self.configured = True
@@ -369,18 +538,13 @@ class PrinterService:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._get_sd_thumbnail_sync, path)
 
-    def _capture_rtsp_snapshot_sync(self) -> tuple[bytes | None, str | None]:
+    def _rtsp_urls_to_try(self) -> list[str]:
         if self.client is None:
-            return None, None
-
-        now = time.time()
-        if self._live_cache_bytes and (now - self._live_cache_time) < 1.5:
-            return self._live_cache_bytes, self._live_cache_mime
-
+            return []
         device = self.client.get_device()
         rtsp_url = device.camera.rtsp_url
         if not rtsp_url or rtsp_url == "disable":
-            return None, None
+            return []
 
         urls_to_try = [rtsp_url]
         try:
@@ -396,7 +560,23 @@ class PrinterService:
         except Exception:
             pass
 
+        seen: set[str] = set()
+        unique: list[str] = []
         for url in urls_to_try:
+            if url not in seen:
+                seen.add(url)
+                unique.append(url)
+        return unique
+
+    def _capture_rtsp_snapshot_sync(self) -> tuple[bytes | None, str | None]:
+        if self.client is None:
+            return None, None
+
+        now = time.time()
+        if self._live_cache_bytes and (now - self._live_cache_time) < 1.5:
+            return self._live_cache_bytes, self._live_cache_mime
+
+        for url in self._rtsp_urls_to_try():
             try:
                 cmd = [
                     "ffmpeg",
@@ -442,6 +622,146 @@ class PrinterService:
     async def get_live_frame(self) -> tuple[bytes | None, str | None]:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._get_live_frame_sync)
+
+    @staticmethod
+    def _normalize_ams_color(color: Any) -> str:
+        if not isinstance(color, str):
+            return "#3a414b"
+        hex_color = color.strip().lstrip("#").upper()
+        if len(hex_color) >= 6 and all(ch in "0123456789ABCDEF" for ch in hex_color[:6]):
+            rgb = hex_color[:6]
+            if rgb == "000000":
+                return "#2f343c"
+            return f"#{rgb}"
+        return "#3a414b"
+
+    def filament_snapshot(self) -> dict[str, Any]:
+        if self.client is None:
+            return {"loaded_filament": None, "remaining_filament": []}
+        try:
+            device = self.client.get_device()
+            ams = self._serialize_ams(device)
+            slots = ams.get("slots", [])
+            loaded = next((slot for slot in slots if slot.get("active")), None)
+            loaded_filament = None
+            if loaded:
+                loaded_filament = {
+                    "slot_index": loaded.get("index"),
+                    "type": loaded.get("type"),
+                    "color_hex": loaded.get("color_hex"),
+                    "remaining_percent": loaded.get("remain_percent"),
+                }
+            remaining = [
+                {
+                    "slot_index": slot.get("index"),
+                    "type": slot.get("type"),
+                    "color_hex": slot.get("color_hex"),
+                    "remaining_percent": slot.get("remain_percent"),
+                    "active": bool(slot.get("active")),
+                    "empty": bool(slot.get("empty")),
+                }
+                for slot in slots
+            ]
+            return {"loaded_filament": loaded_filament, "remaining_filament": remaining}
+        except Exception:
+            return {"loaded_filament": None, "remaining_filament": []}
+
+    async def start_orderworks_print_job(self, request: OrderworksPrintJobRequest) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Client not initialized.")
+
+        raw_path = request.file_path.strip()
+        if not raw_path:
+            raise ValueError("file_path is required.")
+        if raw_path.startswith("ftp://"):
+            ftp_url = raw_path
+            ftp_path = raw_path[6:]
+        else:
+            ftp_path = raw_path if raw_path.startswith("/") else f"/{raw_path}"
+            ftp_url = f"ftp://{ftp_path}"
+
+        command = copy.deepcopy(PRINT_PROJECT_FILE_TEMPLATE)
+        command_print = command["print"]
+        command_print["param"] = request.plate_gcode
+        command_print["url"] = ftp_url
+        command_print["bed_type"] = request.bed_type
+        command_print["timelapse"] = request.timelapse
+        command_print["bed_leveling"] = request.bed_leveling
+        command_print["flow_cali"] = request.flow_cali
+        command_print["vibration_cali"] = request.vibration_cali
+        command_print["layer_inspect"] = request.layer_inspect
+        command_print["use_ams"] = request.use_ams
+        if request.ams_mapping:
+            command_print["ams_mapping"] = request.ams_mapping
+        if request.subtask_name:
+            command_print["subtask_name"] = request.subtask_name
+        else:
+            command_print["subtask_name"] = Path(ftp_path).name
+
+        ok = self.client.publish(command)
+        self._mark_event("event_orderworks_print_submit")
+        return {
+            "ok": bool(ok),
+            "submitted": bool(ok),
+            "file_path": ftp_path,
+            "plate_gcode": request.plate_gcode,
+            "use_ams": request.use_ams,
+            "ams_mapping": command_print.get("ams_mapping"),
+            "subtask_name": command_print.get("subtask_name"),
+        }
+
+    def _serialize_ams(self, device: Any) -> dict[str, Any]:
+        ams = getattr(device, "ams", None)
+        ams_data = getattr(ams, "data", None)
+        if not isinstance(ams_data, dict) or not ams_data:
+            return {
+                "present": False,
+                "ams_index": None,
+                "active_ams_index": None,
+                "active_tray_index": None,
+                "humidity_pct": None,
+                "temperature_c": None,
+                "slots": [],
+            }
+
+        active_ams_index = getattr(ams, "active_ams_index", None)
+        active_tray_index = getattr(ams, "active_tray_index", None)
+
+        if active_ams_index in ams_data:
+            selected_ams_index = active_ams_index
+        else:
+            selected_ams_index = sorted(ams_data.keys())[0]
+
+        selected = ams_data[selected_ams_index]
+        trays = list(getattr(selected, "tray", []) or [])
+        slots: list[dict[str, Any]] = []
+        for tray_idx in range(4):
+            tray = trays[tray_idx] if tray_idx < len(trays) else None
+            is_empty = bool(getattr(tray, "empty", True)) if tray is not None else True
+            tray_type = (getattr(tray, "type", "") or "").strip() if tray is not None else ""
+            slots.append(
+                {
+                    "index": tray_idx,
+                    "active": bool(getattr(tray, "active", False)) if tray is not None else False,
+                    "empty": is_empty,
+                    "type": tray_type if tray_type else ("Empty" if is_empty else "-"),
+                    "name": (getattr(tray, "name", "") or "").strip() if tray is not None else "",
+                    "color_hex": self._normalize_ams_color(getattr(tray, "color", None)) if tray is not None else "#2f343c",
+                    "remain_percent": getattr(tray, "remain", None) if tray is not None else None,
+                }
+            )
+
+        humidity = getattr(selected, "humidity", None)
+        temperature = getattr(selected, "temperature", None)
+        return {
+            "present": True,
+            "ams_index": selected_ams_index,
+            "active_ams_index": active_ams_index,
+            "active_tray_index": active_tray_index,
+            "humidity_pct": humidity if isinstance(humidity, (int, float)) and humidity >= 0 else None,
+            "temperature_c": temperature if isinstance(temperature, (int, float)) and temperature >= 0 else None,
+            "slots": slots,
+        }
 
     async def state(self) -> dict[str, Any]:
         async with self._lock:
@@ -497,6 +817,7 @@ class PrinterService:
                         "print_error": device.print_error.error,
                         "hms": device.hms.errors,
                     },
+                    "ams": self._serialize_ams(device),
                 }
             except Exception as exc:
                 self.last_error = str(exc)
@@ -505,8 +826,11 @@ class PrinterService:
 
 app = FastAPI(title="PrintLab", version="0.1.0")
 service = PrinterService()
+works_service = WorksService()
 dashboard_html = (Path(__file__).with_name("dashboard.html")).read_text(encoding="utf-8")
+static_dir = Path(__file__).with_name("static")
 app.mount("/data", StaticFiles(directory="/data"), name="data")
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
 @app.on_event("startup")
@@ -524,6 +848,23 @@ async def dashboard() -> str:
     return dashboard_html
 
 
+@app.get("/manifest.webmanifest")
+async def manifest() -> FileResponse:
+    return FileResponse(
+        static_dir / "manifest.webmanifest",
+        media_type="application/manifest+json",
+    )
+
+
+@app.get("/sw.js")
+async def service_worker() -> FileResponse:
+    return FileResponse(
+        static_dir / "sw.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     state = await service.state()
@@ -538,6 +879,69 @@ async def health() -> dict[str, Any]:
 @app.get("/api/state")
 async def get_state() -> dict[str, Any]:
     return await service.state()
+
+
+@app.get("/api/works/services")
+async def works_services() -> dict[str, Any]:
+    return {"items": works_service.list_services()}
+
+
+@app.get("/api/works/{service_name}/health")
+async def works_health(service_name: str, path: str = "/health") -> dict[str, Any]:
+    try:
+        result = await works_service.health(service_name, path=path)
+        if service_name.lower() == "stockworks":
+            result["printer_filament"] = service.filament_snapshot()
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/works/{service_name}/request")
+async def works_request(service_name: str, request: WorksRequest) -> dict[str, Any]:
+    try:
+        result = await works_service.request(service_name, request)
+        if service_name.lower() == "stockworks":
+            result["printer_filament"] = service.filament_snapshot()
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/works/orderworks/print-job")
+async def orderworks_print_job(request: OrderworksPrintJobRequest) -> dict[str, Any]:
+    try:
+        return await service.start_orderworks_print_job(request)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/events")
+async def event_stream(request: Request) -> StreamingResponse:
+    queue = service.subscribe_events()
+
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f"event: printer\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            service.unsubscribe_events(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/sd/models")
@@ -579,6 +983,128 @@ async def chamber_image() -> Response:
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/live/stream.mjpg")
+async def chamber_stream() -> StreamingResponse:
+    boundary = "frame"
+
+    async def frame_generator():
+        try:
+            # Primary path: one continuous ffmpeg process for smooth RTSP->MJPEG streaming.
+            for rtsp_url in service._rtsp_urls_to_try():
+                proc = None
+                try:
+                    cmd = [
+                        "ffmpeg",
+                        "-nostdin",
+                        "-loglevel",
+                        "error",
+                        "-rtsp_transport",
+                        "tcp",
+                        "-fflags",
+                        "nobuffer",
+                        "-flags",
+                        "low_delay",
+                        "-probesize",
+                        "32",
+                        "-analyzeduration",
+                        "0",
+                        "-i",
+                        rtsp_url,
+                        "-an",
+                        "-vf",
+                        "fps=12",
+                        "-f",
+                        "image2pipe",
+                        "-vcodec",
+                        "mjpeg",
+                        "-q:v",
+                        "6",
+                        "pipe:1",
+                    ]
+                    proc = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+
+                    if proc.stdout is None:
+                        raise RuntimeError("ffmpeg did not expose stdout")
+
+                    buffer = bytearray()
+                    started = False
+                    while True:
+                        chunk = await proc.stdout.read(65536)
+                        if not chunk:
+                            if proc.returncode is not None:
+                                break
+                            await asyncio.sleep(0.01)
+                            continue
+
+                        started = True
+                        buffer.extend(chunk)
+                        while True:
+                            start = buffer.find(b"\xff\xd8")
+                            if start < 0:
+                                if len(buffer) > 1:
+                                    del buffer[:-1]
+                                break
+                            if start > 0:
+                                del buffer[:start]
+                            end = buffer.find(b"\xff\xd9", 2)
+                            if end < 0:
+                                break
+                            frame = bytes(buffer[: end + 2])
+                            del buffer[: end + 2]
+                            header = (
+                                f"--{boundary}\r\n"
+                                f"Content-Type: image/jpeg\r\n"
+                                f"Content-Length: {len(frame)}\r\n\r\n"
+                            ).encode("ascii")
+                            yield header
+                            yield frame
+                            yield b"\r\n"
+
+                    if started:
+                        return
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    pass
+                finally:
+                    if proc is not None:
+                        try:
+                            if proc.returncode is None:
+                                proc.terminate()
+                                await asyncio.wait_for(proc.wait(), timeout=1.2)
+                        except Exception:
+                            try:
+                                proc.kill()
+                            except Exception:
+                                pass
+
+            # Fallback path: snapshot stream if RTSP/ffmpeg streaming is unavailable.
+            while True:
+                content, mime = await service.get_live_frame()
+                if content and mime:
+                    header = (
+                        f"--{boundary}\r\n"
+                        f"Content-Type: {mime}\r\n"
+                        f"Content-Length: {len(content)}\r\n\r\n"
+                    ).encode("ascii")
+                    yield header
+                    yield content
+                    yield b"\r\n"
+                await asyncio.sleep(0.22)
+        except asyncio.CancelledError:
+            return
+
+    return StreamingResponse(
+        frame_generator(),
+        media_type=f"multipart/x-mixed-replace; boundary={boundary}",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 @app.post("/api/actions/refresh")

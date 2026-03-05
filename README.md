@@ -41,6 +41,32 @@ http://localhost:8080
 - `POST /api/actions/chamber-light` with `{"on": true|false}`
 - `POST /api/actions/fan` with `{"fan":"part_cooling|auxiliary|chamber|heatbreak|secondary_auxiliary","percent":0-100}`
 - `POST /api/actions/temperature` with `{"target":"heatbed|nozzle","value":0-320}`
+- `GET /api/works/services`
+- `GET /api/works/{makerworks|orderworks|stockworks}/health?path=/health`
+- `POST /api/works/{makerworks|orderworks|stockworks}/request`
+  with:
+  `{"method":"GET|POST|PUT|PATCH|DELETE","path":"/v1/resource","query":{},"body":{},"headers":{},"timeout_seconds":20}`
+- `POST /api/works/orderworks/print-job`
+  with:
+  `{"file_path":"/cache/model.3mf","plate_gcode":"Metadata/plate_1.gcode","use_ams":true,"ams_mapping":[0]}`
+
+## Works integration config
+
+Configure each external system in `.env`:
+
+- `MAKERWORKS_BASE_URL`, `MAKERWORKS_API_KEY`, `MAKERWORKS_BEARER_TOKEN`, `MAKERWORKS_AUTH_HEADER`, `MAKERWORKS_VERIFY_SSL`
+- `ORDERWORKS_BASE_URL`, `ORDERWORKS_API_KEY`, `ORDERWORKS_BEARER_TOKEN`, `ORDERWORKS_AUTH_HEADER`, `ORDERWORKS_VERIFY_SSL`
+- `STOCKWORKS_BASE_URL`, `STOCKWORKS_API_KEY`, `STOCKWORKS_BEARER_TOKEN`, `STOCKWORKS_AUTH_HEADER`, `STOCKWORKS_VERIFY_SSL`
+
+Auth behavior:
+- If `*_API_KEY` is set, it is sent as `*_AUTH_HEADER` (default `X-API-Key`).
+- If `*_BEARER_TOKEN` is set, it is sent as `Authorization: Bearer ...`.
+
+Stockworks enrichment:
+- Responses from `GET /api/works/stockworks/health` and `POST /api/works/stockworks/request`
+  include `printer_filament` with:
+  - `loaded_filament` (active AMS slot/type/color/remaining_percent)
+  - `remaining_filament` (all visible AMS slots + remaining percentages)
 
 ## Notes
 
