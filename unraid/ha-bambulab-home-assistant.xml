@@ -1,17 +1,17 @@
 <?xml version="1.0"?>
 <Container version="2">
-  <Name>HA-BambuLab</Name>
-  <Repository>ghcr.io/REPLACE_WITH_YOUR_NAMESPACE/ha-bambulab-home-assistant:latest</Repository>
-  <Registry>https://ghcr.io</Registry>
-  <Network>host</Network>
+  <Name>PrintLab</Name>
+  <Repository>ghcr.io/schartrand77/printlab:latest</Repository>
+  <Registry>https://ghcr.io/schartrand77/printlab</Registry>
+  <Network>makerworks-net</Network>
   <MyIP/>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/greghesp/ha-bambulab</Support>
-  <Project>https://github.com/greghesp/ha-bambulab</Project>
-  <Overview>Home Assistant container with the ha-bambulab custom integration auto-installed on every startup.</Overview>
-  <Category>HomeAutomation:</Category>
-  <WebUI>http://[IP]:[PORT:8123]</WebUI>
+  <Support>https://github.com/schartrand77/printlab</Support>
+  <Project>https://github.com/schartrand77/printlab</Project>
+  <Overview>Print Lab standalone dashboard and API for Bambu printers with multi-printer support, live monitoring, and Works integrations.</Overview>
+  <Category>Tools: HomeAutomation:</Category>
+  <WebUI>http://[IP]:[PORT:8080]</WebUI>
   <TemplateURL/>
   <Icon>https://raw.githubusercontent.com/home-assistant/brands/master/core_integrations/bambu_lab/icon.png</Icon>
   <ExtraParams/>
@@ -20,11 +20,53 @@
   <DateInstalled/>
   <DonateText/>
   <DonateLink/>
-  <Requires>Host networking and mapped /config.</Requires>
+  <Requires>Mapped /data path and printer credentials (or PRINTERS_JSON).</Requires>
 
-  <Config Name="WebUI" Target="8123" Default="8123" Mode="tcp" Description="Home Assistant UI port" Type="Port" Display="always" Required="true" Mask="false">8123</Config>
-  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/ha-bambulab/config" Mode="rw" Description="Home Assistant configuration path" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/ha-bambulab/config</Config>
+  <Config Name="WebUI Port" Target="8080" Default="8080" Mode="tcp" Description="Print Lab web UI port" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Data Path" Target="/data" Default="/mnt/user/appdata/print-lab/data" Mode="rw" Description="Persistent cache/data path (includes printer_names.json)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/print-lab/data</Config>
   <Config Name="TimeZone" Target="TZ" Default="Etc/UTC" Mode="" Description="Timezone" Type="Variable" Display="advanced" Required="false" Mask="false">Etc/UTC</Config>
-  <Config Name="BambuLab Git Ref" Target="HA_BAMBULAB_REF" Default="main" Mode="" Description="Git branch/tag for ha-bambulab" Type="Variable" Display="advanced" Required="false" Mask="false">main</Config>
-  <Config Name="BambuLab Repo URL" Target="HA_BAMBULAB_REPO" Default="https://github.com/greghesp/ha-bambulab.git" Mode="" Description="Git repository for ha-bambulab" Type="Variable" Display="advanced" Required="false" Mask="false">https://github.com/greghesp/ha-bambulab.git</Config>
+
+  <Config Name="Log Level" Target="LOG_LEVEL" Default="INFO" Mode="" Description="Application log level" Type="Variable" Display="advanced" Required="false" Mask="false">INFO</Config>
+
+  <Config Name="PRINTERS_JSON" Target="PRINTERS_JSON" Default="" Mode="" Description="Optional multi-printer JSON array. If set, overrides single PRINTER_* values." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Printer Name" Target="PRINTER_NAME" Default="" Mode="" Description="Friendly name for single-printer mode" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Printer Host" Target="PRINTER_HOST" Default="" Mode="" Description="Single-printer LAN IP/host" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Printer Serial" Target="PRINTER_SERIAL" Default="" Mode="" Description="Single-printer serial number" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Printer Access Code" Target="PRINTER_ACCESS_CODE" Default="" Mode="" Description="Single-printer LAN access code" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Printer Device Type" Target="PRINTER_DEVICE_TYPE" Default="unknown" Mode="" Description="Printer device type override" Type="Variable" Display="advanced" Required="false" Mask="false">unknown</Config>
+  <Config Name="Local MQTT" Target="PRINTER_LOCAL_MQTT" Default="true" Mode="" Description="Use local MQTT mode" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Enable Camera" Target="PRINTER_ENABLE_CAMERA" Default="true" Mode="" Description="Enable camera retrieval" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Disable SSL Verify" Target="PRINTER_DISABLE_SSL_VERIFY" Default="false" Mode="" Description="Disable SSL verification for printer/cloud calls" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="User Language" Target="USER_LANGUAGE" Default="en" Mode="" Description="Language for errors/labels" Type="Variable" Display="advanced" Required="false" Mask="false">en</Config>
+  <Config Name="File Cache Path" Target="FILE_CACHE_PATH" Default="/data/cache" Mode="" Description="Internal cache path" Type="Variable" Display="advanced" Required="false" Mask="false">/data/cache</Config>
+  <Config Name="Print Cache Count" Target="PRINT_CACHE_COUNT" Default="1" Mode="" Description="Cached print records count" Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+  <Config Name="Timelapse Cache Count" Target="TIMELAPSE_CACHE_COUNT" Default="0" Mode="" Description="Cached timelapse records count" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+  <Config Name="Usage Hours" Target="USAGE_HOURS" Default="0" Mode="" Description="Usage hours override" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+  <Config Name="Force IP" Target="FORCE_IP" Default="false" Mode="" Description="Force configured IP over discovered IP" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+
+  <Config Name="Bambu Region" Target="BAMBU_REGION" Default="" Mode="" Description="Bambu cloud region (optional)" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Bambu Email" Target="BAMBU_EMAIL" Default="" Mode="" Description="Bambu cloud email (optional)" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Bambu Username" Target="BAMBU_USERNAME" Default="" Mode="" Description="Bambu cloud username (optional)" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Bambu Auth Token" Target="BAMBU_AUTH_TOKEN" Default="" Mode="" Description="Bambu cloud auth token (optional)" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+
+  <Config Name="Makerworks Base URL" Target="MAKERWORKS_BASE_URL" Default="" Mode="" Description="Makerworks API base URL" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Makerworks API Key" Target="MAKERWORKS_API_KEY" Default="" Mode="" Description="Makerworks API key" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Makerworks Bearer Token" Target="MAKERWORKS_BEARER_TOKEN" Default="" Mode="" Description="Makerworks bearer token" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Makerworks Auth Header" Target="MAKERWORKS_AUTH_HEADER" Default="X-API-Key" Mode="" Description="Header used for Makerworks API key" Type="Variable" Display="advanced" Required="false" Mask="false">X-API-Key</Config>
+  <Config Name="Makerworks Verify SSL" Target="MAKERWORKS_VERIFY_SSL" Default="true" Mode="" Description="Verify SSL for Makerworks requests" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+
+  <Config Name="Orderworks Base URL" Target="ORDERWORKS_BASE_URL" Default="" Mode="" Description="Orderworks API base URL" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Orderworks API Key" Target="ORDERWORKS_API_KEY" Default="" Mode="" Description="Orderworks API key" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Orderworks Bearer Token" Target="ORDERWORKS_BEARER_TOKEN" Default="" Mode="" Description="Orderworks bearer token" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Orderworks Auth Header" Target="ORDERWORKS_AUTH_HEADER" Default="X-API-Key" Mode="" Description="Header used for Orderworks API key" Type="Variable" Display="advanced" Required="false" Mask="false">X-API-Key</Config>
+  <Config Name="Orderworks Verify SSL" Target="ORDERWORKS_VERIFY_SSL" Default="true" Mode="" Description="Verify SSL for Orderworks requests" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+
+  <Config Name="Stockworks Base URL" Target="STOCKWORKS_BASE_URL" Default="" Mode="" Description="Stockworks API base URL" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Stockworks API Key" Target="STOCKWORKS_API_KEY" Default="" Mode="" Description="Stockworks API key" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Stockworks Bearer Token" Target="STOCKWORKS_BEARER_TOKEN" Default="" Mode="" Description="Stockworks bearer token" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Stockworks Auth Header" Target="STOCKWORKS_AUTH_HEADER" Default="X-API-Key" Mode="" Description="Header used for Stockworks API key" Type="Variable" Display="advanced" Required="false" Mask="false">X-API-Key</Config>
+  <Config Name="Stockworks Verify SSL" Target="STOCKWORKS_VERIFY_SSL" Default="true" Mode="" Description="Verify SSL for Stockworks requests" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+
+  <Config Name="BambuLab Git Ref" Target="HA_BAMBULAB_REF" Default="main" Mode="" Description="Build arg: branch/tag for pybambu source" Type="Variable" Display="advanced" Required="false" Mask="false">main</Config>
+  <Config Name="BambuLab Repo URL" Target="HA_BAMBULAB_REPO" Default="https://github.com/greghesp/ha-bambulab.git" Mode="" Description="Build arg: repository for pybambu source" Type="Variable" Display="advanced" Required="false" Mask="false">https://github.com/greghesp/ha-bambulab.git</Config>
 </Container>
