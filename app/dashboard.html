@@ -622,6 +622,7 @@
     let deferredInstallPrompt = null;
     let printerEventSource = null;
     let printerEventRetryTimer = null;
+    const notifyEnabledShownKey = "printlab.notify.enabled.v1";
     const notifyState = {
       connected: null,
       jobState: null,
@@ -692,13 +693,26 @@
 
     async function ensureNativeNotifications() {
       if (!("Notification" in window)) return;
+      const permissionBefore = Notification.permission;
       try {
         if (Notification.permission === "default") {
           await Notification.requestPermission();
         }
       } catch (_e) {}
-      if (Notification.permission === "granted") {
-        await sendNativeNotification("PrintLab", "Native notifications enabled.", "printlab-enabled");
+      if (Notification.permission !== "granted") return;
+
+      // Only send this one-time confirmation when permission is newly granted.
+      if (permissionBefore !== "granted") {
+        let alreadyShown = false;
+        try {
+          alreadyShown = localStorage.getItem(notifyEnabledShownKey) === "1";
+        } catch (_e) {}
+        if (!alreadyShown) {
+          await sendNativeNotification("PrintLab", "Native notifications enabled.", "printlab-enabled");
+          try {
+            localStorage.setItem(notifyEnabledShownKey, "1");
+          } catch (_e) {}
+        }
       }
     }
 
