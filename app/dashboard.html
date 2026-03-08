@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#cfe2f7">
+  <meta id="themeColorMeta" name="theme-color" content="#cfe2f7">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -12,28 +12,53 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
   <title>PrintLab</title>
+  <script>
+    (function() {
+      const theme = localStorage.getItem("printlab-theme") === "dark" ? "dark" : "light";
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
   <style>
     :root {
       --bg: #dfeaf8;
       --bg-2: #c7ddf5;
+      --bg-glow-1: rgba(255, 255, 255, 0.9);
+      --bg-glow-2: rgba(179, 210, 244, 0.7);
       --card: rgba(255, 255, 255, 0.44);
       --card-edge: rgba(255, 255, 255, 0.62);
       --panel: rgba(255, 255, 255, 0.36);
       --line: rgba(96, 134, 176, 0.2);
       --text: #1f2c3b;
       --muted: #5f7389;
+      --accent: #1f84ea;
       --ok: #56ce8a;
       --amber: #ffba45;
       --red: #ff645a;
       --btn: rgba(255, 255, 255, 0.5);
       --glass-shadow: 0 10px 30px rgba(48, 90, 135, 0.2);
     }
+    :root[data-theme="dark"] {
+      --bg: #0e1723;
+      --bg-2: #18283a;
+      --bg-glow-1: rgba(88, 140, 196, 0.18);
+      --bg-glow-2: rgba(14, 23, 35, 0.08);
+      --card: rgba(17, 28, 42, 0.74);
+      --card-edge: rgba(120, 151, 186, 0.28);
+      --panel: rgba(16, 27, 41, 0.74);
+      --line: rgba(131, 162, 197, 0.18);
+      --text: #edf5ff;
+      --muted: #a6bed8;
+      --accent: #63b4ff;
+      --glass-shadow: 0 22px 44px rgba(1, 6, 14, 0.42);
+    }
     * { box-sizing: border-box; }
+    html { color-scheme: light; }
+    :root[data-theme="dark"] { color-scheme: dark; }
     body {
       margin: 0;
       background:
-        radial-gradient(1200px 650px at 8% -18%, rgba(255, 255, 255, 0.9), transparent 56%),
-        radial-gradient(1100px 700px at 115% 115%, rgba(179, 210, 244, 0.7), transparent 58%),
+        radial-gradient(1200px 650px at 8% -18%, var(--bg-glow-1), transparent 56%),
+        radial-gradient(1100px 700px at 115% 115%, var(--bg-glow-2), transparent 58%),
         linear-gradient(150deg, var(--bg), var(--bg-2));
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
@@ -359,6 +384,33 @@
       display: grid;
       gap: 12px;
     }
+    .dashboard-tabs {
+      display: inline-flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .dashboard-tab {
+      border: 1px solid rgba(255, 255, 255, 0.62);
+      background: rgba(255, 255, 255, 0.44);
+      color: #375a79;
+      border-radius: 999px;
+      padding: 7px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .dashboard-tab.active {
+      background: linear-gradient(145deg, #2fa5ff, #1f84ea);
+      border-color: #1f84ea;
+      color: #fff;
+    }
+    .dashboard-panel {
+      display: none;
+      gap: 12px;
+    }
+    .dashboard-panel.active {
+      display: grid;
+    }
     .status-top {
       display: grid;
       grid-template-columns: 1.1fr .9fr;
@@ -527,6 +579,24 @@
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 12px;
+    }
+    .settings-hero {
+      display: grid;
+      gap: 10px;
+    }
+    .settings-inline {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .settings-status {
+      min-height: 18px;
+      font-size: 12px;
+      color: #5f7891;
+    }
+    .settings-status.error {
+      color: #8d2d25;
     }
     .mini-form {
       display: grid;
@@ -816,6 +886,7 @@
       .queue-tools { grid-template-columns: 1fr; }
       .mini-form-grid,
       .mini-form-grid.three { grid-template-columns: 1fr; }
+      .settings-inline { grid-template-columns: 1fr; }
       .ams-body { grid-template-columns: repeat(2, minmax(0, 1fr)); height: auto; }
       .slot { height: 132px; }
       .fil { font-size: 13px; }
@@ -823,6 +894,95 @@
       .model-name { font-size: 17px; }
       .model-meta { font-size: 12px; }
       .print-btn { font-size: 14px; }
+    }
+    .theme-toggle {
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      background: rgba(255, 255, 255, 0.54);
+      color: #2a4f73;
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    :root[data-theme="dark"] .card,
+    :root[data-theme="dark"] .camera-pane,
+    :root[data-theme="dark"] .status-card,
+    :root[data-theme="dark"] .status-kpi,
+    :root[data-theme="dark"] .queue-item,
+    :root[data-theme="dark"] .timeline-item,
+    :root[data-theme="dark"] .preset-item,
+    :root[data-theme="dark"] .rule-item,
+    :root[data-theme="dark"] .model-card,
+    :root[data-theme="dark"] .ams-wrap,
+    :root[data-theme="dark"] .errors,
+    :root[data-theme="dark"] .chip,
+    :root[data-theme="dark"] .field,
+    :root[data-theme="dark"] .search,
+    :root[data-theme="dark"] .text-btn,
+    :root[data-theme="dark"] .queue-remove,
+    :root[data-theme="dark"] .print-btn.secondary,
+    :root[data-theme="dark"] .back-link,
+    :root[data-theme="dark"] .install-btn,
+    :root[data-theme="dark"] .theme-toggle,
+    :root[data-theme="dark"] .cam-toggle,
+    :root[data-theme="dark"] .live-badge,
+    :root[data-theme="dark"] .ams-chip,
+    :root[data-theme="dark"] .fil,
+    :root[data-theme="dark"] .slot {
+      background: rgba(17, 28, 42, 0.82);
+      border-color: rgba(120, 151, 186, 0.28);
+      color: var(--text);
+    }
+    :root[data-theme="dark"] .right-rail,
+    :root[data-theme="dark"] .model-preview,
+    :root[data-theme="dark"] .ams-body {
+      background: rgba(16, 27, 41, 0.74);
+      border-color: rgba(120, 151, 186, 0.28);
+    }
+    :root[data-theme="dark"] .modal,
+    :root[data-theme="dark"] .control-error-overlay {
+      background: rgba(4, 10, 17, 0.82);
+    }
+    :root[data-theme="dark"] .modal-panel,
+    :root[data-theme="dark"] .modal-head,
+    :root[data-theme="dark"] .modal-tools {
+      background: rgba(17, 28, 42, 0.92);
+      border-color: rgba(131, 162, 197, 0.18);
+    }
+    :root[data-theme="dark"] .back-link,
+    :root[data-theme="dark"] .install-btn,
+    :root[data-theme="dark"] .theme-toggle,
+    :root[data-theme="dark"] .dashboard-tab,
+    :root[data-theme="dark"] .close,
+    :root[data-theme="dark"] .rk,
+    :root[data-theme="dark"] .queue-item-meta,
+    :root[data-theme="dark"] .timeline-meta,
+    :root[data-theme="dark"] .model-meta,
+    :root[data-theme="dark"] .label,
+    :root[data-theme="dark"] .check,
+    :root[data-theme="dark"] .settings-status,
+    :root[data-theme="dark"] .status-line,
+    :root[data-theme="dark"] .status-card h3,
+    :root[data-theme="dark"] .status-kpi-label,
+    :root[data-theme="dark"] .prog-meta,
+    :root[data-theme="dark"] .prog-meta small,
+    :root[data-theme="dark"] .rem {
+      color: var(--muted);
+    }
+    :root[data-theme="dark"] .btn {
+      background: linear-gradient(150deg, rgba(22, 36, 54, 0.92), rgba(18, 31, 47, 0.8));
+      border-color: rgba(120, 151, 186, 0.28);
+      color: var(--text);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+    :root[data-theme="dark"] .dashboard-tab.active {
+      background: linear-gradient(145deg, #3098ff, #63b4ff);
+      border-color: #3098ff;
+      color: #08111d;
+    }
+    :root[data-theme="dark"] .bar {
+      background: rgba(131, 162, 197, 0.16);
     }
   </style>
 </head>
@@ -832,6 +992,7 @@
       <div class="top-nav">
         <a class="back-link" href="/">&#8592; Printers</a>
         <div class="top-actions">
+          <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color theme">Dark Mode</button>
           <button id="installBtn" class="install-btn" type="button" hidden>Install App</button>
         </div>
       </div>
@@ -896,104 +1057,123 @@
 
     <section class="card">
       <div class="status-shell">
-        <div class="status-top">
-          <section class="status-card" aria-labelledby="statusTitle">
-            <h3 id="statusTitle">Status & Alerts</h3>
-            <div class="status-kpis">
-              <div class="status-kpi">
-                <div class="status-kpi-label">Progress</div>
-                <div id="statusProgress" class="status-kpi-value">0%</div>
-                <div id="statusProgressLine" class="status-line">L0/? • idle</div>
-              </div>
-              <div class="status-kpi">
-                <div class="status-kpi-label">Queue Health</div>
-                <div id="statusQueue" class="status-kpi-value">0 jobs</div>
-                <div id="statusQueueLine" class="status-line">Ready now</div>
-              </div>
-            </div>
-            <div id="statusChips" class="status-chips" aria-live="polite"></div>
-            <div id="errors" class="status-message">-</div>
-          </section>
-          <section class="status-card" aria-labelledby="queueTitle">
-            <h3 id="queueTitle">Queue</h3>
-            <div id="queueList" class="queue-list">
-              <div class="queue-item-meta">No queued jobs.</div>
-            </div>
-          </section>
+        <div class="dashboard-tabs" role="tablist" aria-label="Printer dashboard sections">
+          <button id="overviewTab" class="dashboard-tab active" type="button" data-panel="overview" role="tab" aria-selected="true">Overview</button>
+          <button id="settingsTab" class="dashboard-tab" type="button" data-panel="settings" role="tab" aria-selected="false">Settings</button>
         </div>
-        <section class="status-card" aria-labelledby="timelineTitle">
-          <h3 id="timelineTitle">Action Timeline</h3>
-          <div id="timelineList" class="timeline-list">
-            <div class="timeline-meta">No activity yet.</div>
+        <div id="overviewPanel" class="dashboard-panel active" role="tabpanel" aria-labelledby="overviewTab">
+          <div class="status-top">
+            <section class="status-card" aria-labelledby="statusTitle">
+              <h3 id="statusTitle">Status & Alerts</h3>
+              <div class="status-kpis">
+                <div class="status-kpi">
+                  <div class="status-kpi-label">Progress</div>
+                  <div id="statusProgress" class="status-kpi-value">0%</div>
+                  <div id="statusProgressLine" class="status-line">L0/? • idle</div>
+                </div>
+                <div class="status-kpi">
+                  <div class="status-kpi-label">Queue Health</div>
+                  <div id="statusQueue" class="status-kpi-value">0 jobs</div>
+                  <div id="statusQueueLine" class="status-line">Ready now</div>
+                </div>
+              </div>
+              <div id="statusChips" class="status-chips" aria-live="polite"></div>
+              <div id="errors" class="status-message">-</div>
+            </section>
+            <section class="status-card" aria-labelledby="queueTitle">
+              <h3 id="queueTitle">Queue</h3>
+              <div id="queueList" class="queue-list">
+                <div class="queue-item-meta">No queued jobs.</div>
+              </div>
+            </section>
           </div>
-        </section>
-        <div class="settings-grid">
-          <section class="status-card" aria-labelledby="presetsTitle">
-            <h3 id="presetsTitle">Control Presets</h3>
-            <div class="mini-form">
-              <label class="label">Preset Name
-                <input id="presetName" class="field" type="text" placeholder="PLA Quick Dry">
+        </div>
+        <div id="settingsPanel" class="dashboard-panel" role="tabpanel" aria-labelledby="settingsTab">
+          <section class="status-card settings-hero" aria-labelledby="printerSettingsTitle">
+            <h3 id="printerSettingsTitle">Printer Settings</h3>
+            <div class="status-line">Rename this printer for the gallery and this dashboard.</div>
+            <div class="settings-inline">
+              <label class="label">Printer Name
+                <input id="printerDisplayName" class="field" type="text" maxlength="64" placeholder="Printer name">
               </label>
-              <div class="mini-form-grid three">
-                <label class="label">Nozzle
-                  <input id="presetNozzle" class="field" type="number" min="0" max="320" placeholder="220">
-                </label>
-                <label class="label">Bed
-                  <input id="presetBed" class="field" type="number" min="0" max="130" placeholder="60">
-                </label>
-                <label class="label">Chamber
-                  <input id="presetChamberFan" class="field" type="number" min="0" max="100" placeholder="40">
-                </label>
-              </div>
-              <div class="mini-form-grid">
-                <label class="label">Part Fan
-                  <input id="presetPartFan" class="field" type="number" min="0" max="100" placeholder="100">
-                </label>
-                <label class="label">Aux Fan
-                  <input id="presetAuxFan" class="field" type="number" min="0" max="100" placeholder="0">
-                </label>
-              </div>
-              <button class="btn cyan" type="button" onclick="saveControlPreset()"><span class="btn-icon">+</span><span class="btn-label">Save Preset</span></button>
+              <button class="btn" type="button" onclick="savePrinterName()">Save Name</button>
             </div>
-            <div id="presetList" class="preset-list">
-              <div class="timeline-meta">No control presets saved.</div>
+            <div id="printerSettingsStatus" class="settings-status" aria-live="polite"></div>
+          </section>
+          <section class="status-card" aria-labelledby="timelineTitle">
+            <h3 id="timelineTitle">Action Timeline</h3>
+            <div id="timelineList" class="timeline-list">
+              <div class="timeline-meta">No activity yet.</div>
             </div>
           </section>
-          <section class="status-card" aria-labelledby="rulesTitle">
-            <h3 id="rulesTitle">Alert Rules</h3>
-            <div class="mini-form">
-              <label class="label">Rule Name
-                <input id="ruleName" class="field" type="text" placeholder="Disconnected > 2 min">
-              </label>
-              <div class="mini-form-grid">
-                <label class="label">Rule Type
-                  <select id="ruleType" class="field">
-                    <option value="disconnect_duration">Disconnected Duration</option>
-                    <option value="chamber_temp_above">Chamber Temp Above</option>
-                    <option value="print_error">Print Error</option>
-                    <option value="queue_backlog">Queue Backlog</option>
-                  </select>
+          <div class="settings-grid">
+            <section class="status-card" aria-labelledby="presetsTitle">
+              <h3 id="presetsTitle">Control Presets</h3>
+              <div class="mini-form">
+                <label class="label">Preset Name
+                  <input id="presetName" class="field" type="text" placeholder="PLA Quick Dry">
                 </label>
-                <label class="label">Threshold
-                  <input id="ruleThreshold" class="field" type="number" min="0" step="0.1" placeholder="2">
-                </label>
+                <div class="mini-form-grid three">
+                  <label class="label">Nozzle
+                    <input id="presetNozzle" class="field" type="number" min="0" max="320" placeholder="220">
+                  </label>
+                  <label class="label">Bed
+                    <input id="presetBed" class="field" type="number" min="0" max="130" placeholder="60">
+                  </label>
+                  <label class="label">Chamber
+                    <input id="presetChamberFan" class="field" type="number" min="0" max="100" placeholder="40">
+                  </label>
+                </div>
+                <div class="mini-form-grid">
+                  <label class="label">Part Fan
+                    <input id="presetPartFan" class="field" type="number" min="0" max="100" placeholder="100">
+                  </label>
+                  <label class="label">Aux Fan
+                    <input id="presetAuxFan" class="field" type="number" min="0" max="100" placeholder="0">
+                  </label>
+                </div>
+                <button class="btn cyan" type="button" onclick="saveControlPreset()"><span class="btn-icon">+</span><span class="btn-label">Save Preset</span></button>
               </div>
-              <div class="mini-form-grid">
-                <label class="label">Severity
-                  <select id="ruleSeverity" class="field">
-                    <option value="info">Info</option>
-                    <option value="warning" selected>Warning</option>
-                    <option value="error">Error</option>
-                  </select>
-                </label>
-                <label class="check"><input id="ruleNotify" type="checkbox" checked> Send Notification</label>
+              <div id="presetList" class="preset-list">
+                <div class="timeline-meta">No control presets saved.</div>
               </div>
-              <button class="btn" type="button" onclick="saveAlertRule()"><span class="btn-icon">+</span><span class="btn-label">Save Rule</span></button>
-            </div>
-            <div id="ruleList" class="rule-list">
-              <div class="timeline-meta">No alert rules saved.</div>
-            </div>
-          </section>
+            </section>
+            <section class="status-card" aria-labelledby="rulesTitle">
+              <h3 id="rulesTitle">Alert Rules</h3>
+              <div class="mini-form">
+                <label class="label">Rule Name
+                  <input id="ruleName" class="field" type="text" placeholder="Disconnected > 2 min">
+                </label>
+                <div class="mini-form-grid">
+                  <label class="label">Rule Type
+                    <select id="ruleType" class="field">
+                      <option value="disconnect_duration">Disconnected Duration</option>
+                      <option value="chamber_temp_above">Chamber Temp Above</option>
+                      <option value="print_error">Print Error</option>
+                      <option value="queue_backlog">Queue Backlog</option>
+                    </select>
+                  </label>
+                  <label class="label">Threshold
+                    <input id="ruleThreshold" class="field" type="number" min="0" step="0.1" placeholder="2">
+                  </label>
+                </div>
+                <div class="mini-form-grid">
+                  <label class="label">Severity
+                    <select id="ruleSeverity" class="field">
+                      <option value="info">Info</option>
+                      <option value="warning" selected>Warning</option>
+                      <option value="error">Error</option>
+                    </select>
+                  </label>
+                  <label class="check"><input id="ruleNotify" type="checkbox" checked> Send Notification</label>
+                </div>
+                <button class="btn" type="button" onclick="saveAlertRule()"><span class="btn-icon">+</span><span class="btn-label">Save Rule</span></button>
+              </div>
+              <div id="ruleList" class="rule-list">
+                <div class="timeline-meta">No alert rules saved.</div>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
     </section>
@@ -1047,9 +1227,16 @@
       if (path.startsWith("/api/")) return `${API_BASE}${path.slice(4)}`;
       return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
     }
-    if (window.PRINTER_NAME) {
-      document.title = `PrintLab - ${window.PRINTER_NAME}`;
+    function setPrinterDisplayName(name) {
+      const nextName = String(name || "").trim() || PRINTER_ID;
+      window.PRINTER_NAME = nextName;
+      document.title = `PrintLab - ${nextName}`;
+      const input = document.getElementById("printerDisplayName");
+      if (input && document.activeElement !== input) {
+        input.value = nextName;
+      }
     }
+    setPrinterDisplayName(window.PRINTER_NAME || PRINTER_ID);
 
     let viewMode = "photo";
     let modelSearchTimer = null;
@@ -1057,6 +1244,7 @@
     let deferredInstallPrompt = null;
     let printerEventSource = null;
     let printerEventRetryTimer = null;
+    const themeStorageKey = "printlab-theme";
     const amsPresetStorageKey = `printlab.amsPreset.${PRINTER_ID}`;
     const notifyEnabledShownKey = "printlab.notify.enabled.v1";
     const notifyState = {
@@ -1079,6 +1267,68 @@
       "data:image/svg+xml;utf8," +
       encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='640' height='480'><rect width='100%' height='100%' fill='#2f343b'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#c2c8d0' font-family='Segoe UI' font-size='24'>Live feed unavailable</text></svg>");
     let chamberLightOn = false;
+
+    function applyTheme(theme) {
+      const nextTheme = theme === "dark" ? "dark" : "light";
+      document.documentElement.dataset.theme = nextTheme;
+      localStorage.setItem(themeStorageKey, nextTheme);
+      const toggle = document.getElementById("themeToggle");
+      if (toggle) toggle.textContent = nextTheme === "dark" ? "Light Mode" : "Dark Mode";
+      const meta = document.getElementById("themeColorMeta");
+      if (meta) meta.setAttribute("content", nextTheme === "dark" ? "#0e1723" : "#cfe2f7");
+    }
+
+    function toggleTheme() {
+      const current = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+      applyTheme(current === "dark" ? "light" : "dark");
+    }
+
+    function setSettingsStatus(message, isError = false) {
+      const status = document.getElementById("printerSettingsStatus");
+      if (!status) return;
+      status.textContent = message || "";
+      status.classList.toggle("error", !!isError);
+    }
+
+    function switchDashboardPanel(panel) {
+      const nextPanel = panel === "settings" ? "settings" : "overview";
+      document.querySelectorAll(".dashboard-tab").forEach((button) => {
+        const active = button.dataset.panel === nextPanel;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      document.querySelectorAll(".dashboard-panel").forEach((section) => {
+        section.classList.toggle("active", section.id === `${nextPanel}Panel`);
+      });
+    }
+
+    async function savePrinterName() {
+      const input = document.getElementById("printerDisplayName");
+      const name = (input?.value || "").trim();
+      if (!name) {
+        setSettingsStatus("Printer name is required.", true);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/printers/${encodeURIComponent(PRINTER_ID)}/name`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name })
+        });
+        if (!res.ok) {
+          let msg = `HTTP ${res.status}`;
+          try {
+            const payload = await res.json();
+            if (payload?.detail) msg = String(payload.detail);
+          } catch (_e) {}
+          throw new Error(msg);
+        }
+        setPrinterDisplayName(name);
+        setSettingsStatus(`Saved printer name: ${name}`);
+      } catch (err) {
+        setSettingsStatus(`Rename failed: ${String(err?.message || err)}`, true);
+      }
+    }
 
     async function initPwa() {
       if (!("serviceWorker" in navigator)) return;
@@ -2055,6 +2305,34 @@
       notifyState.activeAlertSignature = activeAlertSignature;
     }
 
+    document.querySelectorAll(".dashboard-tab").forEach((button) => {
+      button.addEventListener("click", () => switchDashboardPanel(button.dataset.panel || "overview"));
+    });
+    const printerDisplayName = document.getElementById("printerDisplayName");
+    if (printerDisplayName) {
+      printerDisplayName.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          savePrinterName();
+        }
+      });
+    }
+    const ruleTypeSelect = document.getElementById("ruleType");
+    const ruleThresholdInput = document.getElementById("ruleThreshold");
+    if (ruleTypeSelect && ruleThresholdInput) {
+      const syncRuleThresholdState = () => {
+        const disabled = ruleTypeSelect.value === "print_error";
+        ruleThresholdInput.disabled = disabled;
+        if (disabled) ruleThresholdInput.value = "";
+      };
+      ruleTypeSelect.addEventListener("change", syncRuleThresholdState);
+      syncRuleThresholdState();
+    }
+    const themeToggle = document.getElementById("themeToggle");
+    if (themeToggle) {
+      themeToggle.addEventListener("click", toggleTheme);
+    }
+    applyTheme(document.documentElement.dataset.theme);
     initPwa();
     initQueueControls();
     connectPrinterEvents();

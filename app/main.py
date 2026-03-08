@@ -1634,7 +1634,7 @@ def _render_gallery_html() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#cfe2f7">
+  <meta id="themeColorMeta" name="theme-color" content="#cfe2f7">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="PrintLab">
@@ -1642,8 +1642,16 @@ def _render_gallery_html() -> str:
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
   <title>PrintLab - Printers</title>
+  <script>
+    (function() {
+      const theme = localStorage.getItem("printlab-theme") === "dark" ? "dark" : "light";
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
   <style>
-    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif; background:#e6f0fb; color:#213245; }
+    html { color-scheme: light; }
+    :root[data-theme="dark"] { color-scheme: dark; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif; background:#e6f0fb; color:#213245; transition:background .2s ease,color .2s ease; }
     .wrap { max-width:1100px; margin:26px auto; padding:0 16px 40px; }
     h1 { margin:0 0 6px; font-size:28px; }
     .top-row { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:14px; gap:10px; }
@@ -1741,6 +1749,72 @@ def _render_gallery_html() -> str:
     .btn-primary { background:#1f4f7b; color:#fff; }
     .btn-light { background:#dbe9f7; color:#244563; }
     .sidebar-note { color:#5f7892; font-size:12px; margin-top:8px; }
+    .theme-row {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid #d4e1ef;
+      display: grid;
+      gap: 8px;
+    }
+    .theme-toggle {
+      border: 1px solid #bdd2e8;
+      background: #edf4fb;
+      color: #375a79;
+      border-radius: 999px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      justify-self: start;
+    }
+    :root[data-theme="dark"] body {
+      background: #0f1724;
+      color: #edf5ff;
+    }
+    :root[data-theme="dark"] .card,
+    :root[data-theme="dark"] .dialog,
+    :root[data-theme="dark"] .sidebar,
+    :root[data-theme="dark"] .card-menu,
+    :root[data-theme="dark"] .install-btn,
+    :root[data-theme="dark"] .theme-toggle,
+    :root[data-theme="dark"] .field input,
+    :root[data-theme="dark"] .btn-light,
+    :root[data-theme="dark"] .printer-art {
+      background: rgba(17, 28, 42, 0.86);
+      border-color: rgba(120, 151, 186, 0.28);
+      color: #edf5ff;
+    }
+    :root[data-theme="dark"] .helper,
+    :root[data-theme="dark"] .status,
+    :root[data-theme="dark"] .meta,
+    :root[data-theme="dark"] .sidebar-note,
+    :root[data-theme="dark"] .field label,
+    :root[data-theme="dark"] .hamburger-label,
+    :root[data-theme="dark"] .sidebar-close,
+    :root[data-theme="dark"] .menu-item {
+      color: #a6bed8;
+    }
+    :root[data-theme="dark"] .sidebar-tab {
+      background: rgba(18, 31, 47, 0.88);
+      border-color: rgba(120, 151, 186, 0.28);
+      color: #d5e9ff;
+    }
+    :root[data-theme="dark"] .sidebar-tab.active,
+    :root[data-theme="dark"] .btn-primary,
+    :root[data-theme="dark"] .hamburger {
+      background: #3098ff;
+      border-color: #3098ff;
+      color: #08111d;
+    }
+    :root[data-theme="dark"] .dialog-backdrop {
+      background: rgba(4, 10, 17, 0.72);
+    }
+    :root[data-theme="dark"] .menu-item:hover {
+      background: rgba(48, 152, 255, 0.14);
+    }
+    :root[data-theme="dark"] .theme-row {
+      border-top-color: rgba(120, 151, 186, 0.2);
+    }
     @media (max-width: 760px) {
       .sidebar { width:100%; max-width:100%; }
       .top-row { flex-direction:column; align-items:flex-start; }
@@ -1791,6 +1865,10 @@ def _render_gallery_html() -> str:
       </div>
       <div class="sidebar-note">Saved printers persist in <code>/data/printers_added.json</code>.</div>
       </form>
+      <div class="theme-row">
+        <div class="sidebar-note">Appearance</div>
+        <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color theme">Dark Mode</button>
+      </div>
     </div>
   </aside>
   <div class="wrap">
@@ -1836,11 +1914,26 @@ def _render_gallery_html() -> str:
     const renameInput = document.getElementById('renameInput');
     const renameSaveBtn = document.getElementById('renameSaveBtn');
     const renameCancelBtn = document.getElementById('renameCancelBtn');
+    const themeToggle = document.getElementById('themeToggle');
     const tabs = Array.from(document.querySelectorAll('.sidebar-tab'));
     const panels = Array.from(document.querySelectorAll('.tab-panel'));
     const statusEl = document.getElementById('status');
     let deferredInstallPrompt = null;
     let renameTarget = null;
+
+    function applyTheme(theme) {
+      const nextTheme = theme === 'dark' ? 'dark' : 'light';
+      document.documentElement.dataset.theme = nextTheme;
+      localStorage.setItem('printlab-theme', nextTheme);
+      if (themeToggle) themeToggle.textContent = nextTheme === 'dark' ? 'Light Mode' : 'Dark Mode';
+      const meta = document.getElementById('themeColorMeta');
+      if (meta) meta.setAttribute('content', nextTheme === 'dark' ? '#0f1724' : '#cfe2f7');
+    }
+
+    function toggleTheme() {
+      const current = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+      applyTheme(current === 'dark' ? 'light' : 'dark');
+    }
 
     function setStatus(message, isError = false) {
       statusEl.textContent = message || '';
@@ -1869,6 +1962,7 @@ def _render_gallery_html() -> str:
       if (sidebar.classList.contains('open')) closeSidebarPanel();
       else sidebar.classList.add('open');
     });
+    if (themeToggle) themeToggle.addEventListener('click', toggleTheme);
     closeSidebar.addEventListener('click', closeSidebarPanel);
     collapseSidebar.addEventListener('click', closeSidebarPanel);
     renameCancelBtn.addEventListener('click', closeRenameDialog);
@@ -2072,6 +2166,7 @@ def _render_gallery_html() -> str:
       }
     }
 
+    applyTheme(document.documentElement.dataset.theme);
     initPwa();
     loadPrinters();
   </script>
