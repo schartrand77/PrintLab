@@ -214,7 +214,7 @@
       display: flex;
       justify-content: space-between;
       color: var(--muted);
-      font-size: 18px;
+      font-size: 17px;
       font-weight: 500;
       line-height: 1;
     }
@@ -228,7 +228,7 @@
       margin-top: 11px;
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 5px;
+      gap: 7px;
     }
     .actions-wrap {
       margin-top: 11px;
@@ -289,18 +289,41 @@
       cursor: pointer;
     }
     .btn {
-      border: 0;
-      border-radius: 10px;
+      border-radius: 12px;
       border: 1px solid rgba(168, 206, 242, 0.24);
-      height: 44px;
+      min-height: 52px;
       background: linear-gradient(150deg, rgba(255, 255, 255, 0.68), rgba(231, 241, 251, 0.5));
       color: #203145;
-      font-size: 20px;
       cursor: pointer;
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 8px 10px;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.1;
     }
     .btn[hidden] { display: none !important; }
     .btn:hover { filter: brightness(1.08); }
+    .btn:focus-visible,
+    .search:focus-visible,
+    .field:focus-visible,
+    .close:focus-visible,
+    .print-btn:focus-visible,
+    .queue-remove:focus-visible,
+    .control-error-clear:focus-visible {
+      outline: 2px solid #1f84ea;
+      outline-offset: 2px;
+    }
+    .btn-icon {
+      font-size: 18px;
+      line-height: 1;
+    }
+    .btn-label {
+      white-space: nowrap;
+    }
     .btn.yellow { background: linear-gradient(145deg, #ffc458, #ee9d2e); }
     .btn.red { background: linear-gradient(145deg, #ff7c73, #f14f45); }
     .btn.cyan { background: linear-gradient(145deg, #4ac8ff, #278fce); }
@@ -331,6 +354,207 @@
       padding: 8px;
       white-space: pre-wrap;
       word-break: break-word;
+    }
+    .status-shell {
+      display: grid;
+      gap: 12px;
+    }
+    .status-top {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 12px;
+    }
+    .status-card {
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.62);
+      background: rgba(255, 255, 255, 0.34);
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+    .status-card h3 {
+      margin: 0;
+      font-size: 14px;
+      letter-spacing: .2px;
+      text-transform: uppercase;
+      color: #3d5a77;
+    }
+    .status-kpis {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .status-kpi {
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.62);
+      padding: 10px;
+      display: grid;
+      gap: 4px;
+    }
+    .status-kpi-label {
+      font-size: 12px;
+      color: #5e7690;
+      text-transform: uppercase;
+      letter-spacing: .3px;
+    }
+    .status-kpi-value {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -.4px;
+    }
+    .status-line {
+      font-size: 13px;
+      color: #59718a;
+    }
+    .status-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .severity-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid rgba(255, 255, 255, 0.62);
+      background: rgba(255, 255, 255, 0.52);
+      color: #294258;
+    }
+    .severity-chip.info { color: #2a5d8f; }
+    .severity-chip.warning { color: #8b5a1e; }
+    .severity-chip.error { color: #8d2d25; }
+    .status-message {
+      min-height: 40px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #334b62;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .queue-list,
+    .timeline-list,
+    .preset-list,
+    .rule-list {
+      display: grid;
+      gap: 8px;
+    }
+    .queue-item,
+    .timeline-item,
+    .preset-item,
+    .rule-item {
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      background: rgba(255, 255, 255, 0.44);
+      padding: 10px;
+      display: grid;
+      gap: 6px;
+    }
+    .queue-item-head,
+    .timeline-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .queue-item-title,
+    .timeline-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #24374b;
+      word-break: break-word;
+    }
+    .queue-item-meta,
+    .timeline-meta {
+      font-size: 12px;
+      color: #5f7891;
+    }
+    .queue-remove {
+      border: 1px solid rgba(115, 42, 35, 0.2);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.74);
+      color: #7b3128;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 8px;
+      cursor: pointer;
+    }
+    .queue-edit-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .queue-edit-row .field {
+      width: 100%;
+    }
+    .queue-item-actions,
+    .rule-item-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .field {
+      background: rgba(255, 255, 255, 0.62);
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      border-radius: 8px;
+      color: #284158;
+      padding: 8px 10px;
+      font-size: 14px;
+      min-width: 0;
+    }
+    .label {
+      display: grid;
+      gap: 4px;
+      font-size: 12px;
+      color: #5a748f;
+      font-weight: 700;
+    }
+    .check {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #415a72;
+      font-weight: 700;
+      padding-top: 22px;
+    }
+    .settings-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .mini-form {
+      display: grid;
+      gap: 8px;
+    }
+    .mini-form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .mini-form-grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .preset-actions,
+    .rule-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .text-btn {
+      border: 1px solid rgba(168, 206, 242, 0.32);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.78);
+      color: #244059;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 8px;
+      cursor: pointer;
     }
     .modal {
       position: fixed;
@@ -424,7 +648,7 @@
     .model-body {
       padding: 9px;
       display: grid;
-      gap: 4px;
+      gap: 8px;
     }
     .model-name {
       font-size: 20px;
@@ -437,16 +661,31 @@
       color: #607a93;
     }
     .print-btn {
-      margin-top: 4px;
       border: 0;
-      border-radius: 5px;
+      border-radius: 8px;
       background: linear-gradient(145deg, #49c8ff, #248fcd);
       color: #fff;
-      height: 38px;
-      font-size: 15px;
+      min-height: 38px;
+      font-size: 14px;
       font-weight: 600;
-      cursor: not-allowed;
-      opacity: .75;
+      cursor: pointer;
+      padding: 8px 10px;
+    }
+    .print-btn.secondary {
+      background: rgba(255, 255, 255, 0.8);
+      color: #294258;
+      border: 1px solid rgba(163, 194, 223, 0.5);
+    }
+    .model-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .queue-tools {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      width: 100%;
     }
 
     .ams-wrap {
@@ -570,7 +809,13 @@
       .rail-item { border-bottom: 0; border-right: 1px solid #444a54; padding-right: 8px; }
       .rail-item:nth-child(2n) { border-right: 0; }
       .actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      .btn { height: 42px; font-size: 18px; }
+      .btn { min-height: 46px; font-size: 13px; }
+      .status-top { grid-template-columns: 1fr; }
+      .settings-grid { grid-template-columns: 1fr; }
+      .status-kpis { grid-template-columns: 1fr 1fr; }
+      .queue-tools { grid-template-columns: 1fr; }
+      .mini-form-grid,
+      .mini-form-grid.three { grid-template-columns: 1fr; }
       .ams-body { grid-template-columns: repeat(2, minmax(0, 1fr)); height: auto; }
       .slot { height: 132px; }
       .fil { font-size: 13px; }
@@ -603,7 +848,7 @@
           <div class="prog">
             <div class="bar"><div id="progressFill" class="fill"></div></div>
             <div class="prog-meta">
-              <span id="layerInfo">0%</span>
+              <span id="progressSummary">0% • L0/?</span>
               <small id="timeInfo">idle</small>
             </div>
           </div>
@@ -612,17 +857,17 @@
           <div class="rail-item"><div class="rk">Nozzle</div><div id="nozzle" class="rv">-</div></div>
           <div class="rail-item"><div class="rk">Bed</div><div id="bed" class="rv small">-</div></div>
           <div class="rail-item"><div class="rk">Progress</div><div id="progValue" class="rv small">-</div></div>
-          <div class="rail-item"><div class="rk">Chamber</div><div id="chamber" class="rv small">-</div></div>
+          <div class="rail-item"><div class="rk">Health</div><div id="healthScore" class="rv small">-</div></div>
         </aside>
       </div>
 
       <div class="actions-wrap">
         <div class="actions">
-          <button class="btn yellow" title="Light On" onclick="post('/api/actions/chamber-light',{on:true})">&#128161;</button>
-          <button class="btn cyan" title="SD Models" onclick="openModelsModal()">&#9776;</button>
-          <button id="pauseBtn" class="btn" title="Pause" onclick="post('/api/actions/pause')">&#10074;&#10074;</button>
-          <button class="btn red" title="Stop" onclick="post('/api/actions/stop')">&#9632;</button>
-          <button id="resumeBtn" class="btn" title="Resume" onclick="post('/api/actions/resume')" hidden>&#9654;</button>
+          <button id="lightBtn" class="btn yellow" type="button" title="Toggle chamber light" aria-label="Toggle chamber light" onclick="toggleChamberLight()"><span class="btn-icon">&#128161;</span><span class="btn-label">Light</span></button>
+          <button class="btn cyan" type="button" title="Open SD models" aria-label="Open SD models" onclick="openModelsModal()"><span class="btn-icon">&#9776;</span><span class="btn-label">Models</span></button>
+          <button id="pauseBtn" class="btn" type="button" title="Pause print" aria-label="Pause print" onclick="post('/api/actions/pause')"><span class="btn-icon">&#10074;&#10074;</span><span class="btn-label">Pause</span></button>
+          <button class="btn red" type="button" title="Stop print" aria-label="Stop print" onclick="post('/api/actions/stop')"><span class="btn-icon">&#9632;</span><span class="btn-label">Stop</span></button>
+          <button id="resumeBtn" class="btn" type="button" title="Resume print" aria-label="Resume print" onclick="post('/api/actions/resume')" hidden><span class="btn-icon">&#9654;</span><span class="btn-label">Resume</span></button>
         </div>
         <div id="controlErrorOverlay" class="control-error-overlay" aria-live="polite">
           <div class="control-error-panel">
@@ -636,6 +881,9 @@
       </div>
       <div class="meta">
         <span class="chip">Remaining: <span id="remainingTime">-</span></span>
+        <span class="chip">Layer: <span id="layerInfo">0/?</span></span>
+        <span class="chip">Queue: <span id="queueCount">0</span></span>
+        <span class="chip">Updated: <span id="lastUpdated">-</span></span>
       </div>
 
       <div class="meta">
@@ -644,7 +892,110 @@
         <span class="chip">IP: <span id="ip">-</span></span>
         <span class="chip">State: <span id="state">-</span></span>
       </div>
-      <div id="errors" class="errors">-</div>
+    </section>
+
+    <section class="card">
+      <div class="status-shell">
+        <div class="status-top">
+          <section class="status-card" aria-labelledby="statusTitle">
+            <h3 id="statusTitle">Status & Alerts</h3>
+            <div class="status-kpis">
+              <div class="status-kpi">
+                <div class="status-kpi-label">Progress</div>
+                <div id="statusProgress" class="status-kpi-value">0%</div>
+                <div id="statusProgressLine" class="status-line">L0/? • idle</div>
+              </div>
+              <div class="status-kpi">
+                <div class="status-kpi-label">Queue Health</div>
+                <div id="statusQueue" class="status-kpi-value">0 jobs</div>
+                <div id="statusQueueLine" class="status-line">Ready now</div>
+              </div>
+            </div>
+            <div id="statusChips" class="status-chips" aria-live="polite"></div>
+            <div id="errors" class="status-message">-</div>
+          </section>
+          <section class="status-card" aria-labelledby="queueTitle">
+            <h3 id="queueTitle">Queue</h3>
+            <div id="queueList" class="queue-list">
+              <div class="queue-item-meta">No queued jobs.</div>
+            </div>
+          </section>
+        </div>
+        <section class="status-card" aria-labelledby="timelineTitle">
+          <h3 id="timelineTitle">Action Timeline</h3>
+          <div id="timelineList" class="timeline-list">
+            <div class="timeline-meta">No activity yet.</div>
+          </div>
+        </section>
+        <div class="settings-grid">
+          <section class="status-card" aria-labelledby="presetsTitle">
+            <h3 id="presetsTitle">Control Presets</h3>
+            <div class="mini-form">
+              <label class="label">Preset Name
+                <input id="presetName" class="field" type="text" placeholder="PLA Quick Dry">
+              </label>
+              <div class="mini-form-grid three">
+                <label class="label">Nozzle
+                  <input id="presetNozzle" class="field" type="number" min="0" max="320" placeholder="220">
+                </label>
+                <label class="label">Bed
+                  <input id="presetBed" class="field" type="number" min="0" max="130" placeholder="60">
+                </label>
+                <label class="label">Chamber
+                  <input id="presetChamberFan" class="field" type="number" min="0" max="100" placeholder="40">
+                </label>
+              </div>
+              <div class="mini-form-grid">
+                <label class="label">Part Fan
+                  <input id="presetPartFan" class="field" type="number" min="0" max="100" placeholder="100">
+                </label>
+                <label class="label">Aux Fan
+                  <input id="presetAuxFan" class="field" type="number" min="0" max="100" placeholder="0">
+                </label>
+              </div>
+              <button class="btn cyan" type="button" onclick="saveControlPreset()"><span class="btn-icon">+</span><span class="btn-label">Save Preset</span></button>
+            </div>
+            <div id="presetList" class="preset-list">
+              <div class="timeline-meta">No control presets saved.</div>
+            </div>
+          </section>
+          <section class="status-card" aria-labelledby="rulesTitle">
+            <h3 id="rulesTitle">Alert Rules</h3>
+            <div class="mini-form">
+              <label class="label">Rule Name
+                <input id="ruleName" class="field" type="text" placeholder="Disconnected > 2 min">
+              </label>
+              <div class="mini-form-grid">
+                <label class="label">Rule Type
+                  <select id="ruleType" class="field">
+                    <option value="disconnect_duration">Disconnected Duration</option>
+                    <option value="chamber_temp_above">Chamber Temp Above</option>
+                    <option value="print_error">Print Error</option>
+                    <option value="queue_backlog">Queue Backlog</option>
+                  </select>
+                </label>
+                <label class="label">Threshold
+                  <input id="ruleThreshold" class="field" type="number" min="0" step="0.1" placeholder="2">
+                </label>
+              </div>
+              <div class="mini-form-grid">
+                <label class="label">Severity
+                  <select id="ruleSeverity" class="field">
+                    <option value="info">Info</option>
+                    <option value="warning" selected>Warning</option>
+                    <option value="error">Error</option>
+                  </select>
+                </label>
+                <label class="check"><input id="ruleNotify" type="checkbox" checked> Send Notification</label>
+              </div>
+              <button class="btn" type="button" onclick="saveAlertRule()"><span class="btn-icon">+</span><span class="btn-label">Save Rule</span></button>
+            </div>
+            <div id="ruleList" class="rule-list">
+              <div class="timeline-meta">No alert rules saved.</div>
+            </div>
+          </section>
+        </div>
+      </div>
     </section>
 
     <section class="card">
@@ -666,6 +1017,20 @@
       <div class="modal-tools">
         <button class="btn" style="height:36px;font-size:16px;padding:0 12px" onclick="loadSdModels()">Refresh</button>
         <input id="modelSearch" class="search" type="text" placeholder="Search by filename..." oninput="debouncedLoadModels()">
+        <div class="queue-tools">
+          <label class="label">Start At
+            <input id="queueStartAt" class="field" type="datetime-local" aria-label="Scheduled start time">
+          </label>
+          <label class="label">AMS Mapping
+            <input id="amsPreset" class="field" type="text" placeholder="0,1,2,3" aria-label="AMS mapping preset">
+          </label>
+          <label class="label">AMS
+            <select id="useAms" class="field" aria-label="Use AMS">
+              <option value="true">Use AMS</option>
+              <option value="false">Bypass AMS</option>
+            </select>
+          </label>
+        </div>
         <div class="chip">Total: <span id="modelCount">0</span></div>
       </div>
       <div id="modelsGrid" class="model-grid"></div>
@@ -692,12 +1057,14 @@
     let deferredInstallPrompt = null;
     let printerEventSource = null;
     let printerEventRetryTimer = null;
+    const amsPresetStorageKey = `printlab.amsPreset.${PRINTER_ID}`;
     const notifyEnabledShownKey = "printlab.notify.enabled.v1";
     const notifyState = {
       connected: null,
       jobState: null,
       errorSig: null,
-      lastPrinterEvent: null
+      lastPrinterEvent: null,
+      activeAlertSignature: null
     };
     const printErrorGate = {
       active: false,
@@ -711,6 +1078,7 @@
     const liveUnavailableThumb =
       "data:image/svg+xml;utf8," +
       encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='640' height='480'><rect width='100%' height='100%' fill='#2f343b'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#c2c8d0' font-family='Segoe UI' font-size='24'>Live feed unavailable</text></svg>");
+    let chamberLightOn = false;
 
     async function initPwa() {
       if (!("serviceWorker" in navigator)) return;
@@ -1029,6 +1397,229 @@
       return dt.toLocaleDateString();
     }
 
+    function formatDateTime(iso) {
+      if (!iso) return "Now";
+      const dt = new Date(iso);
+      if (Number.isNaN(dt.getTime())) return "Now";
+      return dt.toLocaleString();
+    }
+
+    function isoToLocalInputValue(iso) {
+      if (!iso) return "";
+      const dt = new Date(iso);
+      if (Number.isNaN(dt.getTime())) return "";
+      const pad = (value) => String(value).padStart(2, "0");
+      return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+    }
+
+    function initQueueControls() {
+      const preset = document.getElementById("amsPreset");
+      if (!preset) return;
+      try {
+        preset.value = localStorage.getItem(amsPresetStorageKey) || "";
+      } catch (_e) {}
+      preset.addEventListener("input", () => {
+        try {
+          localStorage.setItem(amsPresetStorageKey, preset.value.trim());
+        } catch (_e) {}
+      });
+    }
+
+    function parseAmsPreset() {
+      const raw = (document.getElementById("amsPreset")?.value || "").trim();
+      if (!raw) return null;
+      const values = raw.split(",").map(part => Number(part.trim())).filter(value => Number.isInteger(value) && value >= 0);
+      return values.length ? values : null;
+    }
+
+    function currentQueuePayload(filePath) {
+      const startAtValue = (document.getElementById("queueStartAt")?.value || "").trim();
+      const startAt = startAtValue ? new Date(startAtValue).toISOString() : null;
+      return {
+        file_path: filePath,
+        plate_gcode: "Metadata/plate_1.gcode",
+        use_ams: (document.getElementById("useAms")?.value || "true") === "true",
+        ams_mapping: parseAmsPreset(),
+        start_at: startAt
+      };
+    }
+
+    async function queueModel(filePath) {
+      const payload = currentQueuePayload(filePath);
+      await post("/api/queue", payload);
+      await loadSdModels();
+    }
+
+    async function printModelNow(filePath) {
+      const payload = currentQueuePayload(filePath);
+      delete payload.start_at;
+      await post("/api/works/orderworks/print-job", payload);
+    }
+
+    async function removeQueueItem(itemId) {
+      try {
+        const res = await fetch(apiPath(`/api/queue/${encodeURIComponent(itemId)}`), { method: "DELETE" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await load();
+      } catch (err) {
+        const errors = document.getElementById("errors");
+        if (errors) errors.textContent = `Queue remove failed: ${String(err?.message || err)}`;
+      }
+    }
+
+    async function updateQueueItemSchedule(itemId, localValue) {
+      const payload = { start_at: localValue ? new Date(localValue).toISOString() : null };
+      try {
+        const res = await fetch(apiPath(`/api/queue/${encodeURIComponent(itemId)}`), {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          let msg = `HTTP ${res.status}`;
+          try {
+            const body = await res.json();
+            if (body?.detail) msg = String(body.detail);
+          } catch (_e) {}
+          throw new Error(msg);
+        }
+        await load();
+      } catch (err) {
+        const errors = document.getElementById("errors");
+        if (errors) errors.textContent = `Queue update failed: ${String(err?.message || err)}`;
+      }
+    }
+
+    async function reorderQueueItem(itemId, direction) {
+      try {
+        const res = await fetch(apiPath(`/api/queue/${encodeURIComponent(itemId)}/reorder`), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ direction })
+        });
+        if (!res.ok) {
+          let msg = `HTTP ${res.status}`;
+          try {
+            const body = await res.json();
+            if (body?.detail) msg = String(body.detail);
+          } catch (_e) {}
+          throw new Error(msg);
+        }
+        await load();
+      } catch (err) {
+        const errors = document.getElementById("errors");
+        if (errors) errors.textContent = `Queue reorder failed: ${String(err?.message || err)}`;
+      }
+    }
+
+    async function toggleChamberLight() {
+      await post("/api/actions/chamber-light", { on: !chamberLightOn });
+    }
+
+    function numberOrNull(id) {
+      const raw = (document.getElementById(id)?.value || "").trim();
+      if (!raw) return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : null;
+    }
+
+    async function saveControlPreset() {
+      const name = (document.getElementById("presetName")?.value || "").trim();
+      if (!name) return;
+      await post("/api/control-presets", {
+        name,
+        nozzle_target: numberOrNull("presetNozzle"),
+        bed_target: numberOrNull("presetBed"),
+        chamber: numberOrNull("presetChamberFan"),
+        part_cooling: numberOrNull("presetPartFan"),
+        auxiliary: numberOrNull("presetAuxFan")
+      });
+      ["presetName", "presetNozzle", "presetBed", "presetChamberFan", "presetPartFan", "presetAuxFan"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = "";
+      });
+    }
+
+    async function removeControlPreset(presetId) {
+      try {
+        const res = await fetch(apiPath(`/api/control-presets/${encodeURIComponent(presetId)}`), { method: "DELETE" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await load();
+      } catch (err) {
+        const errors = document.getElementById("errors");
+        if (errors) errors.textContent = `Preset remove failed: ${String(err?.message || err)}`;
+      }
+    }
+
+    async function applyControlPreset(encodedPreset) {
+      const preset = JSON.parse(decodeURIComponent(encodedPreset));
+      const ops = [];
+      if (Number.isFinite(Number(preset.nozzle_target))) ops.push(post("/api/actions/temperature", { target: "nozzle", value: Number(preset.nozzle_target) }));
+      if (Number.isFinite(Number(preset.bed_target))) ops.push(post("/api/actions/temperature", { target: "heatbed", value: Number(preset.bed_target) }));
+      if (Number.isFinite(Number(preset.part_cooling))) ops.push(post("/api/actions/fan", { fan: "part_cooling", percent: Number(preset.part_cooling) }));
+      if (Number.isFinite(Number(preset.auxiliary))) ops.push(post("/api/actions/fan", { fan: "auxiliary", percent: Number(preset.auxiliary) }));
+      if (Number.isFinite(Number(preset.chamber))) ops.push(post("/api/actions/fan", { fan: "chamber", percent: Number(preset.chamber) }));
+      await Promise.all(ops);
+      await load();
+    }
+
+    async function saveAlertRule() {
+      const name = (document.getElementById("ruleName")?.value || "").trim();
+      const type = (document.getElementById("ruleType")?.value || "").trim();
+      if (!name || !type) return;
+      await post("/api/alert-rules", {
+        name,
+        type,
+        enabled: true,
+        threshold: type === "print_error" ? null : numberOrNull("ruleThreshold"),
+        severity: (document.getElementById("ruleSeverity")?.value || "warning"),
+        notify: !!document.getElementById("ruleNotify")?.checked
+      });
+      ["ruleName", "ruleThreshold"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = "";
+      });
+      const typeEl = document.getElementById("ruleType");
+      if (typeEl) typeEl.value = "disconnect_duration";
+      const severityEl = document.getElementById("ruleSeverity");
+      if (severityEl) severityEl.value = "warning";
+      const notifyEl = document.getElementById("ruleNotify");
+      if (notifyEl) notifyEl.checked = true;
+    }
+
+    async function removeAlertRule(ruleId) {
+      try {
+        const res = await fetch(apiPath(`/api/alert-rules/${encodeURIComponent(ruleId)}`), { method: "DELETE" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await load();
+      } catch (err) {
+        const errors = document.getElementById("errors");
+        if (errors) errors.textContent = `Alert rule remove failed: ${String(err?.message || err)}`;
+      }
+    }
+
+    async function updateAlertRule(ruleId, payload) {
+      try {
+        const res = await fetch(apiPath(`/api/alert-rules/${encodeURIComponent(ruleId)}`), {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          let msg = `HTTP ${res.status}`;
+          try {
+            const body = await res.json();
+            if (body?.detail) msg = String(body.detail);
+          } catch (_e) {}
+          throw new Error(msg);
+        }
+        await load();
+      } catch (err) {
+        const errors = document.getElementById("errors");
+        if (errors) errors.textContent = `Alert rule update failed: ${String(err?.message || err)}`;
+      }
+    }
+
     function openModelsModal() {
       document.getElementById("modelsModal").classList.add("open");
       loadSdModels();
@@ -1073,10 +1664,19 @@
               <div class="model-name">${item.name}</div>
               <div class="model-meta">${formatBytes(item.size_bytes)} - ${formatDate(item.modified)}</div>
               <div class="model-meta">${item.path}</div>
-              <button class="print-btn" title="Coming soon">Print Again</button>
+              <div class="model-actions">
+                <button class="print-btn model-print-now" type="button" data-path="${encodeURIComponent(item.path)}" aria-label="Print ${item.name} now">Print Now</button>
+                <button class="print-btn secondary model-queue" type="button" data-path="${encodeURIComponent(item.path)}" aria-label="Queue ${item.name}">Queue</button>
+              </div>
             </div>
           </article>
         `).join("");
+        grid.querySelectorAll(".model-print-now").forEach((button) => {
+          button.addEventListener("click", () => printModelNow(decodeURIComponent(button.dataset.path || "")));
+        });
+        grid.querySelectorAll(".model-queue").forEach((button) => {
+          button.addEventListener("click", () => queueModel(decodeURIComponent(button.dataset.path || "")));
+        });
       } catch (e) {
         grid.innerHTML = "<div class='model-meta'>Failed to load SD card models.</div>";
       }
@@ -1158,29 +1758,249 @@
       return `${hours}h ${mins}m`;
     }
 
+    function renderStatusChips(state, errorText) {
+      const chips = document.getElementById("statusChips");
+      if (!chips) return;
+      const items = [];
+      items.push({ level: state.connected ? "info" : "warning", text: state.connected ? "Connected" : "Disconnected" });
+      if (state.job?.state) items.push({ level: "info", text: `State: ${state.job.state}` });
+      if (state.queue?.count) items.push({ level: "warning", text: `${state.queue.count} queued` });
+      (Array.isArray(state.active_alerts) ? state.active_alerts : []).forEach((alert) => {
+        items.push({ level: alert.severity || "warning", text: alert.rule_name || alert.message || "Alert active" });
+      });
+      if (!items.some((item) => item.level === "error") && errorText && errorText !== "-") items.push({ level: "error", text: "Alert active" });
+      chips.innerHTML = items.map(item => `<span class="severity-chip ${item.level}" aria-label="${item.level} status">${escapeHtml(item.text)}</span>`).join("");
+    }
+
+    function renderQueue(queue) {
+      const list = document.getElementById("queueList");
+      const countEl = document.getElementById("queueCount");
+      if (countEl) countEl.textContent = String(queue?.count ?? 0);
+      if (!list) return;
+      const items = Array.isArray(queue?.items) ? queue.items : [];
+      if (!items.length) {
+        list.innerHTML = "<div class='queue-item-meta'>No queued jobs.</div>";
+        return;
+      }
+      list.innerHTML = items.map((item) => `
+        <article class="queue-item">
+          <div class="queue-item-head">
+            <div>
+              <div class="queue-item-title">${escapeHtml((item.file_path || "").split("/").pop() || item.file_path || "Queued model")}</div>
+              <div class="queue-item-meta">${escapeHtml(item.start_at ? `Starts ${formatDateTime(item.start_at)}` : "Starts as soon as printer is free")}</div>
+              <div class="queue-item-meta">${escapeHtml(item.ams_mapping ? `AMS ${item.ams_mapping.join(", ")}` : "AMS preset: current")}</div>
+            </div>
+            <div class="queue-item-actions">
+              <button class="text-btn queue-up" type="button" data-queue-id="${escapeHtml(item.id || "")}" aria-label="Move queued job up">Up</button>
+              <button class="text-btn queue-down" type="button" data-queue-id="${escapeHtml(item.id || "")}" aria-label="Move queued job down">Down</button>
+              <button class="queue-remove" type="button" data-queue-id="${escapeHtml(item.id || "")}" aria-label="Remove queued job">Remove</button>
+            </div>
+          </div>
+          <div class="queue-edit-row">
+            <label class="label">Reschedule
+              <input class="field queue-start-edit" type="datetime-local" data-queue-id="${escapeHtml(item.id || "")}" value="${escapeHtml(isoToLocalInputValue(item.start_at))}" aria-label="Reschedule queued job">
+            </label>
+            <button class="text-btn queue-save" type="button" data-queue-id="${escapeHtml(item.id || "")}">Save Time</button>
+            <button class="text-btn queue-clear" type="button" data-queue-id="${escapeHtml(item.id || "")}">Run Next</button>
+          </div>
+        </article>
+      `).join("");
+      list.querySelectorAll(".queue-remove").forEach((button) => {
+        button.addEventListener("click", () => removeQueueItem(button.dataset.queueId || ""));
+      });
+      list.querySelectorAll(".queue-up").forEach((button) => {
+        button.addEventListener("click", () => reorderQueueItem(button.dataset.queueId || "", "up"));
+      });
+      list.querySelectorAll(".queue-down").forEach((button) => {
+        button.addEventListener("click", () => reorderQueueItem(button.dataset.queueId || "", "down"));
+      });
+      list.querySelectorAll(".queue-save").forEach((button) => {
+        button.addEventListener("click", () => {
+          const itemId = button.dataset.queueId || "";
+          const input = list.querySelector(`.queue-start-edit[data-queue-id="${CSS.escape(itemId)}"]`);
+          updateQueueItemSchedule(itemId, input?.value || "");
+        });
+      });
+      list.querySelectorAll(".queue-clear").forEach((button) => {
+        button.addEventListener("click", () => updateQueueItemSchedule(button.dataset.queueId || "", ""));
+      });
+    }
+
+    function renderTimeline(items) {
+      const list = document.getElementById("timelineList");
+      if (!list) return;
+      const entries = Array.isArray(items) ? items : [];
+      if (!entries.length) {
+        list.innerHTML = "<div class='timeline-meta'>No activity yet.</div>";
+        return;
+      }
+      list.innerHTML = entries.map((entry) => `
+        <article class="timeline-item">
+          <div class="timeline-head">
+            <div class="timeline-title">${escapeHtml(entry.message || entry.event || "Activity")}</div>
+            <span class="severity-chip ${escapeHtml(entry.severity || "info")}">${escapeHtml(entry.severity || "info")}</span>
+          </div>
+          <div class="timeline-meta">${escapeHtml(formatDateTime(entry.at))} • ${escapeHtml(entry.actor || "system")}</div>
+        </article>
+      `).join("");
+    }
+
+    function renderPresets(items) {
+      const list = document.getElementById("presetList");
+      if (!list) return;
+      const presets = Array.isArray(items) ? items : [];
+      if (!presets.length) {
+        list.innerHTML = "<div class='timeline-meta'>No control presets saved.</div>";
+        return;
+      }
+      list.innerHTML = presets.map((preset) => {
+        const payload = encodeURIComponent(JSON.stringify(preset));
+        const values = [
+          Number.isFinite(Number(preset.nozzle_target)) ? `Nozzle ${preset.nozzle_target}C` : null,
+          Number.isFinite(Number(preset.bed_target)) ? `Bed ${preset.bed_target}C` : null,
+          Number.isFinite(Number(preset.part_cooling)) ? `Part ${preset.part_cooling}%` : null,
+          Number.isFinite(Number(preset.auxiliary)) ? `Aux ${preset.auxiliary}%` : null,
+          Number.isFinite(Number(preset.chamber)) ? `Chamber ${preset.chamber}%` : null
+        ].filter(Boolean).join(" • ");
+        return `
+          <article class="preset-item">
+            <div class="queue-item-title">${escapeHtml(preset.name || "Preset")}</div>
+            <div class="queue-item-meta">${escapeHtml(values || "No settings recorded.")}</div>
+            <div class="preset-actions">
+              <button class="text-btn preset-apply" type="button" data-preset="${payload}">Apply</button>
+              <button class="text-btn preset-remove" type="button" data-preset-id="${escapeHtml(preset.id || "")}">Remove</button>
+            </div>
+          </article>
+        `;
+      }).join("");
+      list.querySelectorAll(".preset-apply").forEach((button) => {
+        button.addEventListener("click", () => applyControlPreset(button.dataset.preset || ""));
+      });
+      list.querySelectorAll(".preset-remove").forEach((button) => {
+        button.addEventListener("click", () => removeControlPreset(button.dataset.presetId || ""));
+      });
+    }
+
+    function renderAlertRules(items) {
+      const list = document.getElementById("ruleList");
+      if (!list) return;
+      const rules = Array.isArray(items) ? items : [];
+      if (!rules.length) {
+        list.innerHTML = "<div class='timeline-meta'>No alert rules saved.</div>";
+        return;
+      }
+      list.innerHTML = rules.map((rule) => `
+        <article class="rule-item">
+          <div class="queue-item-head">
+            <div>
+              <div class="queue-item-title">${escapeHtml(rule.name || "Rule")}</div>
+              <div class="queue-item-meta">${escapeHtml(rule.type || "rule")}${rule.threshold !== null && rule.threshold !== undefined ? ` • threshold ${escapeHtml(String(rule.threshold))}` : ""}</div>
+            </div>
+            <div class="rule-item-actions">
+              <button class="text-btn rule-toggle" type="button" data-rule-id="${escapeHtml(rule.id || "")}" data-enabled="${rule.enabled ? "1" : "0"}">${rule.enabled ? "Disable" : "Enable"}</button>
+              <button class="queue-remove rule-remove" type="button" data-rule-id="${escapeHtml(rule.id || "")}" aria-label="Remove alert rule">Remove</button>
+            </div>
+          </div>
+          <div class="mini-form-grid">
+            <label class="label">Name
+              <input class="field rule-edit-name" type="text" data-rule-id="${escapeHtml(rule.id || "")}" value="${escapeHtml(rule.name || "")}">
+            </label>
+            <label class="label">Type
+              <select class="field rule-edit-type" data-rule-id="${escapeHtml(rule.id || "")}">
+                <option value="disconnect_duration"${rule.type === "disconnect_duration" ? " selected" : ""}>Disconnected Duration</option>
+                <option value="chamber_temp_above"${rule.type === "chamber_temp_above" ? " selected" : ""}>Chamber Temp Above</option>
+                <option value="print_error"${rule.type === "print_error" ? " selected" : ""}>Print Error</option>
+                <option value="queue_backlog"${rule.type === "queue_backlog" ? " selected" : ""}>Queue Backlog</option>
+              </select>
+            </label>
+          </div>
+          <div class="mini-form-grid">
+            <label class="label">Severity
+              <select class="field rule-edit-severity" data-rule-id="${escapeHtml(rule.id || "")}">
+                <option value="info"${rule.severity === "info" ? " selected" : ""}>Info</option>
+                <option value="warning"${(rule.severity || "warning") === "warning" ? " selected" : ""}>Warning</option>
+                <option value="error"${rule.severity === "error" ? " selected" : ""}>Error</option>
+              </select>
+            </label>
+            <label class="check"><input class="rule-edit-notify" type="checkbox" data-rule-id="${escapeHtml(rule.id || "")}" ${rule.notify !== false ? "checked" : ""}> Send Notification</label>
+          </div>
+          <div class="queue-edit-row">
+            <label class="label">Threshold
+              <input class="field rule-edit-threshold" type="number" min="0" step="0.1" data-rule-id="${escapeHtml(rule.id || "")}" value="${rule.threshold ?? ""}" ${rule.type === "print_error" ? "disabled" : ""}>
+            </label>
+            <button class="text-btn rule-save" type="button" data-rule-id="${escapeHtml(rule.id || "")}">Save Rule</button>
+            <div></div>
+          </div>
+        </article>
+      `).join("");
+      list.querySelectorAll(".rule-edit-type").forEach((select) => {
+        select.addEventListener("change", () => {
+          const ruleId = select.dataset.ruleId || "";
+          const thresholdInput = list.querySelector(`.rule-edit-threshold[data-rule-id="${CSS.escape(ruleId)}"]`);
+          if (thresholdInput) {
+            thresholdInput.disabled = select.value === "print_error";
+            if (select.value === "print_error") thresholdInput.value = "";
+          }
+        });
+      });
+      list.querySelectorAll(".rule-save").forEach((button) => {
+        button.addEventListener("click", () => {
+          const ruleId = button.dataset.ruleId || "";
+          const nameInput = list.querySelector(`.rule-edit-name[data-rule-id="${CSS.escape(ruleId)}"]`);
+          const typeInput = list.querySelector(`.rule-edit-type[data-rule-id="${CSS.escape(ruleId)}"]`);
+          const severityInput = list.querySelector(`.rule-edit-severity[data-rule-id="${CSS.escape(ruleId)}"]`);
+          const notifyInput = list.querySelector(`.rule-edit-notify[data-rule-id="${CSS.escape(ruleId)}"]`);
+          const thresholdInput = list.querySelector(`.rule-edit-threshold[data-rule-id="${CSS.escape(ruleId)}"]`);
+          const thresholdRaw = thresholdInput?.value || "";
+          updateAlertRule(ruleId, {
+            name: nameInput?.value || "",
+            type: typeInput?.value || "disconnect_duration",
+            threshold: (typeInput?.value || "") === "print_error" || !thresholdRaw ? null : Number(thresholdRaw),
+            severity: severityInput?.value || "warning",
+            notify: !!notifyInput?.checked
+          });
+        });
+      });
+      list.querySelectorAll(".rule-toggle").forEach((button) => {
+        button.addEventListener("click", () => {
+          const nextEnabled = button.dataset.enabled !== "1";
+          updateAlertRule(button.dataset.ruleId || "", { enabled: nextEnabled });
+        });
+      });
+      list.querySelectorAll(".rule-remove").forEach((button) => {
+        button.addEventListener("click", () => removeAlertRule(button.dataset.ruleId || ""));
+      });
+    }
+
     async function load() {
       const r = await fetch(apiPath("/api/state"));
       const s = await r.json();
       const progress = Number(s.job?.progress_percent ?? 0);
       const layer = s.job?.current_layer ?? 0;
       const total = s.job?.total_layers ?? 0;
+      const remainingText = formatRemainingMinutes(s.job?.remaining_minutes);
 
       document.getElementById("progressFill").style.width = `${Math.max(0, Math.min(100, progress))}%`;
       document.getElementById("layerInfo").textContent = `${layer}/${total || "?"}`;
-      document.getElementById("timeInfo").textContent = s.job?.state ?? "idle";
+      document.getElementById("progressSummary").textContent = `${progress}% • L${layer}/${total || "?"}`;
+      document.getElementById("timeInfo").textContent = remainingText === "-" ? (s.job?.state ?? "idle") : `${remainingText} left`;
 
       document.getElementById("nozzle").textContent = temp(s.temperatures?.nozzle_current);
       document.getElementById("bed").textContent = temp(s.temperatures?.bed_current);
-      document.getElementById("chamber").textContent = temp(s.temperatures?.chamber);
+      document.getElementById("healthScore").textContent = `${s.health?.score ?? "-"}`;
       document.getElementById("progValue").textContent = `${progress}%`;
 
       document.getElementById("serial").textContent = s.printer?.serial ?? "-";
       document.getElementById("model").textContent = s.printer?.device_type ?? "-";
       document.getElementById("ip").textContent = s.printer?.ip_address ?? "-";
       document.getElementById("state").textContent = s.connected ? "Connected" : "Disconnected";
-      document.getElementById("remainingTime").textContent = formatRemainingMinutes(s.job?.remaining_minutes);
+      document.getElementById("remainingTime").textContent = remainingText;
+      document.getElementById("lastUpdated").textContent = formatDateTime(s.last_update_utc);
       window.__lastJobState = s.job?.state;
       window.__lastConnected = s.connected;
+      chamberLightOn = !!s.lights?.chamber;
+      const lightBtn = document.getElementById("lightBtn");
+      if (lightBtn) lightBtn.querySelector(".btn-label").textContent = chamberLightOn ? "Light Off" : "Light";
       setPrintErrorGate(s.errors?.print_error);
       updateActionButtons(s.job?.state, s.connected);
       if (viewMode === "photo") {
@@ -1190,12 +2010,22 @@
       }
 
       const err = s.errors?.print_error || (s.errors?.hms?.Count ? s.errors.hms : null) || s.last_error || "-";
-      document.getElementById("errors").textContent = typeof err === "string" ? err : JSON.stringify(err, null, 2);
+      const errText = typeof err === "string" ? err : JSON.stringify(err, null, 2);
+      document.getElementById("errors").textContent = errText;
+      document.getElementById("statusProgress").textContent = `${progress}%`;
+      document.getElementById("statusProgressLine").textContent = `L${layer}/${total || "?"} • ${remainingText === "-" ? (s.job?.state ?? "idle") : remainingText}`;
+      document.getElementById("statusQueue").textContent = `${s.queue?.count ?? 0} jobs`;
+      document.getElementById("statusQueueLine").textContent = s.queue?.next_item?.start_at ? `Next ${formatDateTime(s.queue.next_item.start_at)}` : "Ready now";
+      renderStatusChips(s, errText);
+      renderQueue(s.queue);
+      renderTimeline(s.timeline);
+      renderPresets(s.control_presets);
+      renderAlertRules(s.alert_rules);
       renderAms(s.ams);
 
       const jobStateRaw = (s.job?.state || "").toString();
       const jobState = jobStateRaw.toUpperCase();
-      const errorSig = typeof err === "string" ? err : JSON.stringify(err);
+      const errorSig = errText;
 
       if (notifyState.connected === true && !s.connected) {
         sendNativeNotification("Printer Disconnected", "PrintLab lost connection to the printer.", "printer-disconnected");
@@ -1212,13 +2042,21 @@
       if (errorSig && errorSig !== "-" && errorSig !== notifyState.errorSig) {
         sendNativeNotification("Printer Alert", `${String(errorSig).slice(0, 140)}`, "printer-error");
       }
+      const notifiableAlerts = (s.active_alerts || []).filter((alert) => alert.notify !== false);
+      const activeAlertSignature = JSON.stringify(notifiableAlerts.map((alert) => `${alert.type}:${alert.message}`));
+      if (activeAlertSignature !== "[]" && activeAlertSignature !== notifyState.activeAlertSignature) {
+        const firstAlert = notifiableAlerts[0] || null;
+        sendNativeNotification("Rule Alert", firstAlert?.message || "A printer alert rule was triggered.", "printer-rule-alert");
+      }
 
       notifyState.connected = !!s.connected;
       notifyState.jobState = jobState;
       notifyState.errorSig = errorSig;
+      notifyState.activeAlertSignature = activeAlertSignature;
     }
 
     initPwa();
+    initQueueControls();
     connectPrinterEvents();
     load();
     setInterval(load, 3000);

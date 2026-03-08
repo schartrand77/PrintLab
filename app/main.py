@@ -18,6 +18,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
+from uuid import uuid4
 from zipfile import ZipFile
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -151,6 +152,45 @@ class OrderworksPrintJobRequest(BaseModel):
     layer_inspect: bool = True
 
 
+class QueuePrintJobRequest(OrderworksPrintJobRequest):
+    start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
+
+
+class QueueUpdateRequest(BaseModel):
+    start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
+
+
+class ControlPresetRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    nozzle_target: int | None = Field(default=None, ge=0, le=320)
+    bed_target: int | None = Field(default=None, ge=0, le=130)
+    part_cooling: int | None = Field(default=None, ge=0, le=100)
+    auxiliary: int | None = Field(default=None, ge=0, le=100)
+    chamber: int | None = Field(default=None, ge=0, le=100)
+
+
+class AlertRuleRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    type: str = Field(pattern="^(disconnect_duration|chamber_temp_above|print_error|queue_backlog)$")
+    enabled: bool = True
+    threshold: float | None = Field(default=None, ge=0)
+    severity: str = Field(default="warning", pattern="^(info|warning|error)$")
+    notify: bool = True
+
+
+class AlertRuleUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    type: str | None = Field(default=None, pattern="^(disconnect_duration|chamber_temp_above|print_error|queue_backlog)$")
+    enabled: bool | None = None
+    threshold: float | None = Field(default=None, ge=0)
+    severity: str | None = Field(default=None, pattern="^(info|warning|error)$")
+    notify: bool | None = None
+
+
+class QueueReorderRequest(BaseModel):
+    direction: str = Field(pattern="^(up|down)$")
+
+
 class WorksService:
     def __init__(self) -> None:
         self._service_env: dict[str, str] = {
@@ -273,6 +313,229 @@ class PrinterService:
         self._live_cache_time: float = 0.0
         self._event_subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self._main_loop: asyncio.AbstractEventLoop | None = None
+        self._queue_file = Path(f"/data/queue_{printer_id}.json")
+        self._timeline_file = Path(f"/data/timeline_{printer_id}.json")
+        self._presets_file = Path(f"/data/control_presets_{printer_id}.json")
+        self._alert_rules_file = Path(f"/data/alert_rules_{printer_id}.json")
+        self._queue_items: list[dict[str, Any]] = self._load_json_list(self._queue_file)
+        self._timeline_entries: list[dict[str, Any]] = self._load_json_list(self._timeline_file)
+        self._control_presets: list[dict[str, Any]] = self._load_json_list(self._presets_file)
+        self._alert_rules: list[dict[str, Any]] = self._load_json_list(self._alert_rules_file)
+        self._queue_task: asyncio.Task[None] | None = None
+        self._disconnected_since_utc: str | None = None
+
+    def _load_json_list(self, path: Path) -> list[dict[str, Any]]:
+        try:
+            if path.exists():
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(payload, list):
+                    return [item for item in payload if isinstance(item, dict)]
+        except Exception as exc:
+            LOGGER.warning("Failed to load %s: %s", path.name, exc)
+        return []
+
+    def _save_json_list(self, path: Path, payload: list[dict[str, Any]]) -> None:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception as exc:
+            LOGGER.warning("Failed to save %s: %s", path.name, exc)
+
+    def _save_queue(self) -> None:
+        self._save_json_list(self._queue_file, self._queue_items)
+
+    def _save_timeline(self) -> None:
+        self._save_json_list(self._timeline_file, self._timeline_entries)
+
+    def _save_presets(self) -> None:
+        self._save_json_list(self._presets_file, self._control_presets)
+
+    def _save_alert_rules(self) -> None:
+        self._save_json_list(self._alert_rules_file, self._alert_rules)
+
+    def _timeline_entry(
+        self,
+        event: str,
+        message: str,
+        *,
+        severity: str = "info",
+        actor: str = "system",
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "id": uuid4().hex,
+            "event": event,
+            "message": message,
+            "severity": severity,
+            "actor": actor,
+            "details": details or {},
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _record_timeline(
+        self,
+        event: str,
+        message: str,
+        *,
+        severity: str = "info",
+        actor: str = "system",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        entry = self._timeline_entry(event, message, severity=severity, actor=actor, details=details)
+        self._timeline_entries = [entry, *self._timeline_entries[:199]]
+        self._save_timeline()
+
+    def _normalize_schedule(self, start_at: str | None) -> str | None:
+        raw = (start_at or "").strip()
+        if not raw:
+            return None
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("start_at must be a valid ISO timestamp.") from exc
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
+
+    def _job_busy(self) -> bool:
+        if self.client is None or not self.client.connected:
+            return False
+        try:
+            state = str(self.client.get_device().print_job.gcode_state or "").upper()
+        except Exception:
+            return False
+        if not state:
+            return False
+        idle_markers = ("IDLE", "FINISH", "COMPLETE", "FAILED", "STOP")
+        return not any(marker in state for marker in idle_markers)
+
+    def _queue_due_item(self) -> dict[str, Any] | None:
+        now = datetime.now(timezone.utc)
+        for item in self._queue_items:
+            last_attempt_raw = item.get("last_attempt_at")
+            if last_attempt_raw:
+                try:
+                    last_attempt = datetime.fromisoformat(str(last_attempt_raw).replace("Z", "+00:00"))
+                    if last_attempt.tzinfo is None:
+                        last_attempt = last_attempt.replace(tzinfo=timezone.utc)
+                    if last_attempt.astimezone(timezone.utc) > now - timedelta(seconds=60):
+                        continue
+                except ValueError:
+                    pass
+            start_at_raw = item.get("start_at")
+            if not start_at_raw:
+                return item
+            try:
+                start_at = datetime.fromisoformat(str(start_at_raw).replace("Z", "+00:00"))
+            except ValueError:
+                return item
+            if start_at.tzinfo is None:
+                start_at = start_at.replace(tzinfo=timezone.utc)
+            if start_at.astimezone(timezone.utc) <= now:
+                return item
+        return None
+
+    def queue_snapshot(self) -> dict[str, Any]:
+        next_item = self._queue_items[0] if self._queue_items else None
+        return {
+            "count": len(self._queue_items),
+            "next_item": next_item,
+            "items": list(self._queue_items),
+        }
+
+    def timeline_snapshot(self) -> list[dict[str, Any]]:
+        return list(self._timeline_entries[:50])
+
+    def presets_snapshot(self) -> list[dict[str, Any]]:
+        return list(self._control_presets)
+
+    def alert_rules_snapshot(self) -> list[dict[str, Any]]:
+        return list(self._alert_rules)
+
+    def _ensure_default_alert_rules(self) -> None:
+        if self._alert_rules:
+            return
+        self._alert_rules = [
+            {"id": uuid4().hex, "name": "Disconnected > 2 min", "type": "disconnect_duration", "enabled": True, "threshold": 2, "severity": "warning", "notify": True},
+            {"id": uuid4().hex, "name": "Chamber temp > 50C", "type": "chamber_temp_above", "enabled": False, "threshold": 50, "severity": "warning", "notify": False},
+            {"id": uuid4().hex, "name": "Print error detected", "type": "print_error", "enabled": True, "threshold": None, "severity": "error", "notify": True},
+        ]
+        self._save_alert_rules()
+
+    def _evaluate_alert_rules(
+        self,
+        *,
+        connected: bool,
+        chamber_temp: float | None,
+        print_error: Any,
+        queue_count: int,
+    ) -> list[dict[str, Any]]:
+        self._ensure_default_alert_rules()
+        alerts: list[dict[str, Any]] = []
+        now = datetime.now(timezone.utc)
+        disconnected_minutes = None
+        if self._disconnected_since_utc:
+            try:
+                disconnected_since = datetime.fromisoformat(self._disconnected_since_utc.replace("Z", "+00:00"))
+                if disconnected_since.tzinfo is None:
+                    disconnected_since = disconnected_since.replace(tzinfo=timezone.utc)
+                disconnected_minutes = max(0.0, (now - disconnected_since.astimezone(timezone.utc)).total_seconds() / 60.0)
+            except ValueError:
+                disconnected_minutes = None
+
+        for rule in self._alert_rules:
+            rule.setdefault("severity", "warning")
+            rule.setdefault("notify", True)
+            if not rule.get("enabled", True):
+                continue
+            rule_type = str(rule.get("type") or "")
+            threshold = rule.get("threshold")
+            severity = str(rule.get("severity") or "warning")
+            notify = bool(rule.get("notify", True))
+            if rule_type == "disconnect_duration":
+                threshold_minutes = float(threshold or 0)
+                if not connected and disconnected_minutes is not None and disconnected_minutes >= threshold_minutes:
+                    alerts.append({
+                        "rule_id": rule.get("id"),
+                        "rule_name": rule.get("name"),
+                        "type": rule_type,
+                        "severity": severity,
+                        "notify": notify,
+                        "message": f"Printer disconnected for {int(disconnected_minutes)} min.",
+                    })
+            elif rule_type == "chamber_temp_above":
+                threshold_temp = float(threshold or 0)
+                if chamber_temp is not None and chamber_temp > threshold_temp:
+                    alerts.append({
+                        "rule_id": rule.get("id"),
+                        "rule_name": rule.get("name"),
+                        "type": rule_type,
+                        "severity": severity,
+                        "notify": notify,
+                        "message": f"Chamber temperature is {round(chamber_temp)}C.",
+                    })
+            elif rule_type == "print_error":
+                if print_error:
+                    alerts.append({
+                        "rule_id": rule.get("id"),
+                        "rule_name": rule.get("name"),
+                        "type": rule_type,
+                        "severity": severity,
+                        "notify": notify,
+                        "message": "Printer reported a print error.",
+                    })
+            elif rule_type == "queue_backlog":
+                threshold_count = int(float(threshold or 0))
+                if queue_count > threshold_count:
+                    alerts.append({
+                        "rule_id": rule.get("id"),
+                        "rule_name": rule.get("name"),
+                        "type": rule_type,
+                        "severity": severity,
+                        "notify": notify,
+                        "message": f"Queue backlog is {queue_count} jobs.",
+                    })
+        return alerts
 
     def _config(self) -> dict[str, Any]:
         cfg = dict(self._configured_settings)
@@ -290,6 +553,14 @@ class PrinterService:
 
     def _on_client_event(self, event: str) -> None:
         self._mark_event(event)
+        event_name = str(event or "")
+        lower = event_name.lower()
+        severity = "error" if "error" in lower else ("warning" if "disconnect" in lower else "info")
+        if "disconnect" in lower and self._disconnected_since_utc is None:
+            self._disconnected_since_utc = datetime.now(timezone.utc).isoformat()
+        elif "connect" in lower:
+            self._disconnected_since_utc = None
+        self._record_timeline(event_name or "printer_event", f"Printer event: {event_name or 'unknown'}", severity=severity)
 
     def _broadcast_event(self, event: str) -> None:
         payload = {"event": event, "at": self.last_update_utc}
@@ -341,29 +612,48 @@ class PrinterService:
             await self.client.refresh()
             self._mark_event("connected")
             self.last_error = None
+            self._disconnected_since_utc = None
+            self._record_timeline("connected", "Printer connected.", actor="system")
+            if self._queue_task is None or self._queue_task.done():
+                self._queue_task = asyncio.create_task(self._queue_worker())
             LOGGER.info("Connected to printer %s", cfg["serial"])
         except Exception as exc:
             self.last_error = str(exc)
+            if self._disconnected_since_utc is None:
+                self._disconnected_since_utc = datetime.now(timezone.utc).isoformat()
+            self._record_timeline("connect_failed", f"Failed to connect: {exc}", severity="error", actor="system")
             LOGGER.exception("Failed to connect to printer")
 
     async def stop(self) -> None:
+        if self._queue_task is not None:
+            self._queue_task.cancel()
+            self._queue_task = None
         if self.client is not None:
             self.client.disconnect()
             self._mark_event("disconnected")
+            if self._disconnected_since_utc is None:
+                self._disconnected_since_utc = datetime.now(timezone.utc).isoformat()
+            self._record_timeline("disconnected", "Printer disconnected.", severity="warning", actor="system")
 
-    async def action(self, action: str) -> bool:
+    async def action(self, action: str, actor: str = "dashboard") -> bool:
         if self.client is None:
             raise RuntimeError("Client not initialized.")
 
         if action == "pause":
-            return self.client.publish(PAUSE)
+            ok = self.client.publish(PAUSE)
+            self._record_timeline("pause", "Pause requested.", actor=actor, severity="warning")
+            return ok
         if action == "resume":
-            return self.client.publish(RESUME)
+            ok = self.client.publish(RESUME)
+            self._record_timeline("resume", "Resume requested.", actor=actor)
+            return ok
         if action == "stop":
-            return self.client.publish(STOP)
+            ok = self.client.publish(STOP)
+            self._record_timeline("stop", "Stop requested.", actor=actor, severity="warning")
+            return ok
         raise ValueError(f"Unknown action: {action}")
 
-    async def set_chamber_light(self, on: bool) -> None:
+    async def set_chamber_light(self, on: bool, actor: str = "dashboard") -> None:
         if self.client is None:
             raise RuntimeError("Client not initialized.")
         device = self.client.get_device()
@@ -372,15 +662,17 @@ class PrinterService:
         else:
             device.lights.TurnChamberLightOff()
         self._mark_event("event_light_update")
+        self._record_timeline("chamber_light", f"Chamber light turned {'on' if on else 'off'}.", actor=actor)
 
-    async def set_temperature(self, request: TemperatureRequest) -> None:
+    async def set_temperature(self, request: TemperatureRequest, actor: str = "dashboard") -> None:
         if self.client is None:
             raise RuntimeError("Client not initialized.")
         target = TempEnum.HEATBED if request.target == "heatbed" else TempEnum.NOZZLE
         self.client.get_device().temperature.set_target_temp(target, request.value)
         self._mark_event("event_temperature_update")
+        self._record_timeline("temperature", f"Set {request.target} target to {request.value}C.", actor=actor)
 
-    async def set_fan(self, request: FanRequest) -> None:
+    async def set_fan(self, request: FanRequest, actor: str = "dashboard") -> None:
         if self.client is None:
             raise RuntimeError("Client not initialized.")
         fan_map = {
@@ -392,6 +684,7 @@ class PrinterService:
         }
         self.client.get_device().fans.set_fan_speed(fan_map[request.fan], request.percent)
         self._mark_event("event_fan_update")
+        self._record_timeline("fan", f"Set {request.fan} fan to {request.percent}%.", actor=actor)
 
     async def refresh(self) -> None:
         if self.client is None:
@@ -728,7 +1021,7 @@ class PrinterService:
         except Exception:
             return {"loaded_filament": None, "remaining_filament": []}
 
-    async def start_orderworks_print_job(self, request: OrderworksPrintJobRequest) -> dict[str, Any]:
+    async def start_orderworks_print_job(self, request: OrderworksPrintJobRequest, actor: str = "dashboard") -> dict[str, Any]:
         if self.client is None:
             raise RuntimeError("Client not initialized.")
 
@@ -762,6 +1055,16 @@ class PrinterService:
 
         ok = self.client.publish(command)
         self._mark_event("event_orderworks_print_submit")
+        self._record_timeline(
+            "print_submit",
+            f"Submitted print job for {Path(ftp_path).name}.",
+            actor=actor,
+            details={
+                "file_path": ftp_path,
+                "subtask_name": command_print.get("subtask_name"),
+                "ams_mapping": command_print.get("ams_mapping"),
+            },
+        )
         return {
             "ok": bool(ok),
             "submitted": bool(ok),
@@ -771,6 +1074,176 @@ class PrinterService:
             "ams_mapping": command_print.get("ams_mapping"),
             "subtask_name": command_print.get("subtask_name"),
         }
+
+    async def queue_print_job(self, request: QueuePrintJobRequest, actor: str = "dashboard") -> dict[str, Any]:
+        start_at = self._normalize_schedule(request.start_at)
+        item = request.model_dump()
+        item["id"] = uuid4().hex
+        item["start_at"] = start_at
+        item["created_at"] = datetime.now(timezone.utc).isoformat()
+        item["actor"] = actor
+        self._queue_items.append(item)
+        self._save_queue()
+        schedule_label = start_at or "now"
+        self._record_timeline(
+            "queue_add",
+            f"Queued {Path(request.file_path).name} for {schedule_label}.",
+            actor=actor,
+            details={"queue_item_id": item["id"], "file_path": request.file_path, "start_at": start_at},
+        )
+        return {"ok": True, "queued": True, "item": item, "queue": self.queue_snapshot()}
+
+    async def update_queue_item(self, item_id: str, request: QueueUpdateRequest, actor: str = "dashboard") -> dict[str, Any]:
+        start_at = self._normalize_schedule(request.start_at)
+        for item in self._queue_items:
+            if item.get("id") != item_id:
+                continue
+            item["start_at"] = start_at
+            item["updated_at"] = datetime.now(timezone.utc).isoformat()
+            item["updated_by"] = actor
+            self._save_queue()
+            self._record_timeline(
+                "queue_update",
+                f"Updated queue item for {Path(str(item.get('file_path') or '')).name or 'model'}.",
+                actor=actor,
+                details={"queue_item_id": item_id, "start_at": start_at},
+            )
+            return {"ok": True, "item": item, "queue": self.queue_snapshot()}
+        raise ValueError(f"Unknown queue item: {item_id}")
+
+    async def reorder_queue_item(self, item_id: str, direction: str, actor: str = "dashboard") -> dict[str, Any]:
+        for index, item in enumerate(self._queue_items):
+            if item.get("id") != item_id:
+                continue
+            if direction == "up" and index > 0:
+                self._queue_items[index - 1], self._queue_items[index] = self._queue_items[index], self._queue_items[index - 1]
+            elif direction == "down" and index < len(self._queue_items) - 1:
+                self._queue_items[index + 1], self._queue_items[index] = self._queue_items[index], self._queue_items[index + 1]
+            else:
+                return {"ok": True, "queue": self.queue_snapshot()}
+            self._save_queue()
+            self._record_timeline(
+                "queue_reorder",
+                f"Moved queued job for {Path(str(item.get('file_path') or '')).name or 'model'} {direction}.",
+                actor=actor,
+                details={"queue_item_id": item_id, "direction": direction},
+            )
+            return {"ok": True, "queue": self.queue_snapshot()}
+        raise ValueError(f"Unknown queue item: {item_id}")
+
+    async def remove_queue_item(self, item_id: str, actor: str = "dashboard") -> dict[str, Any]:
+        for index, item in enumerate(self._queue_items):
+            if item.get("id") != item_id:
+                continue
+            removed = self._queue_items.pop(index)
+            self._save_queue()
+            self._record_timeline(
+                "queue_remove",
+                f"Removed queued job for {Path(str(removed.get('file_path') or '')).name or 'model'}.",
+                actor=actor,
+                severity="warning",
+                details={"queue_item_id": item_id},
+            )
+            return {"ok": True, "removed": removed, "queue": self.queue_snapshot()}
+        raise ValueError(f"Unknown queue item: {item_id}")
+
+    async def save_control_preset(self, request: ControlPresetRequest, actor: str = "dashboard") -> dict[str, Any]:
+        preset = request.model_dump()
+        preset["id"] = uuid4().hex
+        preset["created_at"] = datetime.now(timezone.utc).isoformat()
+        preset["actor"] = actor
+        self._control_presets.append(preset)
+        self._save_presets()
+        self._record_timeline("preset_save", f"Saved control preset {request.name}.", actor=actor)
+        return {"ok": True, "item": preset, "items": self.presets_snapshot()}
+
+    async def remove_control_preset(self, preset_id: str, actor: str = "dashboard") -> dict[str, Any]:
+        for index, preset in enumerate(self._control_presets):
+            if preset.get("id") != preset_id:
+                continue
+            removed = self._control_presets.pop(index)
+            self._save_presets()
+            self._record_timeline("preset_remove", f"Removed control preset {removed.get('name') or 'preset'}.", actor=actor, severity="warning")
+            return {"ok": True, "removed": removed, "items": self.presets_snapshot()}
+        raise ValueError(f"Unknown preset: {preset_id}")
+
+    async def save_alert_rule(self, request: AlertRuleRequest, actor: str = "dashboard") -> dict[str, Any]:
+        rule = request.model_dump()
+        rule["id"] = uuid4().hex
+        rule["created_at"] = datetime.now(timezone.utc).isoformat()
+        rule["actor"] = actor
+        self._alert_rules.append(rule)
+        self._save_alert_rules()
+        self._record_timeline("alert_rule_save", f"Saved alert rule {request.name}.", actor=actor)
+        return {"ok": True, "item": rule, "items": self.alert_rules_snapshot()}
+
+    async def update_alert_rule(self, rule_id: str, request: AlertRuleUpdateRequest, actor: str = "dashboard") -> dict[str, Any]:
+        for rule in self._alert_rules:
+            if rule.get("id") != rule_id:
+                continue
+            updates = request.model_dump(exclude_unset=True)
+            for key, value in updates.items():
+                rule[key] = value
+            rule["updated_at"] = datetime.now(timezone.utc).isoformat()
+            rule["updated_by"] = actor
+            self._save_alert_rules()
+            self._record_timeline(
+                "alert_rule_update",
+                f"Updated alert rule {rule.get('name') or 'rule'}.",
+                actor=actor,
+                details={"rule_id": rule_id},
+            )
+            return {"ok": True, "item": rule, "items": self.alert_rules_snapshot()}
+        raise ValueError(f"Unknown alert rule: {rule_id}")
+
+    async def remove_alert_rule(self, rule_id: str, actor: str = "dashboard") -> dict[str, Any]:
+        for index, rule in enumerate(self._alert_rules):
+            if rule.get("id") != rule_id:
+                continue
+            removed = self._alert_rules.pop(index)
+            self._save_alert_rules()
+            self._record_timeline("alert_rule_remove", f"Removed alert rule {removed.get('name') or 'rule'}.", actor=actor, severity="warning")
+            return {"ok": True, "removed": removed, "items": self.alert_rules_snapshot()}
+        raise ValueError(f"Unknown alert rule: {rule_id}")
+
+    async def _queue_worker(self) -> None:
+        while True:
+            try:
+                await asyncio.sleep(5)
+                if self.client is None or not self.client.connected:
+                    continue
+                if self._job_busy():
+                    continue
+                due_item = self._queue_due_item()
+                if due_item is None:
+                    continue
+
+                due_item["last_attempt_at"] = datetime.now(timezone.utc).isoformat()
+                self._save_queue()
+                request = OrderworksPrintJobRequest(**{k: v for k, v in due_item.items() if k in OrderworksPrintJobRequest.model_fields})
+                result = await self.start_orderworks_print_job(request, actor=f"queue:{due_item.get('actor') or 'system'}")
+                if result.get("submitted"):
+                    self._queue_items = [item for item in self._queue_items if item.get("id") != due_item.get("id")]
+                    self._save_queue()
+                    self._record_timeline(
+                        "queue_submit",
+                        f"Queued job started for {Path(request.file_path).name}.",
+                        actor="scheduler",
+                        details={"queue_item_id": due_item.get("id"), "file_path": request.file_path},
+                    )
+                else:
+                    self._record_timeline(
+                        "queue_submit_failed",
+                        f"Queued job failed to submit for {Path(request.file_path).name}.",
+                        actor="scheduler",
+                        severity="error",
+                        details={"queue_item_id": due_item.get("id"), "file_path": request.file_path},
+                    )
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                self.last_error = str(exc)
+                self._record_timeline("queue_worker_error", f"Queue worker error: {exc}", severity="error", actor="system")
 
     def _serialize_ams(self, device: Any) -> dict[str, Any]:
         ams = getattr(device, "ams", None)
@@ -852,12 +1325,19 @@ class PrinterService:
 
     async def state(self) -> dict[str, Any]:
         async with self._lock:
+            queue = self.queue_snapshot()
+            self._ensure_default_alert_rules()
             base = {
                 "configured": self.configured,
                 "connected": bool(self.client and self.client.connected),
                 "last_event": self.last_event,
                 "last_update_utc": self.last_update_utc,
                 "last_error": self.last_error,
+                "queue": queue,
+                "timeline": self.timeline_snapshot()[:8],
+                "control_presets": self.presets_snapshot(),
+                "alert_rules": self.alert_rules_snapshot(),
+                "active_alerts": [],
             }
 
             if self.client is None:
@@ -868,6 +1348,12 @@ class PrinterService:
                 info = device.info
                 job = device.print_job
                 temp = device.temperature
+                alerts = self._evaluate_alert_rules(
+                    connected=base["connected"],
+                    chamber_temp=temp.chamber_temp,
+                    print_error=device.print_error.error,
+                    queue_count=queue["count"],
+                )
                 return {
                     **base,
                     "printer": {
@@ -905,6 +1391,21 @@ class PrinterService:
                         "hms": device.hms.errors,
                     },
                     "ams": self._serialize_ams(device),
+                    "active_alerts": alerts,
+                    "health": {
+                        "score": max(
+                            0,
+                            min(
+                                100,
+                                100
+                                - (0 if base["connected"] else 45)
+                                - (25 if device.print_error.error else 0)
+                                - min(queue["count"], 5) * 4
+                                - (12 if self.last_error else 0),
+                            ),
+                        ),
+                        "queue_backlog": queue["count"],
+                    },
                 }
             except Exception as exc:
                 self.last_error = str(exc)
@@ -1090,6 +1591,15 @@ def _parse_basic_auth(authorization: str | None) -> tuple[str, str] | None:
     return username, password
 
 
+def _actor_from_request(request: Request) -> str:
+    credentials = _parse_basic_auth(request.headers.get("authorization"))
+    if credentials is not None:
+        username, _password = credentials
+        if username.strip():
+            return username.strip()
+    return "dashboard"
+
+
 @app.middleware("http")
 async def admin_auth_middleware(request: Request, call_next):
     if not ADMIN_PASSWORD:
@@ -1153,7 +1663,7 @@ def _render_gallery_html() -> str:
     .install-btn[hidden] { display:none !important; }
     .status { min-height:20px; margin:0 0 14px; font-size:13px; color:#3a5977; }
     .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:16px; }
-    .card { background:rgba(255,255,255,.66); border:1px solid rgba(255,255,255,.75); border-radius:16px; padding:14px; box-shadow:0 10px 30px rgba(42,90,138,.16); backdrop-filter:blur(12px); }
+    .card { position:relative; background:rgba(255,255,255,.66); border:1px solid rgba(255,255,255,.75); border-radius:16px; padding:14px; box-shadow:0 10px 30px rgba(42,90,138,.16); backdrop-filter:blur(12px); }
     .card-link { text-decoration:none; color:inherit; display:block; }
     .card:hover { transform:translateY(-2px); transition:all .14s ease; }
     .name-row { margin-top:8px; display:flex; align-items:center; gap:8px; }
@@ -1163,8 +1673,31 @@ def _render_gallery_html() -> str:
     .ok { background:#e5f7ee; color:#2f8b56; }
     .bad { background:#fdeceb; color:#a0413b; }
     .printer-art { width:100%; height:150px; object-fit:contain; background:rgba(255,255,255,.72); border-radius:12px; display:block; }
-    .rename-icon { border:0; background:transparent; color:#3e6387; cursor:pointer; font-size:13px; line-height:1; padding:0; opacity:.86; text-decoration:underline; }
-    .rename-icon:hover { opacity:1; }
+    .card-actions { position:absolute; top:12px; right:12px; }
+    .menu-btn {
+      border:1px solid rgba(193,214,236,.9); background:rgba(255,255,255,.92); color:#2f4f6d; cursor:pointer;
+      width:34px; height:34px; border-radius:999px; font-size:18px; line-height:1; box-shadow:0 6px 16px rgba(36,69,99,.12);
+    }
+    .card-menu {
+      position:absolute; top:42px; right:0; min-width:132px; display:none; background:#fff;
+      border:1px solid #d4e1ef; border-radius:12px; padding:6px; box-shadow:0 16px 34px rgba(22,54,86,.18);
+    }
+    .card-menu.open { display:block; }
+    .menu-item {
+      width:100%; border:0; background:transparent; color:#2a4b68; text-align:left; cursor:pointer;
+      border-radius:8px; padding:8px 10px; font-size:13px; font-weight:600;
+    }
+    .menu-item:hover { background:#eef5fc; }
+    .dialog-backdrop {
+      position:fixed; inset:0; background:rgba(18,34,52,.36); display:none; align-items:center; justify-content:center; z-index:60; padding:16px;
+    }
+    .dialog-backdrop.open { display:flex; }
+    .dialog {
+      width:min(420px, 100%); background:#fff; border:1px solid #d4e1ef; border-radius:16px; padding:16px;
+      box-shadow:0 24px 46px rgba(22,54,86,.24);
+    }
+    .dialog h3 { margin:0 0 10px; font-size:19px; }
+    .dialog p { margin:0 0 12px; color:#58718b; font-size:13px; }
     .hamburger {
       border:0; border-radius:10px; background:#1f4f7b; color:#fff; cursor:pointer;
       width:42px; height:34px; display:grid; place-items:center; box-shadow:0 8px 22px rgba(22,54,86,.34);
@@ -1279,16 +1812,35 @@ def _render_gallery_html() -> str:
     <div id="status" class="status"></div>
     <div id="cards" class="grid"></div>
   </div>
+  <div id="renameDialog" class="dialog-backdrop" aria-hidden="true">
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="renameTitle">
+      <h3 id="renameTitle">Rename Printer</h3>
+      <p>Update the label shown on the printer gallery and dashboard.</p>
+      <div class="field">
+        <label for="renameInput">Printer Name</label>
+        <input id="renameInput" maxlength="64" autocomplete="off">
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" type="button" id="renameSaveBtn">Save</button>
+        <button class="btn btn-light" type="button" id="renameCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
   <script>
     const sidebar = document.getElementById('sidebar');
     const sidebarToggle = document.getElementById('sidebarToggle');
     const closeSidebar = document.getElementById('closeSidebar');
     const collapseSidebar = document.getElementById('collapseSidebar');
     const addPrinterForm = document.getElementById('addPrinterForm');
+    const renameDialog = document.getElementById('renameDialog');
+    const renameInput = document.getElementById('renameInput');
+    const renameSaveBtn = document.getElementById('renameSaveBtn');
+    const renameCancelBtn = document.getElementById('renameCancelBtn');
     const tabs = Array.from(document.querySelectorAll('.sidebar-tab'));
     const panels = Array.from(document.querySelectorAll('.tab-panel'));
     const statusEl = document.getElementById('status');
     let deferredInstallPrompt = null;
+    let renameTarget = null;
 
     function setStatus(message, isError = false) {
       statusEl.textContent = message || '';
@@ -1299,12 +1851,53 @@ def _render_gallery_html() -> str:
       sidebar.classList.remove('open');
     }
 
+    function openRenameDialog(printerId, currentName) {
+      renameTarget = printerId;
+      renameInput.value = currentName || '';
+      renameDialog.classList.add('open');
+      renameDialog.setAttribute('aria-hidden', 'false');
+      window.setTimeout(() => renameInput.focus(), 0);
+    }
+
+    function closeRenameDialog() {
+      renameDialog.classList.remove('open');
+      renameDialog.setAttribute('aria-hidden', 'true');
+      renameTarget = null;
+    }
+
     sidebarToggle.addEventListener('click', () => {
       if (sidebar.classList.contains('open')) closeSidebarPanel();
       else sidebar.classList.add('open');
     });
     closeSidebar.addEventListener('click', closeSidebarPanel);
     collapseSidebar.addEventListener('click', closeSidebarPanel);
+    renameCancelBtn.addEventListener('click', closeRenameDialog);
+    renameDialog.addEventListener('click', (event) => {
+      if (event.target === renameDialog) closeRenameDialog();
+    });
+    renameSaveBtn.addEventListener('click', async () => {
+      if (!renameTarget) return;
+      const next = renameInput.value.trim();
+      if (!next) return;
+      const res = await fetch(`/api/printers/${encodeURIComponent(renameTarget)}/name`, {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({name: next})
+      });
+      if (res.ok) {
+        setStatus(`Renamed printer: ${next}`);
+        closeRenameDialog();
+        loadPrinters();
+      } else {
+        const txt = await res.text();
+        setStatus(`Rename failed: ${txt}`, true);
+      }
+    });
+    document.addEventListener('click', (event) => {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest('.card-actions')) return;
+      document.querySelectorAll('.card-menu.open').forEach((menu) => menu.classList.remove('open'));
+    });
 
     tabs.forEach((tab) => {
       tab.addEventListener('click', () => {
@@ -1424,11 +2017,17 @@ def _render_gallery_html() -> str:
           const ok = p.connected ? 'ok' : 'bad';
           const label = p.connected ? 'Connected' : 'Disconnected';
           return `<article class="card">
+            <div class="card-actions">
+              <button type="button" class="menu-btn" data-menu-id="${p.id}" aria-label="Open printer actions">...</button>
+              <div class="card-menu" data-menu-panel="${p.id}">
+                <button type="button" class="menu-item menu-open" data-id="${p.id}">Open</button>
+                <button type="button" class="menu-item menu-rename" data-id="${p.id}" data-name="${(p.name || p.id).replace(/"/g, '&quot;')}">Rename</button>
+              </div>
+            </div>
             <a class="card-link" href="/printer/${encodeURIComponent(p.id)}">
               ${printerSvg()}
               <div class="name-row">
                 <div class="name">${p.name || p.id}</div>
-                <button type="button" class="rename-icon" data-id="${p.id}" data-name="${(p.name || p.id).replace(/"/g, '&quot;')}" title="Rename printer">Edit</button>
               </div>
               <div class="meta">Serial: ${p.serial || '-'}</div>
               <span class="badge ${ok}">${label}</span>
@@ -1436,26 +2035,36 @@ def _render_gallery_html() -> str:
           </article>`;
         }).join('');
 
-        document.querySelectorAll('.rename-icon').forEach((btn) => {
+        document.querySelectorAll('.menu-btn').forEach((btn) => {
+          btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const targetId = btn.getAttribute('data-menu-id');
+            document.querySelectorAll('.card-menu.open').forEach((menu) => {
+              if (menu.getAttribute('data-menu-panel') !== targetId) menu.classList.remove('open');
+            });
+            const panel = document.querySelector(`.card-menu[data-menu-panel="${targetId}"]`);
+            if (panel) panel.classList.toggle('open');
+          });
+        });
+
+        document.querySelectorAll('.menu-open').forEach((btn) => {
+          btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const id = btn.getAttribute('data-id');
+            if (id) window.location.href = `/printer/${encodeURIComponent(id)}`;
+          });
+        });
+
+        document.querySelectorAll('.menu-rename').forEach((btn) => {
           btn.addEventListener('click', async (event) => {
             event.preventDefault();
             event.stopPropagation();
             const id = btn.getAttribute('data-id');
             const current = btn.getAttribute('data-name') || '';
-            const next = prompt('Printer name', current);
-            if (!next || !next.trim()) return;
-            const res = await fetch(`/api/printers/${encodeURIComponent(id)}/name`, {
-              method: 'POST',
-              headers: {'content-type': 'application/json'},
-              body: JSON.stringify({name: next.trim()})
-            });
-            if (res.ok) {
-              setStatus(`Renamed printer: ${next.trim()}`);
-              loadPrinters();
-            } else {
-              const txt = await res.text();
-              setStatus(`Rename failed: ${txt}`, true);
-            }
+            document.querySelectorAll('.card-menu.open').forEach((menu) => menu.classList.remove('open'));
+            openRenameDialog(id, current);
           });
         });
       } catch (err) {
@@ -1609,9 +2218,193 @@ async def works_request(service_name: str, request: WorksRequest, printer_id: st
 
 
 @app.post("/api/works/orderworks/print-job")
-async def orderworks_print_job(request: OrderworksPrintJobRequest, printer_id: str | None = None) -> dict[str, Any]:
+async def orderworks_print_job(request: Request, payload: OrderworksPrintJobRequest, printer_id: str | None = None) -> dict[str, Any]:
     try:
-        return await _service_or_404(printer_id).start_orderworks_print_job(request)
+        return await _service_or_404(printer_id).start_orderworks_print_job(payload, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/queue")
+async def queue_snapshot() -> dict[str, Any]:
+    return _service_or_404().queue_snapshot()
+
+
+@app.get("/api/printers/{printer_id}/queue")
+async def queue_snapshot_by_printer(printer_id: str) -> dict[str, Any]:
+    return _service_or_404(printer_id).queue_snapshot()
+
+
+@app.post("/api/queue")
+async def queue_print_job(request: Request, payload: QueuePrintJobRequest) -> dict[str, Any]:
+    try:
+        return await _service_or_404().queue_print_job(payload, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/printers/{printer_id}/queue")
+async def queue_print_job_by_printer(printer_id: str, request: Request, payload: QueuePrintJobRequest) -> dict[str, Any]:
+    try:
+        return await _service_or_404(printer_id).queue_print_job(payload, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/api/queue/{item_id}")
+async def update_queue(item_id: str, request: Request, payload: QueueUpdateRequest) -> dict[str, Any]:
+    try:
+        return await _service_or_404().update_queue_item(item_id, payload, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/queue/{item_id}/reorder")
+async def reorder_queue(item_id: str, request: Request, payload: QueueReorderRequest) -> dict[str, Any]:
+    try:
+        return await _service_or_404().reorder_queue_item(item_id, payload.direction, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/api/printers/{printer_id}/queue/{item_id}")
+async def update_queue_by_printer(printer_id: str, item_id: str, request: Request, payload: QueueUpdateRequest) -> dict[str, Any]:
+    try:
+        return await _service_or_404(printer_id).update_queue_item(item_id, payload, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/printers/{printer_id}/queue/{item_id}/reorder")
+async def reorder_queue_by_printer(printer_id: str, item_id: str, request: Request, payload: QueueReorderRequest) -> dict[str, Any]:
+    try:
+        return await _service_or_404(printer_id).reorder_queue_item(item_id, payload.direction, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/queue/{item_id}")
+async def remove_queue(item_id: str, request: Request) -> dict[str, Any]:
+    try:
+        return await _service_or_404().remove_queue_item(item_id, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/printers/{printer_id}/queue/{item_id}")
+async def remove_queue_by_printer(printer_id: str, item_id: str, request: Request) -> dict[str, Any]:
+    try:
+        return await _service_or_404(printer_id).remove_queue_item(item_id, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/timeline")
+async def timeline_snapshot() -> dict[str, Any]:
+    return {"items": _service_or_404().timeline_snapshot()}
+
+
+@app.get("/api/printers/{printer_id}/timeline")
+async def timeline_snapshot_by_printer(printer_id: str) -> dict[str, Any]:
+    return {"items": _service_or_404(printer_id).timeline_snapshot()}
+
+
+@app.get("/api/control-presets")
+async def control_presets() -> dict[str, Any]:
+    return {"items": _service_or_404().presets_snapshot()}
+
+
+@app.get("/api/printers/{printer_id}/control-presets")
+async def control_presets_by_printer(printer_id: str) -> dict[str, Any]:
+    return {"items": _service_or_404(printer_id).presets_snapshot()}
+
+
+@app.post("/api/control-presets")
+async def save_control_preset(request: Request, payload: ControlPresetRequest) -> dict[str, Any]:
+    try:
+        return await _service_or_404().save_control_preset(payload, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/printers/{printer_id}/control-presets")
+async def save_control_preset_by_printer(printer_id: str, request: Request, payload: ControlPresetRequest) -> dict[str, Any]:
+    try:
+        return await _service_or_404(printer_id).save_control_preset(payload, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/control-presets/{preset_id}")
+async def remove_control_preset(preset_id: str, request: Request) -> dict[str, Any]:
+    try:
+        return await _service_or_404().remove_control_preset(preset_id, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/printers/{printer_id}/control-presets/{preset_id}")
+async def remove_control_preset_by_printer(printer_id: str, preset_id: str, request: Request) -> dict[str, Any]:
+    try:
+        return await _service_or_404(printer_id).remove_control_preset(preset_id, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/alert-rules")
+async def alert_rules() -> dict[str, Any]:
+    return {"items": _service_or_404().alert_rules_snapshot()}
+
+
+@app.get("/api/printers/{printer_id}/alert-rules")
+async def alert_rules_by_printer(printer_id: str) -> dict[str, Any]:
+    return {"items": _service_or_404(printer_id).alert_rules_snapshot()}
+
+
+@app.post("/api/alert-rules")
+async def save_alert_rule(request: Request, payload: AlertRuleRequest) -> dict[str, Any]:
+    try:
+        return await _service_or_404().save_alert_rule(payload, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/api/alert-rules/{rule_id}")
+async def update_alert_rule(rule_id: str, request: Request, payload: AlertRuleUpdateRequest) -> dict[str, Any]:
+    try:
+        return await _service_or_404().update_alert_rule(rule_id, payload, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/printers/{printer_id}/alert-rules")
+async def save_alert_rule_by_printer(printer_id: str, request: Request, payload: AlertRuleRequest) -> dict[str, Any]:
+    try:
+        return await _service_or_404(printer_id).save_alert_rule(payload, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/api/printers/{printer_id}/alert-rules/{rule_id}")
+async def update_alert_rule_by_printer(printer_id: str, rule_id: str, request: Request, payload: AlertRuleUpdateRequest) -> dict[str, Any]:
+    try:
+        return await _service_or_404(printer_id).update_alert_rule(rule_id, payload, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/alert-rules/{rule_id}")
+async def remove_alert_rule(rule_id: str, request: Request) -> dict[str, Any]:
+    try:
+        return await _service_or_404().remove_alert_rule(rule_id, actor=_actor_from_request(request))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/printers/{printer_id}/alert-rules/{rule_id}")
+async def remove_alert_rule_by_printer(printer_id: str, rule_id: str, request: Request) -> dict[str, Any]:
+    try:
+        return await _service_or_404(printer_id).remove_alert_rule(rule_id, actor=_actor_from_request(request))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1893,36 +2686,36 @@ async def refresh() -> dict[str, bool]:
 
 
 @app.post("/api/actions/chamber-light")
-async def chamber_light(request: ChamberLightRequest) -> dict[str, bool]:
+async def chamber_light(request: Request, payload: ChamberLightRequest) -> dict[str, bool]:
     try:
-        await _service_or_404().set_chamber_light(request.on)
+        await _service_or_404().set_chamber_light(payload.on, actor=_actor_from_request(request))
         return {"ok": True}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/actions/temperature")
-async def temperature(request: TemperatureRequest) -> dict[str, bool]:
+async def temperature(request: Request, payload: TemperatureRequest) -> dict[str, bool]:
     try:
-        await _service_or_404().set_temperature(request)
+        await _service_or_404().set_temperature(payload, actor=_actor_from_request(request))
         return {"ok": True}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/actions/fan")
-async def fan(request: FanRequest) -> dict[str, bool]:
+async def fan(request: Request, payload: FanRequest) -> dict[str, bool]:
     try:
-        await _service_or_404().set_fan(request)
+        await _service_or_404().set_fan(payload, actor=_actor_from_request(request))
         return {"ok": True}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/actions/{action}")
-async def action(action: str) -> dict[str, bool]:
+async def action(request: Request, action: str) -> dict[str, bool]:
     try:
-        ok = await _service_or_404().action(action)
+        ok = await _service_or_404().action(action, actor=_actor_from_request(request))
         return {"ok": ok}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1938,36 +2731,36 @@ async def refresh_by_printer(printer_id: str) -> dict[str, bool]:
 
 
 @app.post("/api/printers/{printer_id}/actions/chamber-light")
-async def chamber_light_by_printer(printer_id: str, request: ChamberLightRequest) -> dict[str, bool]:
+async def chamber_light_by_printer(printer_id: str, request: Request, payload: ChamberLightRequest) -> dict[str, bool]:
     try:
-        await _service_or_404(printer_id).set_chamber_light(request.on)
+        await _service_or_404(printer_id).set_chamber_light(payload.on, actor=_actor_from_request(request))
         return {"ok": True}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/printers/{printer_id}/actions/temperature")
-async def temperature_by_printer(printer_id: str, request: TemperatureRequest) -> dict[str, bool]:
+async def temperature_by_printer(printer_id: str, request: Request, payload: TemperatureRequest) -> dict[str, bool]:
     try:
-        await _service_or_404(printer_id).set_temperature(request)
+        await _service_or_404(printer_id).set_temperature(payload, actor=_actor_from_request(request))
         return {"ok": True}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/printers/{printer_id}/actions/fan")
-async def fan_by_printer(printer_id: str, request: FanRequest) -> dict[str, bool]:
+async def fan_by_printer(printer_id: str, request: Request, payload: FanRequest) -> dict[str, bool]:
     try:
-        await _service_or_404(printer_id).set_fan(request)
+        await _service_or_404(printer_id).set_fan(payload, actor=_actor_from_request(request))
         return {"ok": True}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/printers/{printer_id}/actions/{action}")
-async def action_by_printer(printer_id: str, action: str) -> dict[str, bool]:
+async def action_by_printer(printer_id: str, request: Request, action: str) -> dict[str, bool]:
     try:
-        ok = await _service_or_404(printer_id).action(action)
+        ok = await _service_or_404(printer_id).action(action, actor=_actor_from_request(request))
         return {"ok": ok}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
