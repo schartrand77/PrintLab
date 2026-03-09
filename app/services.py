@@ -154,6 +154,17 @@ class AddPrinterRequest(BaseModel):
     disable_ssl_verify: bool = False
 
 
+class UpdatePrinterRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    host: str = Field(min_length=1, max_length=255)
+    serial: str = Field(min_length=1, max_length=128)
+    access_code: str = Field(min_length=1, max_length=128)
+    device_type: str = Field(default="unknown", max_length=64)
+    local_mqtt: bool = True
+    enable_camera: bool = True
+    disable_ssl_verify: bool = False
+
+
 class WorksRequest(BaseModel):
     method: str = Field(pattern="^(GET|POST|PUT|PATCH|DELETE)$")
     path: str = Field(default="/")
@@ -1860,6 +1871,8 @@ class MultiPrinterManager:
             {
                 "id": service.printer_id,
                 "name": service.display_name,
+                "is_added": service.printer_id in self._added_printers,
+                "config": dict(service._configured_settings),
             }
             for service in self._services.values()
         ]
@@ -1969,6 +1982,51 @@ class MultiPrinterManager:
         service = self.get(requested_id)
         await service.start()
         return {"id": service.printer_id, "name": service.display_name}
+
+    async def update(self, printer_id: str, request: UpdatePrinterRequest) -> dict[str, str]:
+        if printer_id not in self._added_printers:
+            raise ValueError("Only printers added from this app can be edited.")
+
+        existing = self.get(printer_id)
+        config = {
+            **build_default_printer_config(),
+            "name": request.name.strip(),
+            "host": request.host.strip(),
+            "serial": request.serial.strip(),
+            "access_code": request.access_code.strip(),
+            "device_type": request.device_type.strip() or "unknown",
+            "local_mqtt": request.local_mqtt,
+            "enable_camera": request.enable_camera,
+            "disable_ssl_verify": request.disable_ssl_verify,
+        }
+        entry = {"id": printer_id, "name": request.name.strip(), "config": config}
+
+        await existing.stop()
+        replacement = PrinterService(config=config, printer_id=printer_id, display_name=request.name.strip())
+        self._services[printer_id] = replacement
+        self._added_printers[printer_id] = entry
+        self._name_overrides[printer_id] = request.name.strip()
+        self._save_added_printers()
+        self._save_name_overrides()
+        await replacement.start()
+        return {"id": replacement.printer_id, "name": replacement.display_name}
+
+    async def remove(self, printer_id: str) -> dict[str, Any]:
+        if printer_id not in self._added_printers:
+            raise ValueError("Only printers added from this app can be deleted.")
+        if len(self._services) <= 1:
+            raise ValueError("At least one printer must remain configured.")
+
+        service = self.get(printer_id)
+        await service.stop()
+        self._services.pop(printer_id, None)
+        self._added_printers.pop(printer_id, None)
+        self._name_overrides.pop(printer_id, None)
+        if self._default_id == printer_id:
+            self._default_id = next(iter(self._services), None)
+        self._save_added_printers()
+        self._save_name_overrides()
+        return {"ok": True, "id": printer_id}
 
     async def start(self) -> None:
         for service in self._services.values():

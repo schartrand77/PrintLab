@@ -23,6 +23,7 @@ from app.services import (
     QueueUpdateRequest,
     SuccessfulGcodeSyncRequest,
     TemperatureRequest,
+    UpdatePrinterRequest,
     WorksRequest,
 )
 
@@ -55,6 +56,18 @@ async def list_printers() -> dict[str, Any]:
                 "serial": (state.get("printer") or {}).get("serial"),
                 "device_type": (state.get("printer") or {}).get("device_type"),
                 "last_error": state.get("last_error"),
+                "can_edit": bool(entry.get("is_added")),
+                "can_delete": bool(entry.get("is_added")) and entry["id"] != printer_manager.default_id,
+                "settings": {
+                    "name": entry["name"],
+                    "host": (entry.get("config") or {}).get("host", ""),
+                    "serial": (entry.get("config") or {}).get("serial", ""),
+                    "access_code": (entry.get("config") or {}).get("access_code", ""),
+                    "device_type": (entry.get("config") or {}).get("device_type", "unknown"),
+                    "local_mqtt": bool((entry.get("config") or {}).get("local_mqtt", True)),
+                    "enable_camera": bool((entry.get("config") or {}).get("enable_camera", True)),
+                    "disable_ssl_verify": bool((entry.get("config") or {}).get("disable_ssl_verify", False)),
+                },
             }
         )
     return {"default_id": printer_manager.default_id, "items": items}
@@ -65,6 +78,23 @@ async def add_printer(request: AddPrinterRequest) -> dict[str, Any]:
     try:
         printer = await printer_manager.add(request)
         return {"ok": True, "printer": printer}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.patch("/api/printers/{printer_id}")
+async def update_printer(printer_id: str, request: UpdatePrinterRequest) -> dict[str, Any]:
+    try:
+        printer = await printer_manager.update(printer_id, request)
+        return {"ok": True, "printer": printer}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/api/printers/{printer_id}")
+async def delete_printer(printer_id: str) -> dict[str, Any]:
+    try:
+        return await printer_manager.remove(printer_id)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
