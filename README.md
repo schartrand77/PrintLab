@@ -40,6 +40,13 @@ http://localhost:8080
 
 ## API endpoints
 
+Interactive API docs are published at:
+
+- `GET /docs`
+- `GET /redoc`
+- `GET /openapi.json`
+- `GET /openapi.json/export` to persist the current schema to `data/openapi.json`
+
 - `GET /health`
 - `GET /api/printers`
 - `POST /api/printers`
@@ -64,6 +71,10 @@ http://localhost:8080
   with:
   `{"file_path":"/cache/model.3mf","plate_gcode":"Metadata/plate_1.gcode","use_ams":true,"ams_mapping":[0]}`
   (optional query: `?printer_id={printer_id}`)
+- `GET /api/successful-gcodes`
+- `GET /api/printers/{printer_id}/successful-gcodes`
+- `POST /api/successful-gcodes/{record_id}/sync-makerworks`
+- `POST /api/printers/{printer_id}/successful-gcodes/{record_id}/sync-makerworks`
 
 ## Works integration config
 
@@ -77,11 +88,29 @@ Auth behavior:
 - If `*_API_KEY` is set, it is sent as `*_AUTH_HEADER` (default `X-API-Key`).
 - If `*_BEARER_TOKEN` is set, it is sent as `Authorization: Bearer ...`.
 
+Successful G-code tracking:
+- Every completed print that reaches `FINISH` or `COMPLETE` is persisted to `/data/successful_gcodes_{printer_id}.json`.
+- SD-card model listings are enriched with successful G-code counts and latest MakerWorks sync status.
+- Optional automatic MakerWorks attachment can be enabled with:
+  - `MAKERWORKS_ATTACH_GCODE_ENABLED=true`
+  - `MAKERWORKS_ATTACH_GCODE_METHOD=POST`
+  - `MAKERWORKS_ATTACH_GCODE_PATH_TEMPLATE=/models/{model_id}/gcodes`
+- The attachment payload includes printer, model, file, plate, AMS, and completion metadata. `model_id` is inferred from a leading numeric filename prefix such as `20906356-widget_plate_1.3mf`.
+
 Stockworks enrichment:
 - Responses from `GET /api/works/stockworks/health` and `POST /api/works/stockworks/request`
   include `printer_filament` with:
   - `loaded_filament` (active AMS slot/type/color/remaining_percent)
   - `remaining_filament` (all visible AMS slots + remaining percentages)
+
+## Quality and SDK workflow
+
+- Install dev tooling with `pip install -r requirements.txt -r requirements-dev.txt`
+- Run `ruff check app tests scripts`
+- Run `mypy`
+- Run `pytest`
+- Export the schema with `python scripts/export_openapi.py`
+- Optionally generate a typed client with `pwsh scripts/generate_client.ps1`
 
 ## Notes
 

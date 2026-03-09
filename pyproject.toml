@@ -1,0 +1,21 @@
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/services.py" = ["F401"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app/auth.py", "app/main.py", "app/models.py", "app/runtime.py", "app/routers", "scripts/export_openapi.py", "tests"]
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_unused_ignores = true
+disallow_untyped_defs = false

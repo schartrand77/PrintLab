@@ -32,3 +32,5 @@ data/
 Thumbs.db
 .vscode/
 .idea/
+generated-client/
+data/openapi.json
