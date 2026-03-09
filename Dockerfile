@@ -6,7 +6,6 @@ ARG HA_BAMBULAB_REF=main
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/opt
-ENV REQUIRE_AUTH=true
 
 WORKDIR /app
 
@@ -22,7 +21,9 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY app /app/app
+COPY docker/start-printlab.sh /usr/local/bin/start-printlab.sh
+RUN chmod +x /usr/local/bin/start-printlab.sh
 
 EXPOSE 8080
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["/usr/local/bin/start-printlab.sh"]
