@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from app.services import PrinterService, WorksService
@@ -15,6 +17,40 @@ def test_build_url_normalizes_missing_leading_slash() -> None:
     service = WorksService()
     url = service._build_url("https://makerworks.local/", "v1/orders")
     assert url == "https://makerworks.local/v1/orders"
+
+
+def test_request_allowlist_rejects_unlisted_path(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+    monkeypatch.setenv("MAKERWORKS_ALLOWED_PATHS", "/health,/v1/orders")
+    service = WorksService()
+
+    with pytest.raises(ValueError, match="Path is not allowed"):
+        service._ensure_request_allowed(service._get_config("makerworks"), "GET", "/v1/admin")
+
+
+def test_request_allowlist_rejects_unlisted_method(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+    monkeypatch.setenv("MAKERWORKS_ALLOWED_PATHS", "/v1/orders")
+    monkeypatch.setenv("MAKERWORKS_ALLOWED_METHODS", "GET")
+    service = WorksService()
+
+    with pytest.raises(ValueError, match="Method is not allowed"):
+        service._ensure_request_allowed(service._get_config("makerworks"), "POST", "/v1/orders")
+
+
+def test_secret_file_is_used_for_service_api_key(monkeypatch) -> None:
+    secret_file = Path("data/test-makerworks-api-key.txt")
+    secret_file.parent.mkdir(parents=True, exist_ok=True)
+    secret_file.write_text("from-file\n", encoding="utf-8")
+    try:
+        monkeypatch.delenv("MAKERWORKS_API_KEY", raising=False)
+        monkeypatch.setenv("MAKERWORKS_API_KEY_FILE", str(secret_file.resolve()))
+
+        service = WorksService()
+
+        assert service._get_config("makerworks")["api_key"] == "from-file"
+    finally:
+        secret_file.unlink(missing_ok=True)
 
 
 def test_resolve_sd_path_from_filename_only() -> None:

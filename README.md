@@ -10,7 +10,7 @@ This is **not** Home Assistant. It runs as a direct web/API service.
 - Direct MQTT connection to your printer (LAN mode / local MQTT by default).
 - Multi-printer gallery dashboard at `http://localhost:8080`.
 - Printer detail dashboard at `http://localhost:8080/printer/{printer_id}`.
-- Optional admin password protection for all UI/API routes.
+- Required auth by default in container images, with signed cookie sessions for the web UI.
 - REST API for status and control actions.
 - Pause / resume / stop, refresh state, chamber light control, fan and temperature control.
 
@@ -19,9 +19,11 @@ This is **not** Home Assistant. It runs as a direct web/API service.
 1. Copy `.env.example` to `.env` and fill in either:
    - single-printer `PRINTER_HOST` / `PRINTER_SERIAL` / `PRINTER_ACCESS_CODE`
    - or `PRINTERS_JSON` with multiple printers
-2. Set admin credentials (recommended):
+2. Set admin credentials:
+   - `REQUIRE_AUTH=true` is the image default and startup fails if credentials are missing
    - `ADMIN_USERNAME` (default: `admin`)
-   - `ADMIN_PASSWORD` (if empty, auth is disabled)
+   - `ADMIN_PASSWORD`
+   - optional `SESSION_SECRET` to override the cookie signing secret
 3. If using single-printer mode, fill in:
    - `PRINTER_HOST`
    - `PRINTER_SERIAL`
@@ -46,6 +48,10 @@ Interactive API docs are published at:
 - `GET /redoc`
 - `GET /openapi.json`
 - `GET /openapi.json/export` to persist the current schema to `data/openapi.json`
+- `GET /login`
+- `POST /auth/login`
+- `POST /auth/logout`
+- `GET /auth/session`
 
 - `GET /health`
 - `GET /api/printers`
@@ -80,13 +86,18 @@ Interactive API docs are published at:
 
 Configure each external system in `.env`:
 
-- `MAKERWORKS_BASE_URL`, `MAKERWORKS_API_KEY`, `MAKERWORKS_BEARER_TOKEN`, `MAKERWORKS_AUTH_HEADER`, `MAKERWORKS_VERIFY_SSL`
-- `ORDERWORKS_BASE_URL`, `ORDERWORKS_API_KEY`, `ORDERWORKS_BEARER_TOKEN`, `ORDERWORKS_AUTH_HEADER`, `ORDERWORKS_VERIFY_SSL`
-- `STOCKWORKS_BASE_URL`, `STOCKWORKS_API_KEY`, `STOCKWORKS_BEARER_TOKEN`, `STOCKWORKS_AUTH_HEADER`, `STOCKWORKS_VERIFY_SSL`
+- `MAKERWORKS_BASE_URL`, `MAKERWORKS_API_KEY`, `MAKERWORKS_BEARER_TOKEN`, `MAKERWORKS_AUTH_HEADER`, `MAKERWORKS_VERIFY_SSL`, `MAKERWORKS_ALLOWED_PATHS`, `MAKERWORKS_ALLOWED_METHODS`
+- `ORDERWORKS_BASE_URL`, `ORDERWORKS_API_KEY`, `ORDERWORKS_BEARER_TOKEN`, `ORDERWORKS_AUTH_HEADER`, `ORDERWORKS_VERIFY_SSL`, `ORDERWORKS_ALLOWED_PATHS`, `ORDERWORKS_ALLOWED_METHODS`
+- `STOCKWORKS_BASE_URL`, `STOCKWORKS_API_KEY`, `STOCKWORKS_BEARER_TOKEN`, `STOCKWORKS_AUTH_HEADER`, `STOCKWORKS_VERIFY_SSL`, `STOCKWORKS_ALLOWED_PATHS`, `STOCKWORKS_ALLOWED_METHODS`
 
 Auth behavior:
+- Browser UI auth uses `POST /auth/login`, an HttpOnly signed session cookie, a non-HttpOnly CSRF cookie, and `X-CSRF-Token` on mutating requests.
+- Basic Auth still works for API clients.
 - If `*_API_KEY` is set, it is sent as `*_AUTH_HEADER` (default `X-API-Key`).
 - If `*_BEARER_TOKEN` is set, it is sent as `Authorization: Bearer ...`.
+- `*_ALLOWED_PATHS` is a comma-separated prefix allowlist. Requests outside the list are rejected.
+- `*_ALLOWED_METHODS` is optional. If set, only those methods are proxied.
+- All env vars also support Docker-style file-based secrets via `*_FILE`.
 
 Successful G-code tracking:
 - Every completed print that reaches `FINISH` or `COMPLETE` is persisted to `/data/successful_gcodes_{printer_id}.json`.

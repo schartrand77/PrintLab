@@ -139,6 +139,24 @@ def render_gallery_html() -> str:
     const sidebar = document.getElementById('sidebar');
     const sidebarBackdrop = document.getElementById('sidebarBackdrop');
     const themeStorageKey = 'printlab-theme';
+    const nativeFetch = window.fetch.bind(window);
+
+    function readCookie(name) {
+      const prefix = `${name}=`;
+      return document.cookie.split(';').map((item) => item.trim()).find((item) => item.startsWith(prefix))?.slice(prefix.length) || '';
+    }
+
+    window.fetch = function(input, init = {}) {
+      const next = { ...init, credentials: 'same-origin' };
+      const method = String(next.method || 'GET').toUpperCase();
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        const headers = new Headers(next.headers || {});
+        const csrf = readCookie('printlab_csrf');
+        if (csrf && !headers.has('X-CSRF-Token')) headers.set('X-CSRF-Token', csrf);
+        next.headers = headers;
+      }
+      return nativeFetch(input, next);
+    };
 
     function applyTheme(theme) {
       const nextTheme = theme === 'dark' ? 'dark' : 'light';
@@ -411,6 +429,24 @@ def render_add_printer_html() -> str:
     const printerList = document.getElementById('printerList');
     const themeStorageKey = 'printlab-theme';
     let printersById = {};
+    const nativeFetch = window.fetch.bind(window);
+
+    function readCookie(name) {
+      const prefix = `${name}=`;
+      return document.cookie.split(';').map((item) => item.trim()).find((item) => item.startsWith(prefix))?.slice(prefix.length) || '';
+    }
+
+    window.fetch = function(input, init = {}) {
+      const next = { ...init, credentials: 'same-origin' };
+      const method = String(next.method || 'GET').toUpperCase();
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        const headers = new Headers(next.headers || {});
+        const csrf = readCookie('printlab_csrf');
+        if (csrf && !headers.has('X-CSRF-Token')) headers.set('X-CSRF-Token', csrf);
+        next.headers = headers;
+      }
+      return nativeFetch(input, next);
+    };
 
     function applyTheme(theme) {
       const nextTheme = theme === 'dark' ? 'dark' : 'light';

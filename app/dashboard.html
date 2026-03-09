@@ -1220,6 +1220,25 @@
   <script>
     const PRINTER_ID = window.PRINTER_ID || "printer-1";
     const API_BASE = `/api/printers/${encodeURIComponent(PRINTER_ID)}`;
+    const nativeFetch = window.fetch.bind(window);
+
+    function readCookie(name) {
+      const prefix = `${name}=`;
+      return document.cookie.split(";").map((item) => item.trim()).find((item) => item.startsWith(prefix))?.slice(prefix.length) || "";
+    }
+
+    window.fetch = function(input, init = {}) {
+      const next = { ...init, credentials: "same-origin" };
+      const method = String(next.method || "GET").toUpperCase();
+      if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+        const headers = new Headers(next.headers || {});
+        const csrf = readCookie("printlab_csrf");
+        if (csrf && !headers.has("X-CSRF-Token")) headers.set("X-CSRF-Token", csrf);
+        next.headers = headers;
+      }
+      return nativeFetch(input, next);
+    };
+
     function apiPath(path) {
       if (!path) return API_BASE;
       if (path.startsWith("http://") || path.startsWith("https://")) return path;

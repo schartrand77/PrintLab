@@ -23,6 +23,8 @@ from zipfile import ZipFile
 import requests
 from pydantic import BaseModel, Field
 
+from app.config import get_bool, get_env
+
 try:
     from pybambu import BambuClient
     from pybambu.commands import PAUSE, PRINT_PROJECT_FILE_TEMPLATE, RESUME, STOP
@@ -47,17 +49,11 @@ except ImportError:  # pragma: no cover - exercised only in test/dev environment
 
 
 LOGGER = logging.getLogger("printlab")
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
-if ADMIN_PASSWORD:
-    LOGGER.info("Admin password protection enabled.")
-else:
-    LOGGER.warning("Admin password protection is disabled (ADMIN_PASSWORD not set).")
+logging.basicConfig(level=get_env("LOG_LEVEL", "INFO").upper())
 
 
 def data_root() -> Path:
-    configured = os.getenv("PRINTLAB_DATA_DIR", "").strip()
+    configured = get_env("PRINTLAB_DATA_DIR", "")
     if configured:
         return Path(configured)
     default = Path("/data")
@@ -67,37 +63,34 @@ def data_root() -> Path:
 
 
 def parse_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    return get_bool(name, default)
 
 
 def build_default_printer_config() -> dict[str, Any]:
     return {
-        "name": os.getenv("PRINTER_NAME", "").strip(),
-        "host": os.getenv("PRINTER_HOST", "").strip(),
-        "serial": os.getenv("PRINTER_SERIAL", "").strip(),
-        "access_code": os.getenv("PRINTER_ACCESS_CODE", "").strip(),
-        "device_type": os.getenv("PRINTER_DEVICE_TYPE", "unknown"),
+        "name": get_env("PRINTER_NAME", ""),
+        "host": get_env("PRINTER_HOST", ""),
+        "serial": get_env("PRINTER_SERIAL", ""),
+        "access_code": get_env("PRINTER_ACCESS_CODE", ""),
+        "device_type": get_env("PRINTER_DEVICE_TYPE", "unknown"),
         "local_mqtt": parse_bool("PRINTER_LOCAL_MQTT", True),
         "enable_camera": parse_bool("PRINTER_ENABLE_CAMERA", True),
         "disable_ssl_verify": parse_bool("PRINTER_DISABLE_SSL_VERIFY", False),
-        "user_language": os.getenv("USER_LANGUAGE", "en"),
-        "file_cache_path": os.getenv("FILE_CACHE_PATH", "/data/cache"),
-        "print_cache_count": int(os.getenv("PRINT_CACHE_COUNT", "1")),
-        "timelapse_cache_count": int(os.getenv("TIMELAPSE_CACHE_COUNT", "0")),
-        "usage_hours": float(os.getenv("USAGE_HOURS", "0")),
+        "user_language": get_env("USER_LANGUAGE", "en"),
+        "file_cache_path": get_env("FILE_CACHE_PATH", "/data/cache"),
+        "print_cache_count": int(get_env("PRINT_CACHE_COUNT", "1")),
+        "timelapse_cache_count": int(get_env("TIMELAPSE_CACHE_COUNT", "0")),
+        "usage_hours": float(get_env("USAGE_HOURS", "0")),
         "force_ip": parse_bool("FORCE_IP", False),
-        "region": os.getenv("BAMBU_REGION", ""),
-        "email": os.getenv("BAMBU_EMAIL", ""),
-        "username": os.getenv("BAMBU_USERNAME", ""),
-        "auth_token": os.getenv("BAMBU_AUTH_TOKEN", ""),
+        "region": get_env("BAMBU_REGION", ""),
+        "email": get_env("BAMBU_EMAIL", ""),
+        "username": get_env("BAMBU_USERNAME", ""),
+        "auth_token": get_env("BAMBU_AUTH_TOKEN", ""),
     }
 
 
 def load_printer_definitions() -> list[dict[str, Any]]:
-    raw = os.getenv("PRINTERS_JSON", "").strip()
+    raw = get_env("PRINTERS_JSON", "")
     default_cfg = build_default_printer_config()
     if not raw:
         return [{"id": "printer-1", "name": default_cfg.get("name") or default_cfg.get("serial") or "Printer 1", "config": default_cfg}]
@@ -239,16 +232,39 @@ class WorksService:
             "stockworks": "STOCKWORKS",
         }
 
+    def _default_allowed_paths(self, service: str) -> list[str]:
+        prefixes = ["/health"]
+        if service == "makerworks":
+            path_template = get_env("MAKERWORKS_ATTACH_GCODE_PATH_TEMPLATE", "")
+            prefix = self._path_template_prefix(path_template)
+            if prefix:
+                prefixes.append(prefix)
+        return prefixes
+
+    def _path_template_prefix(self, path_template: str) -> str | None:
+        raw = str(path_template or "").strip()
+        if not raw:
+            return None
+        if not raw.startswith("/"):
+            raw = f"/{raw}"
+        prefix = raw.split("{", 1)[0].rstrip("/")
+        return prefix or "/"
+
+    def _parse_csv(self, raw: str) -> list[str]:
+        return [item.strip() for item in raw.split(",") if item.strip()]
+
     def _get_config(self, service: str) -> dict[str, Any]:
         key = self._service_env.get(service.lower())
         if key is None:
             raise ValueError(f"Unknown integration service: {service}")
 
-        base_url = os.getenv(f"{key}_BASE_URL", "").strip()
-        api_key = os.getenv(f"{key}_API_KEY", "").strip()
-        bearer_token = os.getenv(f"{key}_BEARER_TOKEN", "").strip()
-        auth_header = os.getenv(f"{key}_AUTH_HEADER", "X-API-Key").strip() or "X-API-Key"
+        base_url = get_env(f"{key}_BASE_URL", "")
+        api_key = get_env(f"{key}_API_KEY", "")
+        bearer_token = get_env(f"{key}_BEARER_TOKEN", "")
+        auth_header = get_env(f"{key}_AUTH_HEADER", "X-API-Key") or "X-API-Key"
         verify_ssl = parse_bool(f"{key}_VERIFY_SSL", True)
+        allowed_paths = self._parse_csv(get_env(f"{key}_ALLOWED_PATHS", "")) or self._default_allowed_paths(service.lower())
+        allowed_methods = [item.upper() for item in self._parse_csv(get_env(f"{key}_ALLOWED_METHODS", ""))]
 
         return {
             "service": service.lower(),
@@ -257,6 +273,8 @@ class WorksService:
             "bearer_token": bearer_token,
             "auth_header": auth_header,
             "verify_ssl": verify_ssl,
+            "allowed_paths": allowed_paths,
+            "allowed_methods": allowed_methods,
             "configured": bool(base_url),
         }
 
@@ -269,23 +287,40 @@ class WorksService:
                     "service": cfg["service"],
                     "configured": cfg["configured"],
                     "base_url": cfg["base_url"],
+                    "allowed_paths": cfg["allowed_paths"],
+                    "allowed_methods": cfg["allowed_methods"],
                 }
             )
         return items
 
-    def _build_url(self, base_url: str, path: str) -> str:
-        if not base_url:
-            raise RuntimeError("Service is not configured (missing BASE_URL).")
+    def _normalize_path(self, path: str) -> str:
         raw_path = (path or "/").strip()
         if raw_path.startswith("http://") or raw_path.startswith("https://"):
             raise ValueError("Absolute URLs are not allowed in request path.")
         if not raw_path.startswith("/"):
             raw_path = f"/{raw_path}"
+        return raw_path
+
+    def _ensure_request_allowed(self, cfg: dict[str, Any], method: str, path: str) -> str:
+        normalized_path = self._normalize_path(path)
+        allowed_paths = [str(item).strip() for item in cfg.get("allowed_paths", []) if str(item).strip()]
+        if not any(normalized_path == prefix or normalized_path.startswith(f"{prefix.rstrip('/')}/") for prefix in allowed_paths):
+            raise ValueError(f"Path is not allowed for {cfg['service']}: {normalized_path}")
+        allowed_methods = [str(item).upper() for item in cfg.get("allowed_methods", []) if str(item).strip()]
+        if allowed_methods and method.upper() not in allowed_methods:
+            raise ValueError(f"Method is not allowed for {cfg['service']}: {method.upper()}")
+        return normalized_path
+
+    def _build_url(self, base_url: str, path: str) -> str:
+        if not base_url:
+            raise RuntimeError("Service is not configured (missing BASE_URL).")
+        raw_path = self._normalize_path(path)
         return f"{base_url.rstrip('/')}{raw_path}"
 
     def request_sync(self, service: str, payload: WorksRequest) -> dict[str, Any]:
         cfg = self._get_config(service)
-        url = self._build_url(cfg["base_url"], payload.path)
+        normalized_path = self._ensure_request_allowed(cfg, payload.method, payload.path)
+        url = self._build_url(cfg["base_url"], normalized_path)
 
         headers: dict[str, str] = {"Accept": "application/json"}
         if cfg["api_key"]:
@@ -649,11 +684,11 @@ class PrinterService:
         return f"{file_path}|{subtask_name}|{completed_at[:16]}"
 
     def _makerworks_attach_config(self) -> dict[str, Any]:
-        path_template = os.getenv("MAKERWORKS_ATTACH_GCODE_PATH_TEMPLATE", "").strip()
+        path_template = get_env("MAKERWORKS_ATTACH_GCODE_PATH_TEMPLATE", "")
         return {
             "enabled": parse_bool("MAKERWORKS_ATTACH_GCODE_ENABLED", False),
             "path_template": path_template,
-            "method": (os.getenv("MAKERWORKS_ATTACH_GCODE_METHOD", "POST").strip() or "POST").upper(),
+            "method": (get_env("MAKERWORKS_ATTACH_GCODE_METHOD", "POST") or "POST").upper(),
         }
 
     async def _sync_successful_gcode_to_makerworks(self, record: dict[str, Any], *, force: bool = False) -> dict[str, Any]:

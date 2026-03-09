@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.auth import register_admin_auth
+from app.auth import auth_router, register_admin_auth, validate_auth_configuration
 from app.routers.api import router as api_router
 from app.routers.ui import router as ui_router
 from app.runtime import start_runtime, stop_runtime
@@ -24,6 +24,7 @@ async def lifespan(_app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    validate_auth_configuration()
     app = FastAPI(
         title="PrintLab",
         version="0.1.0",
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     register_admin_auth(app)
     app.mount("/data", StaticFiles(directory=str(data_root())), name="data")
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    app.include_router(auth_router)
     app.include_router(ui_router)
     app.include_router(api_router)
 
