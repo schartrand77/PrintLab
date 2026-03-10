@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from app.runtime import service_or_404
@@ -1140,7 +1141,11 @@ def render_makerworks_search_html() -> str:
 
 
 def render_makerworks_routing_html() -> str:
-    return """<!doctype html>
+    slicer_target = (os.getenv("SLICER_TARGET", "bambu_studio") or "bambu_studio").strip().lower()
+    slicer_protocol_template = (
+        os.getenv("SLICER_PROTOCOL_TEMPLATE", "") or ""
+    ).strip()
+    html = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -1262,6 +1267,8 @@ def render_makerworks_routing_html() -> str:
     </section>
   </div>
   <script>
+    const slicerTarget = __SLICER_TARGET__;
+    const slicerProtocolTemplate = __SLICER_PROTOCOL_TEMPLATE__;
     const nativeFetch = window.fetch.bind(window);
     const routingKey = 'printlab.makerworks.routingModels';
     let chosenModels = [];
@@ -1426,6 +1433,62 @@ def render_makerworks_routing_html() -> str:
         showNotice(`Failed to resend callback: ${String(error?.message || error)}`);
       }
     }
+    function decodeRoutingItem(encoded) {
+      try {
+        return JSON.parse(decodeURIComponent(String(encoded || '')));
+      } catch (_error) {
+        return null;
+      }
+    }
+    function openExternalUrl(url) {
+      if (!url) return false;
+      const opened = window.open(String(url), '_blank', 'noopener,noreferrer');
+      return !!opened;
+    }
+    function buildSlicerLaunchUrl(assetUrl) {
+      const url = String(assetUrl || '').trim();
+      if (!url) return '';
+      const encoded = encodeURIComponent(url);
+      if (slicerProtocolTemplate && slicerProtocolTemplate.includes('{url}')) {
+        return slicerProtocolTemplate.replace('{url}', encoded);
+      }
+      if (slicerTarget === 'orca' || slicerTarget === 'orca_slicer' || slicerTarget === 'orcaslicer') {
+        return `orcaslicer://open?file=${encoded}`;
+      }
+      if (slicerTarget === 'browser') {
+        return url;
+      }
+      return `bambustudioopen://open?file=${encoded}`;
+    }
+    function sendQueuedJobToSlicer(encodedItem) {
+      const item = decodeRoutingItem(encodedItem);
+      const assetUrl = String(item?.download_url || '').trim();
+      const label = item?.model_name || item?.file_name || item?.id || 'Queued model';
+      if (!assetUrl) {
+        showNotice(`${label} does not have a slicer asset URL yet.`);
+        return;
+      }
+      const slicerUrl = buildSlicerLaunchUrl(assetUrl);
+      if (!slicerUrl || !openExternalUrl(slicerUrl)) {
+        showNotice(`Popup blocked while opening ${label} in slicer.`);
+        return;
+      }
+      showNotice(`Sent ${label} to ${slicerTarget === 'browser' ? 'browser' : (slicerTarget.startsWith('orca') ? 'OrcaSlicer' : 'Bambu Studio')}.`);
+    }
+    function importQueuedRevision(encodedItem) {
+      const item = decodeRoutingItem(encodedItem);
+      const revisionUrl = String(item?.model_url || item?.download_url || '').trim();
+      const label = item?.model_name || item?.file_name || item?.id || 'Queued model';
+      if (!revisionUrl) {
+        showNotice(`${label} does not have a revision link yet.`);
+        return;
+      }
+      if (!openExternalUrl(revisionUrl)) {
+        showNotice(`Popup blocked while opening ${label} revision.`);
+        return;
+      }
+      showNotice(`Opened ${label} revision.`);
+    }
     async function deleteQueuedJob(nodeId, queueItemId, label) {
       if (!queueItemId) {
         showNotice('Queued job is missing a queue entry id.');
@@ -1493,6 +1556,7 @@ def render_makerworks_routing_html() -> str:
           const item = entry.item;
           const isChosen = entry.kind === 'chosen';
           const assignedPrinter = draftAssignments[entry.id] || item.printer_id || '';
+          const encodedItem = encodeURIComponent(JSON.stringify(item));
           return `
             <article id="${escapeHtml(entry.id)}" class="node routeable ${activeLeft === entry.id ? 'selected' : ''} ${assignedPrinter ? 'connected' : ''}" onclick="selectLeftNode('${escapeHtml(entry.id)}')">
               <span class="drag-handle right" title="Drag to printer" onpointerdown="startWireDrag('${escapeHtml(entry.id)}', event)">
@@ -1514,7 +1578,8 @@ def render_makerworks_routing_html() -> str:
                 ${isChosen ? `<button class="btn secondary" type="button" onclick="event.stopPropagation(); delete draftAssignments['${escapeHtml(entry.id)}']; renderBoard();">Clear Wire</button>` : `<a class="link-btn" href="/printer/${encodeURIComponent(item.printer_id || '')}" onclick="event.stopPropagation();">Open</a>`}
                 ${isChosen ? `<button class="btn" type="button" onclick="event.stopPropagation(); submitChosenModel('${escapeHtml(entry.id)}')" ${assignedPrinter ? '' : 'disabled'}>Queue Now</button>` : `<button class="btn secondary" type="button" onclick="event.stopPropagation(); deleteQueuedJob('${escapeHtml(entry.id)}', '${escapeHtml(String(item.queue_item_id || ''))}', '${escapeHtml(String(item.model_name || item.file_name || item.id || 'Queued job'))}')">Delete Queue</button>`}
               </div>
-              ${isChosen ? '' : `<div class="node-actions"><button class="btn secondary" type="button" onclick="event.stopPropagation(); syncSubmittedJob('${escapeHtml(String(item.id || ''))}')">Resend Callback</button><span></span></div>`}
+              ${isChosen ? '' : `<div class="node-actions"><button class="btn secondary" type="button" onclick="event.stopPropagation(); sendQueuedJobToSlicer('${escapeHtml(encodedItem)}')">Send to slicer</button><button class="btn secondary" type="button" onclick="event.stopPropagation(); importQueuedRevision('${escapeHtml(encodedItem)}')">Import revision</button></div>`}
+              ${isChosen ? '' : `<div class="node-actions"><button class="btn secondary" type="button" onclick="event.stopPropagation(); syncSubmittedJob('${escapeHtml(String(item.id || ''))}')">Resend Callback</button><span class="node-meta">${escapeHtml(String(item.file_path || ''))}</span></div>`}
             </article>
           `;
         }).join('');
@@ -1555,6 +1620,10 @@ def render_makerworks_routing_html() -> str:
   </script>
 </body>
 </html>"""
+    return (
+        html.replace("__SLICER_TARGET__", json.dumps(slicer_target))
+        .replace("__SLICER_PROTOCOL_TEMPLATE__", json.dumps(slicer_protocol_template))
+    )
 
 
 def render_printer_dashboard(printer_id: str) -> str:

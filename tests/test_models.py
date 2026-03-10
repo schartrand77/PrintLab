@@ -107,3 +107,15 @@ def test_render_makerworks_routing_page_contains_board_layout() -> None:
     assert ">Delete<" in html
     assert "Clear Wire" in html
     assert "Delete Queue" in html
+    assert "Send to slicer" in html
+    assert "Import revision" in html
+    assert "sendQueuedJobToSlicer" in html
+    assert "importQueuedRevision" in html
+    assert "bambustudioopen://open?file=" in html
+
+
+def test_render_makerworks_routing_page_can_target_orcaslicer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SLICER_TARGET", "orca_slicer")
+    html = views.render_makerworks_routing_html()
+    assert 'const slicerTarget = "orca_slicer";' in html
+    assert "orcaslicer://open?file=" in html
