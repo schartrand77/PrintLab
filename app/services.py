@@ -1137,6 +1137,15 @@ class PrinterService:
         quoted = quote(resolved_path, safe="")
         return f"/api/printers/{quote(self.printer_id, safe='')}/sd/thumbnail?path={quoted}"
 
+    def _is_alias_thumbnail_path(self, path: str) -> bool:
+        normalized = str(path or "").strip().replace("\\", "/")
+        if not normalized:
+            return True
+        lowered = normalized.lower()
+        if lowered.startswith("/data/metadata/") or lowered.startswith("/metadata/"):
+            return True
+        return not normalized.startswith("/")
+
     def _job_context_from_request(self, request: OrderworksPrintJobRequest, actor: str) -> dict[str, Any]:
         metadata = self._extract_model_metadata(request.file_path, request.subtask_name)
         return {
@@ -1975,14 +1984,22 @@ class PrinterService:
 
         thumb_dir = data_root() / "cache" / "sd_thumbs"
         thumb_dir.mkdir(parents=True, exist_ok=True)
-        key = hashlib.sha1(path.encode("utf-8")).hexdigest()
-        for ext, mime in ((".png", "image/png"), (".jpg", "image/jpeg"), (".jpeg", "image/jpeg"), (".webp", "image/webp")):
-            p = thumb_dir / f"{key}{ext}"
-            if p.exists():
-                return p.read_bytes(), mime
+        raw_path = str(path or "").strip()
+        raw_key = hashlib.sha1(raw_path.encode("utf-8")).hexdigest() if raw_path else None
+        if raw_key and not self._is_alias_thumbnail_path(raw_path):
+            for ext, mime in ((".png", "image/png"), (".jpg", "image/jpeg"), (".jpeg", "image/jpeg"), (".webp", "image/webp")):
+                p = thumb_dir / f"{raw_key}{ext}"
+                if p.exists():
+                    return p.read_bytes(), mime
 
         ftp = self.client.ftp_connection()
-        resolved_path = self._resolve_sd_path_sync(ftp, path)
+        resolved_path = self._resolve_sd_path_sync(ftp, raw_path)
+        resolved_key = hashlib.sha1(resolved_path.encode("utf-8")).hexdigest() if resolved_path else raw_key
+        if resolved_key:
+            for ext, mime in ((".png", "image/png"), (".jpg", "image/jpeg"), (".jpeg", "image/jpeg"), (".webp", "image/webp")):
+                p = thumb_dir / f"{resolved_key}{ext}"
+                if p.exists():
+                    return p.read_bytes(), mime
         model_name = Path(resolved_path).name
         base_dir = str(Path(resolved_path).parent).replace("\\", "/")
         if base_dir == ".":
@@ -2009,7 +2026,7 @@ class PrinterService:
                 sidecar = f"{base_dir.rstrip('/')}/{base_name}{ext}" if base_dir != "/" else f"/{base_name}{ext}"
                 content = try_retr(sidecar)
                 if content:
-                    p = thumb_dir / f"{key}{ext}"
+                    p = thumb_dir / f"{resolved_key}{ext}"
                     p.write_bytes(content)
                     return content, mime
 
@@ -2024,7 +2041,7 @@ class PrinterService:
                         if candidates:
                             candidates.sort()
                             image = zf.read(candidates[0])
-                            p = thumb_dir / f"{key}.png"
+                            p = thumb_dir / f"{resolved_key}.png"
                             p.write_bytes(image)
                             return image, "image/png"
         finally:

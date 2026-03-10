@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -236,6 +237,49 @@ def test_resolve_sd_path_from_internal_plate_path_uses_current_subtask_name() ->
 
     resolved = service._resolve_sd_path_sync(FakeFtp(), "/data/Metadata/plate_1.gcode")
     assert resolved == "/cache/CubeStack_desk_lamp_(no_glue,_no_supports).gcode.3mf"
+
+
+def test_sd_thumbnail_alias_path_does_not_reuse_stale_alias_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    data_dir = Path("tests/.tmp/thumb-cache")
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("PRINTLAB_DATA_DIR", str(data_dir.resolve()))
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    alias_path = "/data/Metadata/plate_1.gcode"
+    resolved_path = "/cache/actual-part.gcode.3mf"
+    thumb_dir = data_dir / "cache" / "sd_thumbs"
+    thumb_dir.mkdir(parents=True, exist_ok=True)
+    stale_key = hashlib.sha1(alias_path.encode("utf-8")).hexdigest()
+    (thumb_dir / f"{stale_key}.png").write_bytes(b"stale")
+
+    class FakeFtp:
+        def retrbinary(self, command: str, callback) -> None:
+            if command == "RETR /cache/actual-part.png":
+                callback(b"fresh")
+                return
+            raise AssertionError(f"unexpected RETR command: {command}")
+
+        def quit(self) -> None:
+            return None
+
+    class FakeClient:
+        def ftp_connection(self) -> FakeFtp:
+            return FakeFtp()
+
+    service.client = FakeClient()
+    service._resolve_sd_path_sync = lambda ftp, raw_path: resolved_path  # type: ignore[method-assign]
+
+    content, mime = service._get_sd_thumbnail_sync(alias_path)
+
+    assert content == b"fresh"
+    assert mime == "image/png"
+    resolved_key = hashlib.sha1(resolved_path.encode("utf-8")).hexdigest()
+    assert (thumb_dir / f"{resolved_key}.png").read_bytes() == b"fresh"
 
 
 def test_openapi_contains_makerworks_library_paths() -> None:
