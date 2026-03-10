@@ -76,6 +76,25 @@ class MakerworksQueueJobRequest(BaseModel):
     layer_inspect: bool = True
 
 
+class MakerworksSubmitJobRequest(BaseModel):
+    model_id: str = Field(min_length=1)
+    printer_id: str | None = Field(default=None, min_length=1, max_length=64)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
+    source_job_id: str | None = Field(default=None, min_length=1, max_length=128)
+    source_order_id: str | None = Field(default=None, min_length=1, max_length=128)
+    start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
+    plate_gcode: str = Field(default="Metadata/plate_1.gcode")
+    use_ams: bool = True
+    ams_mapping: list[int] | None = None
+    bed_type: str = "auto"
+    timelapse: bool = False
+    bed_leveling: bool = True
+    flow_cali: bool = True
+    vibration_cali: bool = True
+    layer_inspect: bool = True
+    metadata: dict[str, Any] | None = None
+
+
 class QueueUpdateRequest(BaseModel):
     start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
 

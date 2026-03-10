@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from app.auth import actor_from_request
-from app.runtime import printer_manager, service_or_404, works_service
+from app.runtime import job_manager, printer_manager, service_or_404, works_service
 from app.services import (
     AddPrinterRequest,
     AlertRuleRequest,
@@ -19,6 +17,7 @@ from app.services import (
     ControlPresetRequest,
     FanRequest,
     MakerworksQueueJobRequest,
+    MakerworksSubmitJobRequest,
     OrderworksPrintJobRequest,
     PrinterNameRequest,
     QueuePrintJobRequest,
@@ -249,48 +248,86 @@ async def makerworks_queue_job_by_printer(
     try:
         if not (await service.state()).get("connected"):
             raise ValueError("Printer is not connected. Choose a connected printer before queueing a MakerWorks model.")
-        if service.job_busy():
-            raise ValueError("Printer is currently printing. Choose a printer that is not actively printing.")
-
-        detail = await works_service.makerworks_library_item(payload.model_id, include_raw=False)
-        item = detail["item"]
-        if not item.get("queue_supported"):
-            raise ValueError(item.get("printer_handoff_note") or "This MakerWorks model cannot be queued yet.")
-
-        asset = await works_service.download_asset("makerworks", str(item.get("download_url") or ""))
-        preferred_base = re.sub(r"[^A-Za-z0-9._-]+", "-", f"makerworks-{item.get('id') or payload.model_id}-{item.get('name') or 'model'}").strip("._-")
-        preferred_name = f"{preferred_base[:96]}{Path(str(asset.get('filename') or '')).suffix or '.3mf'}"
-        if str(asset.get("filename") or "").lower().endswith(".gcode.3mf"):
-            preferred_name = f"{preferred_base[:96]}.gcode.3mf"
-
-        staged = await service.stage_project_bytes(bytes(asset["content"]), preferred_name)
-        queue_request = QueuePrintJobRequest(
-            file_path=str(staged["file_path"]),
-            plate_gcode=payload.plate_gcode,
-            use_ams=payload.use_ams,
-            ams_mapping=payload.ams_mapping,
-            bed_type=payload.bed_type,
-            timelapse=payload.timelapse,
-            bed_leveling=payload.bed_leveling,
-            flow_cali=payload.flow_cali,
-            vibration_cali=payload.vibration_cali,
-            layer_inspect=payload.layer_inspect,
-            start_at=payload.start_at,
-        )
-        result = await service.queue_print_job(
-            queue_request,
+        result = await job_manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(
+                model_id=payload.model_id,
+                printer_id=printer_id,
+                start_at=payload.start_at,
+                plate_gcode=payload.plate_gcode,
+                use_ams=payload.use_ams,
+                ams_mapping=payload.ams_mapping,
+                bed_type=payload.bed_type,
+                timelapse=payload.timelapse,
+                bed_leveling=payload.bed_leveling,
+                flow_cali=payload.flow_cali,
+                vibration_cali=payload.vibration_cali,
+                layer_inspect=payload.layer_inspect,
+            ),
             actor=actor_from_request(request),
-            metadata={
-                "display_name": item.get("name"),
-                "source": "makerworks",
-                "source_model_id": item.get("id"),
-                "source_model_url": item.get("model_url"),
-                "source_download_url": item.get("download_url"),
-                "source_file_type": item.get("file_type"),
-                "staged_file_name": staged.get("file_name"),
-            },
         )
-        return {"ok": True, "queued": True, "printer_id": printer_id, "source_item": item, **result}
+        return {"ok": True, "queued": True, "printer_id": printer_id, "source_item": result.get("source_item"), **result}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/works/makerworks/jobs")
+async def makerworks_submit_job(request: Request, payload: MakerworksSubmitJobRequest) -> dict[str, Any]:
+    try:
+        result = await job_manager.submit_makerworks_job(payload, actor=actor_from_request(request))
+        return {"ok": True, **result}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api/jobs")
+async def list_jobs(status: str | None = None) -> dict[str, Any]:
+    items = job_manager.list_jobs(status=status)
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/api/jobs/{job_id}")
+async def get_job(job_id: str) -> dict[str, Any]:
+    try:
+        return {"item": job_manager.get_job(job_id)}
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/api/jobs/{job_id}/sync-makerworks")
+async def sync_job(job_id: str, payload: SuccessfulGcodeSyncRequest | None = None) -> dict[str, Any]:
+    try:
+        job = await job_manager.sync_job_to_makerworks(job_id, force=bool(payload and payload.force))
+        return {"ok": True, "item": job}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api/printers/{printer_id}/jobs")
+async def list_jobs_by_printer(printer_id: str, status: str | None = None) -> dict[str, Any]:
+    try:
+        items = job_manager.list_jobs(printer_id=printer_id, status=status)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/api/printers/{printer_id}/jobs/{job_id}")
+async def get_job_by_printer(printer_id: str, job_id: str) -> dict[str, Any]:
+    try:
+        return {"item": job_manager.get_job(job_id, printer_id=printer_id)}
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/api/printers/{printer_id}/jobs/{job_id}/sync-makerworks")
+async def sync_job_by_printer(
+    printer_id: str,
+    job_id: str,
+    payload: SuccessfulGcodeSyncRequest | None = None,
+) -> dict[str, Any]:
+    try:
+        job = await job_manager.sync_job_to_makerworks(job_id, printer_id=printer_id, force=bool(payload and payload.force))
+        return {"ok": True, "item": job}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -72,6 +72,15 @@ Interactive API docs are published at:
 - `GET /api/works/{makerworks|orderworks|stockworks}/health?path=/health`
 - `GET /api/works/makerworks/library`
 - `GET /api/works/makerworks/library/{model_id}`
+- `POST /api/works/makerworks/jobs`
+  with:
+  `{"model_id":"widget-1","printer_id":"printer-1","idempotency_key":"mw-job-123","source_job_id":"makerworks-123","metadata":{"priority":"rush"}}`
+- `GET /api/jobs`
+- `GET /api/jobs/{job_id}`
+- `POST /api/jobs/{job_id}/sync-makerworks`
+- `GET /api/printers/{printer_id}/jobs`
+- `GET /api/printers/{printer_id}/jobs/{job_id}`
+- `POST /api/printers/{printer_id}/jobs/{job_id}/sync-makerworks`
 - `POST /api/works/{makerworks|orderworks|stockworks}/request`
   with:
   `{"method":"GET|POST|PUT|PATCH|DELETE","path":"/v1/resource","query":{},"body":{},"headers":{},"timeout_seconds":20}`
@@ -91,6 +100,8 @@ Interactive API docs are published at:
 Configure each external system in `.env`:
 
 - `MAKERWORKS_BASE_URL`, `MAKERWORKS_API_KEY`, `MAKERWORKS_BEARER_TOKEN`, `MAKERWORKS_AUTH_HEADER`, `MAKERWORKS_VERIFY_SSL`, `MAKERWORKS_ALLOWED_PATHS`, `MAKERWORKS_ALLOWED_METHODS`
+- Optional MakerWorks job callbacks:
+  `MAKERWORKS_JOB_CALLBACK_ENABLED`, `MAKERWORKS_JOB_CALLBACK_METHOD`, `MAKERWORKS_JOB_CALLBACK_PATH_TEMPLATE`
 - MakerWorks library normalization:
   `MAKERWORKS_LIBRARY_LIST_PATH`, `MAKERWORKS_LIBRARY_DETAIL_PATH_TEMPLATE`, `MAKERWORKS_LIBRARY_SEARCH_PARAM`, `MAKERWORKS_LIBRARY_PAGE_PARAM`, `MAKERWORKS_LIBRARY_PAGE_SIZE_PARAM`, `MAKERWORKS_LIBRARY_PAGE_SIZE`, `MAKERWORKS_LIBRARY_ITEMS_PATH`, `MAKERWORKS_LIBRARY_TOTAL_PATH`, `MAKERWORKS_LIBRARY_ID_PATH`, `MAKERWORKS_LIBRARY_NAME_PATH`, `MAKERWORKS_LIBRARY_SUMMARY_PATH`, `MAKERWORKS_LIBRARY_DESCRIPTION_PATH`, `MAKERWORKS_LIBRARY_THUMBNAIL_PATH`, `MAKERWORKS_LIBRARY_MODEL_URL_PATH`, `MAKERWORKS_LIBRARY_DOWNLOAD_URL_PATH`, `MAKERWORKS_LIBRARY_AUTHOR_PATH`, `MAKERWORKS_LIBRARY_TAGS_PATH`, `MAKERWORKS_LIBRARY_FILES_PATH`, `MAKERWORKS_LIBRARY_CREATED_AT_PATH`, `MAKERWORKS_LIBRARY_UPDATED_AT_PATH`
 - `ORDERWORKS_BASE_URL`, `ORDERWORKS_API_KEY`, `ORDERWORKS_BEARER_TOKEN`, `ORDERWORKS_AUTH_HEADER`, `ORDERWORKS_VERIFY_SSL`, `ORDERWORKS_ALLOWED_PATHS`, `ORDERWORKS_ALLOWED_METHODS`
@@ -109,6 +120,21 @@ MakerWorks library notes:
 - The dashboard now has a `MakerWorks` tab inside the model library modal.
 - Responses are normalized into a stable shape (`id`, `name`, `summary`, `thumbnail_url`, `model_url`, `download_url`, `author`, `tags`, `printer_handoff_ready`) so the UI does not need to match your upstream schema exactly.
 - This pass is read-only for external models: it surfaces whether downloadable assets exist, and leaves the actual printer handoff as the next step.
+
+MakerWorks job intake:
+- `POST /api/works/makerworks/jobs` is the new PrintLab-native submission path for MakerWorks.
+- PrintLab stages the asset to printer storage, creates a queue entry, and persists a submitted-job ledger in `/data/submitted_jobs_{printer_id}.json`.
+- Use `idempotency_key` when MakerWorks may retry the same submission; PrintLab will return the existing job record instead of queueing a duplicate.
+- Job status currently advances through `queued`, `started`, `completed`, `failed`, `cancelled`, and `submit_failed`.
+- If `MAKERWORKS_JOB_CALLBACK_ENABLED=true`, each new status is pushed back to MakerWorks once using `MAKERWORKS_JOB_CALLBACK_PATH_TEMPLATE`.
+
+MakerWorks callback contract:
+- Recommended callback path template: `/api/printlab/jobs/{job_id}` or `/api/printlab/jobs/{job_id}/status`.
+- Default method: `POST`.
+- Template variables available in `MAKERWORKS_JOB_CALLBACK_PATH_TEMPLATE`:
+  `{job_id}`, `{printer_id}`, `{model_id}`, `{source_job_id}`, `{source_order_id}`, `{status}`.
+- Callback payload shape:
+  `{"job_id":"...","status":"queued|started|completed|failed|cancelled|submit_failed","printer_id":"...","printer_name":"...","queue_item_id":"...","successful_gcode_id":"...","idempotency_key":"...","source":"makerworks","source_job_id":"...","source_order_id":"...","model_id":"...","model_name":"...","model_url":"...","download_url":"...","file_path":"...","file_name":"...","plate_gcode":"...","start_at":"...","started_at":"...","completed_at":"...","last_error":"...","metadata":{},"history":[],"updated_at":"...","created_at":"..."}`
 
 Successful G-code tracking:
 - Every completed print that reaches `FINISH` or `COMPLETE` is persisted to `/data/successful_gcodes_{printer_id}.json`.

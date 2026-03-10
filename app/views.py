@@ -1291,8 +1291,12 @@ def render_makerworks_html() -> str:
           <div class="selection-title">Printer Queues</div>
           <div id="queueList" class="queue-list"></div>
         </div>
+        <div class="selection-card">
+          <div class="selection-title">Submitted Jobs</div>
+          <div id="jobList" class="queue-list"></div>
+        </div>
         <div class="helper">
-          Only printers that are connected and not actively printing appear in the per-model queue dropdowns. Queue lists refresh after each submission and on a timer.
+          MakerWorks submissions go through the PrintLab job ledger, so this page now shows both printer queues and submitted-job callback status.
         </div>
       </aside>
     </div>
@@ -1315,6 +1319,7 @@ def render_makerworks_html() -> str:
     let makerworksPage = 1;
     const makerworksPageSize = 8;
     let makerworksTotal = 0;
+    let submittedJobs = [];
 
     function readCookie(name) {
       const prefix = `${name}=`;
@@ -1701,6 +1706,61 @@ def render_makerworks_html() -> str:
       }).join('');
     }
 
+    function formatDateTime(value) {
+      if (!value) return 'Unknown time';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    }
+
+    function renderSubmittedJobs() {
+      const jobList = document.getElementById('jobList');
+      if (!jobList) return;
+      const items = Array.isArray(submittedJobs) ? submittedJobs.slice(0, 8) : [];
+      if (!items.length) {
+        jobList.innerHTML = "<div class='queue-item'><div class='queue-item-name'>No submitted jobs</div><div class='queue-item-meta'>MakerWorks jobs will appear here after submission.</div></div>";
+        return;
+      }
+
+      jobList.innerHTML = items.map((job) => {
+        const callback = job.callback || {};
+        const status = String(job.status || 'unknown');
+        const callbackState = callback.delivered_status === status
+          ? `Callback delivered ${formatDateTime(callback.last_delivered_at)}`
+          : (callback.last_error
+            ? `Callback failed: ${callback.last_error}`
+            : 'Callback pending');
+        const printerLabel = printersById[job.printer_id]?.name || job.printer_name || job.printer_id || 'Unassigned printer';
+        const syncAction = job.source === 'makerworks'
+          ? `<button class="btn secondary" type="button" onclick="syncSubmittedJob('${escapeHtml(job.id || '')}')">Resend</button>`
+          : '';
+        return `
+          <div class="queue-printer-card">
+            <div class="queue-printer-head">
+              <div>
+                <div class="queue-printer-name">${escapeHtml(job.model_name || job.file_name || job.id || 'Submitted job')}</div>
+                <div class="queue-printer-meta">${escapeHtml(status)} - ${escapeHtml(printerLabel)}</div>
+              </div>
+              <a class="link-btn" href="/printer/${encodeURIComponent(job.printer_id || '')}">Open</a>
+            </div>
+            <div class="queue-items">
+              <div class="queue-item">
+                <div class="queue-item-name">${escapeHtml(job.source_job_id || job.source_order_id || job.id || 'PrintLab job')}</div>
+                <div class="queue-item-meta">${escapeHtml(callbackState)}</div>
+              </div>
+              <div class="queue-item">
+                <div class="queue-item-name">Updated ${escapeHtml(formatDateTime(job.updated_at || job.created_at))}</div>
+                <div class="queue-item-meta">${escapeHtml(job.idempotency_key ? `Idempotency ${job.idempotency_key}` : 'No idempotency key')}</div>
+              </div>
+            </div>
+            <div class="model-actions">
+              ${syncAction}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
     async function loadPrinters() {
       const response = await fetch('/api/printers');
       const data = await response.json();
@@ -1732,6 +1792,34 @@ def render_makerworks_html() -> str:
       queueSnapshots = Object.fromEntries(snapshots);
       renderQueueLists();
       syncSelectionPanel();
+    }
+
+    async function loadSubmittedJobs() {
+      const response = await fetch('/api/jobs');
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.detail || `HTTP ${response.status}`);
+      }
+      submittedJobs = Array.isArray(data.items) ? data.items : [];
+      renderSubmittedJobs();
+    }
+
+    async function syncSubmittedJob(jobId) {
+      try {
+        const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/sync-makerworks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ force: true }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data?.detail || `HTTP ${response.status}`);
+        }
+        showNotice(`Resent callback for ${data.item?.model_name || data.item?.file_name || 'submitted job'}.`, 'success');
+        await loadSubmittedJobs();
+      } catch (error) {
+        showNotice(`Failed to resend callback: ${String(error?.message || error)}`, 'error');
+      }
     }
 
     function selectModel(encodedItem) {
@@ -1771,10 +1859,14 @@ def render_makerworks_html() -> str:
       queueingModelIds.add(String(modelId));
       await loadMakerworks(false);
       try {
-        const response = await fetch(`/api/printers/${encodeURIComponent(printerId)}/works/makerworks/queue-job`, {
+        const response = await fetch('/api/works/makerworks/jobs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model_id: String(modelId) }),
+          body: JSON.stringify({
+            model_id: String(modelId),
+            printer_id: printerId,
+            idempotency_key: `makerworks-ui:${printerId}:${String(modelId)}`,
+          }),
         });
         const data = await response.json();
         if (!response.ok) {
@@ -1784,7 +1876,8 @@ def render_makerworks_html() -> str:
         writeStoredJson(selectedModelKey, selectedModel);
         selectedPrinterId = printerId;
         localStorage.setItem(selectedPrinterKey, selectedPrinterId);
-        showNotice(`Queued ${selectedModel.name || 'MakerWorks model'} to ${printersById[printerId]?.name || printerId}.`, 'success');
+        const submissionState = data.created === false ? 'already existed in' : 'queued to';
+        showNotice(`${selectedModel.name || 'MakerWorks model'} ${submissionState} ${printersById[printerId]?.name || printerId}.`, 'success');
         await refreshPageData(false);
       } catch (error) {
         showNotice(`Failed to queue MakerWorks model: ${String(error?.message || error)}`, 'error');
@@ -1893,6 +1986,7 @@ def render_makerworks_html() -> str:
     async function refreshPageData(showLoading = true) {
       await loadPrinters();
       await loadQueues();
+      await loadSubmittedJobs();
       await loadMakerworks(showLoading);
     }
 

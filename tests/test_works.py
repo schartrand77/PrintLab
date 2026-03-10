@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,17 @@ def test_makerworks_library_paths_are_kept_when_env_allowlist_is_legacy(monkeypa
 
     assert "/health" in cfg["allowed_paths"]
     assert "/api/models" in cfg["allowed_paths"]
+
+
+def test_makerworks_job_callback_path_is_kept_when_env_allowlist_is_legacy(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+    monkeypatch.setenv("MAKERWORKS_ALLOWED_PATHS", "/health")
+    monkeypatch.setenv("MAKERWORKS_JOB_CALLBACK_PATH_TEMPLATE", "/api/printlab/jobs/{job_id}")
+    service = WorksService()
+
+    cfg = service._get_config("makerworks")
+
+    assert "/api/printlab/jobs" in cfg["allowed_paths"]
 
 
 def test_secret_file_is_used_for_service_api_key(monkeypatch) -> None:
@@ -226,3 +238,42 @@ def test_openapi_contains_makerworks_library_paths() -> None:
     schema = create_app().openapi()
     assert "/api/works/makerworks/library" in schema["paths"]
     assert "/api/printers/{printer_id}/works/makerworks/library" in schema["paths"]
+
+
+def test_submitted_job_sync_posts_status_to_makerworks(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_JOB_CALLBACK_ENABLED", "true")
+    monkeypatch.setenv("MAKERWORKS_JOB_CALLBACK_METHOD", "POST")
+    monkeypatch.setenv("MAKERWORKS_JOB_CALLBACK_PATH_TEMPLATE", "/api/printlab/jobs/{job_id}")
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    service._submitted_jobs = [
+        {
+            "id": "job-1",
+            "source": "makerworks",
+            "status": "queued",
+            "model_id": "widget-1",
+            "file_name": "widget.3mf",
+            "created_at": "2026-03-10T12:00:00+00:00",
+            "updated_at": "2026-03-10T12:00:00+00:00",
+            "history": [],
+        }
+    ]
+
+    class FakeWorksService:
+        async def request(self, service_name: str, payload) -> dict[str, object]:
+            assert service_name == "makerworks"
+            assert payload.path == "/api/printlab/jobs/job-1"
+            assert payload.body["status"] == "queued"
+            assert payload.body["printer_id"] == "printer-1"
+            return {"ok": True, "status_code": 202}
+
+    monkeypatch.setattr("app.runtime.works_service", FakeWorksService())
+
+    job = asyncio.run(service._sync_submitted_job_to_makerworks(service._submitted_jobs[0], force=True))
+
+    assert job["callback"]["delivered_status"] == "queued"
+    assert job["callback"]["status_code"] == 202

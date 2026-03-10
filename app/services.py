@@ -199,6 +199,25 @@ class MakerworksQueueJobRequest(BaseModel):
     layer_inspect: bool = True
 
 
+class MakerworksSubmitJobRequest(BaseModel):
+    model_id: str = Field(min_length=1)
+    printer_id: str | None = Field(default=None, min_length=1, max_length=64)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
+    source_job_id: str | None = Field(default=None, min_length=1, max_length=128)
+    source_order_id: str | None = Field(default=None, min_length=1, max_length=128)
+    start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
+    plate_gcode: str = Field(default="Metadata/plate_1.gcode")
+    use_ams: bool = True
+    ams_mapping: list[int] | None = None
+    bed_type: str = "auto"
+    timelapse: bool = False
+    bed_leveling: bool = True
+    flow_cali: bool = True
+    vibration_cali: bool = True
+    layer_inspect: bool = True
+    metadata: dict[str, Any] | None = None
+
+
 class QueueUpdateRequest(BaseModel):
     start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
 
@@ -253,6 +272,10 @@ class WorksService:
             prefix = self._path_template_prefix(path_template)
             if prefix:
                 prefixes.append(prefix)
+            callback_template = get_env("MAKERWORKS_JOB_CALLBACK_PATH_TEMPLATE", "")
+            callback_prefix = self._path_template_prefix(callback_template)
+            if callback_prefix and callback_prefix not in prefixes:
+                prefixes.append(callback_prefix)
             library_cfg = self._makerworks_library_config()
             for candidate in (library_cfg["list_path"], library_cfg["detail_path_template"]):
                 library_prefix = self._path_template_prefix(candidate)
@@ -804,11 +827,13 @@ class PrinterService:
         self._presets_file = root / f"control_presets_{printer_id}.json"
         self._alert_rules_file = root / f"alert_rules_{printer_id}.json"
         self._successful_gcodes_file = root / f"successful_gcodes_{printer_id}.json"
+        self._submitted_jobs_file = root / f"submitted_jobs_{printer_id}.json"
         self._queue_items: list[dict[str, Any]] = self._load_json_list(self._queue_file)
         self._timeline_entries: list[dict[str, Any]] = self._load_json_list(self._timeline_file)
         self._control_presets: list[dict[str, Any]] = self._load_json_list(self._presets_file)
         self._alert_rules: list[dict[str, Any]] = self._load_json_list(self._alert_rules_file)
         self._successful_gcodes: list[dict[str, Any]] = self._load_json_list(self._successful_gcodes_file)
+        self._submitted_jobs: list[dict[str, Any]] = self._load_json_list(self._submitted_jobs_file)
         self._queue_task: asyncio.Task[None] | None = None
         self._job_monitor_task: asyncio.Task[None] | None = None
         self._disconnected_since_utc: str | None = None
@@ -847,6 +872,9 @@ class PrinterService:
 
     def _save_successful_gcodes(self) -> None:
         self._save_json_list(self._successful_gcodes_file, self._successful_gcodes)
+
+    def _save_submitted_jobs(self) -> None:
+        self._save_json_list(self._submitted_jobs_file, self._submitted_jobs)
 
     def _timeline_entry(
         self,
@@ -946,6 +974,82 @@ class PrinterService:
 
     def successful_gcodes_snapshot(self) -> list[dict[str, Any]]:
         return list(self._successful_gcodes[:200])
+
+    def submitted_jobs_snapshot(self, *, status: str | None = None) -> list[dict[str, Any]]:
+        if not status:
+            return list(self._submitted_jobs[:200])
+        target = status.strip().lower()
+        return [item for item in self._submitted_jobs[:200] if str(item.get("status") or "").lower() == target]
+
+    def submitted_job(self, job_id: str) -> dict[str, Any]:
+        for item in self._submitted_jobs:
+            if item.get("id") == job_id:
+                return item
+        raise ValueError(f"Unknown submitted job: {job_id}")
+
+    def find_submitted_job_by_idempotency(self, idempotency_key: str) -> dict[str, Any] | None:
+        target = idempotency_key.strip()
+        if not target:
+            return None
+        for item in self._submitted_jobs:
+            if str(item.get("idempotency_key") or "").strip() == target:
+                return item
+        return None
+
+    def _append_submitted_job_event(
+        self,
+        job: dict[str, Any],
+        *,
+        status: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        event = {
+            "id": uuid4().hex,
+            "status": status,
+            "message": message,
+            "at": datetime.now(timezone.utc).isoformat(),
+            "details": details or {},
+        }
+        history = job.get("history")
+        if not isinstance(history, list):
+            history = []
+            job["history"] = history
+        history.insert(0, event)
+        del history[50:]
+        job["status"] = status
+        job["updated_at"] = event["at"]
+        if status not in {"submit_failed", "failed"}:
+            job["last_error"] = None
+
+    def create_submitted_job(self, payload: dict[str, Any], *, message: str = "Job accepted by PrintLab.") -> dict[str, Any]:
+        job = copy.deepcopy(payload)
+        self._append_submitted_job_event(job, status=str(job.get("status") or "accepted"), message=message)
+        self._submitted_jobs = [job, *self._submitted_jobs[:499]]
+        self._save_submitted_jobs()
+        job_id = str(job.get("id") or "").strip()
+        if job_id:
+            self._schedule_submitted_job_callback(job_id)
+        return job
+
+    def update_submitted_job(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        job = self.submitted_job(job_id)
+        if extra:
+            job.update(extra)
+        if status in {"submit_failed", "failed"} and details and details.get("error"):
+            job["last_error"] = str(details["error"])
+        self._append_submitted_job_event(job, status=status, message=message, details=details)
+        self._save_submitted_jobs()
+        self._schedule_submitted_job_callback(job_id)
+        return job
 
     def _strip_model_suffix(self, value: str) -> str:
         lowered = value.lower()
@@ -1104,6 +1208,135 @@ class PrinterService:
             "method": (get_env("MAKERWORKS_ATTACH_GCODE_METHOD", "POST") or "POST").upper(),
         }
 
+    def _makerworks_job_callback_config(self) -> dict[str, Any]:
+        path_template = get_env("MAKERWORKS_JOB_CALLBACK_PATH_TEMPLATE", "")
+        return {
+            "enabled": parse_bool("MAKERWORKS_JOB_CALLBACK_ENABLED", False),
+            "path_template": path_template,
+            "method": (get_env("MAKERWORKS_JOB_CALLBACK_METHOD", "POST") or "POST").upper(),
+        }
+
+    def _submitted_job_callback_payload(self, job: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "job_id": job.get("id"),
+            "status": job.get("status"),
+            "printer_id": self.printer_id,
+            "printer_name": self.display_name,
+            "queue_item_id": job.get("queue_item_id"),
+            "successful_gcode_id": job.get("successful_gcode_id"),
+            "idempotency_key": job.get("idempotency_key"),
+            "source": job.get("source"),
+            "source_job_id": job.get("source_job_id"),
+            "source_order_id": job.get("source_order_id"),
+            "model_id": job.get("model_id"),
+            "model_name": job.get("model_name"),
+            "model_url": job.get("model_url"),
+            "download_url": job.get("download_url"),
+            "file_path": job.get("file_path"),
+            "file_name": job.get("file_name"),
+            "plate_gcode": job.get("plate_gcode"),
+            "start_at": job.get("start_at"),
+            "started_at": job.get("started_at"),
+            "completed_at": job.get("completed_at"),
+            "last_error": job.get("last_error"),
+            "metadata": job.get("metadata") or {},
+            "history": job.get("history") or [],
+            "updated_at": job.get("updated_at"),
+            "created_at": job.get("created_at"),
+        }
+
+    async def _sync_submitted_job_to_makerworks(self, job: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
+        cfg = self._makerworks_job_callback_config()
+        if not cfg["enabled"]:
+            raise RuntimeError("MakerWorks job callbacks are disabled.")
+        if not cfg["path_template"]:
+            raise RuntimeError("MAKERWORKS_JOB_CALLBACK_PATH_TEMPLATE is not configured.")
+        if str(job.get("source") or "").lower() != "makerworks":
+            raise RuntimeError("Only MakerWorks-origin jobs can be synced back to MakerWorks.")
+
+        callback = job.setdefault("callback", {})
+        current_status = str(job.get("status") or "").strip().lower()
+        if callback.get("delivered_status") == current_status and not force:
+            return job
+
+        path = cfg["path_template"].format(
+            job_id=quote(str(job.get("id") or ""), safe=""),
+            printer_id=quote(self.printer_id, safe=""),
+            model_id=quote(str(job.get("model_id") or ""), safe=""),
+            source_job_id=quote(str(job.get("source_job_id") or ""), safe=""),
+            source_order_id=quote(str(job.get("source_order_id") or ""), safe=""),
+            status=quote(current_status, safe=""),
+        )
+        callback["last_attempt_at"] = datetime.now(timezone.utc).isoformat()
+        callback["path"] = path
+        try:
+            from app.runtime import works_service
+
+            result = await works_service.request(
+                "makerworks",
+                WorksRequest(method=cfg["method"], path=path, body=self._submitted_job_callback_payload(job)),
+            )
+            if not result.get("ok"):
+                raise RuntimeError(f"MakerWorks returned HTTP {result.get('status_code')}.")
+            callback.update(
+                {
+                    "delivered_status": current_status,
+                    "last_delivered_at": datetime.now(timezone.utc).isoformat(),
+                    "last_error": None,
+                    "status_code": result.get("status_code"),
+                }
+            )
+            self._save_submitted_jobs()
+            self._record_timeline(
+                "makerworks_job_callback_success",
+                f"Synced job status {current_status} for {job.get('file_name') or job.get('model_name') or 'job'} to MakerWorks.",
+                actor="system",
+                details={"job_id": job.get("id"), "status": current_status, "path": path},
+            )
+            return job
+        except Exception as exc:
+            callback.update(
+                {
+                    "last_error": str(exc),
+                }
+            )
+            self._save_submitted_jobs()
+            self._record_timeline(
+                "makerworks_job_callback_failed",
+                f"Failed syncing job status {current_status} for {job.get('file_name') or job.get('model_name') or 'job'} to MakerWorks.",
+                actor="system",
+                severity="warning",
+                details={"job_id": job.get("id"), "status": current_status, "error": str(exc), "path": path},
+            )
+            raise
+
+    def _schedule_submitted_job_callback(self, job_id: str, *, force: bool = False) -> None:
+        cfg = self._makerworks_job_callback_config()
+        if not cfg["enabled"]:
+            return
+        try:
+            job = self.submitted_job(job_id)
+        except ValueError:
+            return
+        if str(job.get("source") or "").lower() != "makerworks":
+            return
+
+        async def _runner() -> None:
+            try:
+                await self._sync_submitted_job_to_makerworks(job, force=force)
+            except Exception:
+                return
+
+        if self._main_loop and self._main_loop.is_running():
+            try:
+                running_loop = asyncio.get_running_loop()
+                if running_loop is self._main_loop:
+                    asyncio.create_task(_runner())
+                    return
+            except RuntimeError:
+                pass
+            self._main_loop.call_soon_threadsafe(lambda: asyncio.create_task(_runner()))
+
     async def _sync_successful_gcode_to_makerworks(self, record: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
         cfg = self._makerworks_attach_config()
         if not cfg["enabled"]:
@@ -1208,6 +1441,15 @@ class PrinterService:
                 await self._sync_successful_gcode_to_makerworks(record)
             except Exception:
                 pass
+        job_id = str((self._active_job_context or {}).get("job_id") or "").strip()
+        if job_id:
+            self.update_submitted_job(
+                job_id,
+                status="completed",
+                message=f"Print completed for {record.get('file_name') or 'model'}.",
+                details={"record_id": record.get("id"), "file_path": record.get("file_path")},
+                extra={"completed_at": completed_at, "successful_gcode_id": record.get("id")},
+            )
 
     async def _monitor_print_jobs(self) -> None:
         while True:
@@ -1234,6 +1476,17 @@ class PrinterService:
                     await self._record_successful_completion(snapshot)
                     self._active_job_context = None
                 elif "FAILED" in state or "STOP" in state or "IDLE" in state:
+                    context = self._active_job_context or {}
+                    job_id = str(context.get("job_id") or "").strip()
+                    if previously_busy and job_id:
+                        failure_status = "cancelled" if "STOP" in state else "failed"
+                        self.update_submitted_job(
+                            job_id,
+                            status=failure_status,
+                            message=f"Print ended in state {state or 'unknown'} for {snapshot.get('file_name') or 'model'}.",
+                            details={"state": state, "file_path": snapshot.get("file_path")},
+                            extra={"completed_at": datetime.now(timezone.utc).isoformat()},
+                        )
                     self._active_job_context = None
                 self._last_job_state = state
             except asyncio.CancelledError:
@@ -2025,6 +2278,13 @@ class PrinterService:
                 actor=actor,
                 details={"queue_item_id": item_id, "start_at": start_at},
             )
+            if item.get("job_id"):
+                self.update_submitted_job(
+                    str(item["job_id"]),
+                    status="queued",
+                    message=f"Queue schedule updated for {Path(str(item.get('file_path') or '')).name or 'model'}.",
+                    details={"queue_item_id": item_id, "start_at": start_at},
+                )
             return {"ok": True, "item": item, "queue": self.queue_snapshot()}
         raise ValueError(f"Unknown queue item: {item_id}")
 
@@ -2045,6 +2305,13 @@ class PrinterService:
                 actor=actor,
                 details={"queue_item_id": item_id, "direction": direction},
             )
+            if item.get("job_id"):
+                self.update_submitted_job(
+                    str(item["job_id"]),
+                    status="queued",
+                    message=f"Queue order updated for {Path(str(item.get('file_path') or '')).name or 'model'}.",
+                    details={"queue_item_id": item_id, "direction": direction},
+                )
             return {"ok": True, "queue": self.queue_snapshot()}
         raise ValueError(f"Unknown queue item: {item_id}")
 
@@ -2061,6 +2328,13 @@ class PrinterService:
                 severity="warning",
                 details={"queue_item_id": item_id},
             )
+            if removed.get("job_id"):
+                self.update_submitted_job(
+                    str(removed["job_id"]),
+                    status="cancelled",
+                    message=f"Queue entry removed for {Path(str(removed.get('file_path') or '')).name or 'model'}.",
+                    details={"queue_item_id": item_id, "actor": actor},
+                )
             return {"ok": True, "removed": removed, "queue": self.queue_snapshot()}
         raise ValueError(f"Unknown queue item: {item_id}")
 
@@ -2140,6 +2414,25 @@ class PrinterService:
                 request = OrderworksPrintJobRequest(**{k: v for k, v in due_item.items() if k in OrderworksPrintJobRequest.model_fields})
                 result = await self.start_orderworks_print_job(request, actor=f"queue:{due_item.get('actor') or 'system'}")
                 if result.get("submitted"):
+                    if due_item.get("job_id"):
+                        if self._active_job_context is None:
+                            self._active_job_context = {}
+                        self._active_job_context.update(
+                            {
+                                "job_id": due_item.get("job_id"),
+                                "model_id": due_item.get("source_model_id"),
+                                "model_name": due_item.get("display_name"),
+                                "source_model_url": due_item.get("source_model_url"),
+                                "source_download_url": due_item.get("source_download_url"),
+                            }
+                        )
+                        self.update_submitted_job(
+                            str(due_item["job_id"]),
+                            status="started",
+                            message=f"Printer started queued job for {Path(request.file_path).name}.",
+                            details={"queue_item_id": due_item.get("id"), "file_path": request.file_path},
+                            extra={"started_at": datetime.now(timezone.utc).isoformat()},
+                        )
                     self._queue_items = [item for item in self._queue_items if item.get("id") != due_item.get("id")]
                     self._save_queue()
                     self._record_timeline(
@@ -2149,6 +2442,13 @@ class PrinterService:
                         details={"queue_item_id": due_item.get("id"), "file_path": request.file_path},
                     )
                 else:
+                    if due_item.get("job_id"):
+                        self.update_submitted_job(
+                            str(due_item["job_id"]),
+                            status="submit_failed",
+                            message=f"Printer rejected queued job for {Path(request.file_path).name}.",
+                            details={"queue_item_id": due_item.get("id"), "file_path": request.file_path},
+                        )
                     self._record_timeline(
                         "queue_submit_failed",
                         f"Queued job failed to submit for {Path(request.file_path).name}.",
@@ -2529,5 +2829,167 @@ class MultiPrinterManager:
     async def stop(self) -> None:
         for service in self._services.values():
             await service.stop()
+
+
+class PrintJobManager:
+    def __init__(self, printer_manager: MultiPrinterManager, works_service: WorksService) -> None:
+        self._printer_manager = printer_manager
+        self._works_service = works_service
+
+    async def _resolve_printer(self, printer_id: str | None) -> PrinterService:
+        if printer_id:
+            service = self._printer_manager.get(printer_id)
+            state = await service.state()
+            if not state.get("connected"):
+                raise ValueError(f"Printer {printer_id} is not connected.")
+            return service
+
+        candidates: list[tuple[bool, int, str, PrinterService]] = []
+        for entry in self._printer_manager.list_items():
+            service = self._printer_manager.get(entry["id"])
+            state = await service.state()
+            if not state.get("connected"):
+                continue
+            queue = state.get("queue") or {}
+            candidates.append((service.job_busy(), int(queue.get("count") or 0), entry["id"], service))
+
+        if not candidates:
+            raise ValueError("No connected printers are available.")
+
+        candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+        return candidates[0][3]
+
+    def _build_preferred_name(self, source_item: dict[str, Any], payload: MakerworksSubmitJobRequest, asset: dict[str, Any]) -> str:
+        preferred_base = re.sub(
+            r"[^A-Za-z0-9._-]+",
+            "-",
+            f"makerworks-{source_item.get('id') or payload.model_id}-{source_item.get('name') or 'model'}",
+        ).strip("._-")
+        preferred_name = f"{preferred_base[:96]}{Path(str(asset.get('filename') or '')).suffix or '.3mf'}"
+        if str(asset.get("filename") or "").lower().endswith(".gcode.3mf"):
+            preferred_name = f"{preferred_base[:96]}.gcode.3mf"
+        return preferred_name
+
+    async def submit_makerworks_job(self, payload: MakerworksSubmitJobRequest, actor: str = "dashboard") -> dict[str, Any]:
+        target_printer = await self._resolve_printer(payload.printer_id)
+
+        idempotency_key = str(payload.idempotency_key or "").strip()
+        if idempotency_key:
+            existing = target_printer.find_submitted_job_by_idempotency(idempotency_key)
+            if existing is not None:
+                return {"ok": True, "created": False, "job": existing}
+
+        detail = await self._works_service.makerworks_library_item(payload.model_id, include_raw=False)
+        source_item = detail["item"]
+        if not source_item.get("queue_supported"):
+            raise ValueError(source_item.get("printer_handoff_note") or "This MakerWorks model cannot be queued yet.")
+
+        asset = await self._works_service.download_asset("makerworks", str(source_item.get("download_url") or ""))
+        preferred_name = self._build_preferred_name(source_item, payload, asset)
+        staged = await target_printer.stage_project_bytes(bytes(asset["content"]), preferred_name)
+
+        job_id = uuid4().hex
+        queue_request = QueuePrintJobRequest(
+            file_path=str(staged["file_path"]),
+            plate_gcode=payload.plate_gcode,
+            use_ams=payload.use_ams,
+            ams_mapping=payload.ams_mapping,
+            bed_type=payload.bed_type,
+            timelapse=payload.timelapse,
+            bed_leveling=payload.bed_leveling,
+            flow_cali=payload.flow_cali,
+            vibration_cali=payload.vibration_cali,
+            layer_inspect=payload.layer_inspect,
+            start_at=payload.start_at,
+        )
+
+        queue_result = await target_printer.queue_print_job(
+            queue_request,
+            actor=actor,
+            metadata={
+                "job_id": job_id,
+                "display_name": source_item.get("name"),
+                "source": "makerworks",
+                "source_model_id": source_item.get("id"),
+                "source_model_url": source_item.get("model_url"),
+                "source_download_url": source_item.get("download_url"),
+                "source_file_type": source_item.get("file_type"),
+                "staged_file_name": staged.get("file_name"),
+            },
+        )
+        queue_item = queue_result["item"]
+        submitted_job = target_printer.create_submitted_job(
+            {
+                "id": job_id,
+                "source": "makerworks",
+                "status": "queued",
+                "printer_id": target_printer.printer_id,
+                "printer_name": target_printer.display_name,
+                "queue_item_id": queue_item.get("id"),
+                "idempotency_key": idempotency_key or None,
+                "source_job_id": payload.source_job_id,
+                "source_order_id": payload.source_order_id,
+                "model_id": source_item.get("id"),
+                "model_name": source_item.get("name"),
+                "model_url": source_item.get("model_url"),
+                "download_url": source_item.get("download_url"),
+                "file_type": source_item.get("file_type"),
+                "file_path": staged.get("file_path"),
+                "file_name": staged.get("file_name"),
+                "plate_gcode": payload.plate_gcode,
+                "start_at": queue_item.get("start_at"),
+                "use_ams": payload.use_ams,
+                "ams_mapping": payload.ams_mapping,
+                "actor": actor,
+                "metadata": payload.metadata or {},
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            message=f"Queued MakerWorks model {source_item.get('name') or payload.model_id}.",
+        )
+        target_printer._record_timeline(
+            "job_accept",
+            f"Accepted MakerWorks job for {source_item.get('name') or payload.model_id}.",
+            actor=actor,
+            details={"job_id": job_id, "queue_item_id": queue_item.get("id"), "model_id": source_item.get("id")},
+        )
+        return {"ok": True, "created": True, "job": submitted_job, "source_item": source_item, "queue": queue_result["queue"]}
+
+    def list_jobs(self, *, printer_id: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+        if printer_id:
+            return self._printer_manager.get(printer_id).submitted_jobs_snapshot(status=status)
+
+        items: list[dict[str, Any]] = []
+        for entry in self._printer_manager.list_items():
+            items.extend(self._printer_manager.get(entry["id"]).submitted_jobs_snapshot(status=status))
+        items.sort(key=lambda item: str(item.get("created_at") or item.get("updated_at") or ""), reverse=True)
+        return items
+
+    def get_job(self, job_id: str, *, printer_id: str | None = None) -> dict[str, Any]:
+        if printer_id:
+            return self._printer_manager.get(printer_id).submitted_job(job_id)
+
+        for entry in self._printer_manager.list_items():
+            service = self._printer_manager.get(entry["id"])
+            try:
+                return service.submitted_job(job_id)
+            except ValueError:
+                continue
+        raise ValueError(f"Unknown submitted job: {job_id}")
+
+    async def sync_job_to_makerworks(self, job_id: str, *, printer_id: str | None = None, force: bool = False) -> dict[str, Any]:
+        if printer_id:
+            service = self._printer_manager.get(printer_id)
+            job = service.submitted_job(job_id)
+            return await service._sync_submitted_job_to_makerworks(job, force=force)
+
+        for entry in self._printer_manager.list_items():
+            service = self._printer_manager.get(entry["id"])
+            try:
+                job = service.submitted_job(job_id)
+            except ValueError:
+                continue
+            return await service._sync_submitted_job_to_makerworks(job, force=force)
+        raise ValueError(f"Unknown submitted job: {job_id}")
 
 

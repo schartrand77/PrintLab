@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
-from app.services import PrinterService
+from app.services import MakerworksSubmitJobRequest, PrinterService, PrintJobManager
 
 
 def _service() -> PrinterService:
@@ -49,3 +50,126 @@ def test_queue_due_item_waits_for_future_schedule() -> None:
     ]
 
     assert service._queue_due_item() is None
+
+
+def test_submitted_job_lifecycle_updates_status() -> None:
+    service = _service()
+    created = service.create_submitted_job(
+        {
+            "id": "job-1",
+            "status": "queued",
+            "file_name": "widget.3mf",
+            "file_path": "/cache/widget.3mf",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+        message="Queued widget.",
+    )
+
+    assert created["status"] == "queued"
+    assert created["history"][0]["message"] == "Queued widget."
+
+    updated = service.update_submitted_job(
+        "job-1",
+        status="completed",
+        message="Widget completed.",
+        extra={"successful_gcode_id": "record-1"},
+    )
+
+    assert updated["status"] == "completed"
+    assert updated["successful_gcode_id"] == "record-1"
+    assert updated["history"][0]["message"] == "Widget completed."
+
+
+class _FakePrinter:
+    def __init__(self, printer_id: str, *, connected: bool, busy: bool, queue_count: int) -> None:
+        self.printer_id = printer_id
+        self.display_name = printer_id.upper()
+        self._connected = connected
+        self._busy = busy
+        self._queue_count = queue_count
+        self.created_jobs: list[dict[str, object]] = []
+
+    async def state(self) -> dict[str, object]:
+        return {"connected": self._connected, "queue": {"count": self._queue_count}}
+
+    def job_busy(self) -> bool:
+        return self._busy
+
+    def find_submitted_job_by_idempotency(self, idempotency_key: str) -> dict[str, object] | None:
+        for job in self.created_jobs:
+            if job.get("idempotency_key") == idempotency_key:
+                return job
+        return None
+
+    async def stage_project_bytes(self, content: bytes, preferred_name: str) -> dict[str, object]:
+        assert content == b"3mf"
+        return {"file_name": preferred_name, "file_path": f"/cache/{preferred_name}"}
+
+    async def queue_print_job(self, _request, actor: str = "dashboard", metadata=None) -> dict[str, object]:
+        self._queue_count += 1
+        return {
+            "item": {
+                "id": "queue-1",
+                "start_at": None,
+                **(metadata or {}),
+            },
+            "queue": {"count": self._queue_count},
+        }
+
+    def create_submitted_job(self, payload: dict[str, object], *, message: str = "Job accepted by PrintLab.") -> dict[str, object]:
+        payload = dict(payload)
+        payload["history"] = [{"message": message}]
+        self.created_jobs.append(payload)
+        return payload
+
+    def _record_timeline(self, *_args, **_kwargs) -> None:
+        return None
+
+
+class _FakePrinterManager:
+    def __init__(self, printers: list[_FakePrinter]) -> None:
+        self._printers = {printer.printer_id: printer for printer in printers}
+
+    def list_items(self) -> list[dict[str, str]]:
+        return [{"id": printer_id} for printer_id in self._printers]
+
+    def get(self, printer_id: str):
+        return self._printers[printer_id]
+
+
+class _FakeWorksService:
+    async def makerworks_library_item(self, model_id: str, *, include_raw: bool = False) -> dict[str, object]:
+        assert include_raw is False
+        return {
+            "item": {
+                "id": model_id,
+                "name": "Widget",
+                "model_url": "https://makerworks.local/models/widget",
+                "download_url": "https://makerworks.local/files/widget.3mf",
+                "file_type": "3mf",
+                "queue_supported": True,
+            }
+        }
+
+    async def download_asset(self, service: str, asset_url: str) -> dict[str, object]:
+        assert service == "makerworks"
+        assert asset_url.endswith("widget.3mf")
+        return {"content": b"3mf", "filename": "widget.3mf"}
+
+
+def test_print_job_manager_auto_selects_idle_connected_printer() -> None:
+    busy = _FakePrinter("busy-printer", connected=True, busy=True, queue_count=0)
+    idle = _FakePrinter("idle-printer", connected=True, busy=False, queue_count=1)
+    offline = _FakePrinter("offline-printer", connected=False, busy=False, queue_count=0)
+    manager = PrintJobManager(_FakePrinterManager([busy, idle, offline]), _FakeWorksService())
+
+    result = asyncio.run(
+        manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(model_id="widget-1", idempotency_key="mw-123"),
+            actor="makerworks",
+        )
+    )
+
+    assert result["created"] is True
+    assert result["job"]["printer_id"] == "idle-printer"
+    assert idle.created_jobs[0]["idempotency_key"] == "mw-123"
