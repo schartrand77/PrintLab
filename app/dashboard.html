@@ -689,6 +689,32 @@
       min-width: 260px;
       font-size: 16px;
     }
+    .library-switch {
+      display: inline-flex;
+      gap: 6px;
+      padding: 4px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.66);
+      background: rgba(255, 255, 255, 0.5);
+    }
+    .library-tab {
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: #3c5874;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 7px 12px;
+      cursor: pointer;
+    }
+    .library-tab.active {
+      background: linear-gradient(145deg, #2fa5ff, #1f84ea);
+      color: #fff;
+    }
+    .library-note {
+      flex: 1 1 100%;
+      min-height: 18px;
+    }
     .model-grid {
       padding: 12px 14px 16px;
       display: grid;
@@ -741,15 +767,42 @@
       cursor: pointer;
       padding: 8px 10px;
     }
+    a.print-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+    }
     .print-btn.secondary {
       background: rgba(255, 255, 255, 0.8);
       color: #294258;
       border: 1px solid rgba(163, 194, 223, 0.5);
     }
+    .print-btn[disabled] {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
     .model-actions {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
+    }
+    .model-actions.single {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .model-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .model-pill {
+      border-radius: 999px;
+      border: 1px solid rgba(163, 194, 223, 0.45);
+      background: rgba(255, 255, 255, 0.78);
+      color: #41627f;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 8px;
     }
     .queue-tools {
       display: grid;
@@ -1191,13 +1244,17 @@
   <div id="modelsModal" class="modal" onclick="onModalBackdrop(event)">
     <div class="modal-panel">
       <div class="modal-head">
-        <div class="modal-title">SD Card Models</div>
+        <div id="modelsModalTitle" class="modal-title">Model Library</div>
         <button class="close" title="Close" onclick="closeModelsModal()">&times;</button>
       </div>
       <div class="modal-tools">
-        <button class="btn" style="height:36px;font-size:16px;padding:0 12px" onclick="loadSdModels()">Refresh</button>
+        <div class="library-switch" role="tablist" aria-label="Model source">
+          <button id="libraryTabSd" class="library-tab active" type="button" role="tab" aria-selected="true" onclick="switchLibrarySource('sd')">Printer SD</button>
+          <button id="libraryTabMakerworks" class="library-tab" type="button" role="tab" aria-selected="false" onclick="switchLibrarySource('makerworks')">MakerWorks</button>
+        </div>
+        <button class="btn" style="height:36px;font-size:16px;padding:0 12px" onclick="refreshLibrarySource()">Refresh</button>
         <input id="modelSearch" class="search" type="text" placeholder="Search by filename..." oninput="debouncedLoadModels()">
-        <div class="queue-tools">
+        <div id="queueTools" class="queue-tools">
           <label class="label">Start At
             <input id="queueStartAt" class="field" type="datetime-local" aria-label="Scheduled start time">
           </label>
@@ -1211,7 +1268,8 @@
             </select>
           </label>
         </div>
-        <div class="chip">Total: <span id="modelCount">0</span></div>
+        <div id="libraryNotice" class="model-meta library-note"></div>
+        <div class="chip"><span id="modelCountLabel">SD Card</span>: <span id="modelCount">0</span></div>
       </div>
       <div id="modelsGrid" class="model-grid"></div>
     </div>
@@ -1258,6 +1316,7 @@
     setPrinterDisplayName(window.PRINTER_NAME || PRINTER_ID);
 
     let viewMode = "photo";
+    let librarySource = "sd";
     let modelSearchTimer = null;
     let swRegistration = null;
     let deferredInstallPrompt = null;
@@ -1726,6 +1785,48 @@
       };
     }
 
+    function updateLibraryChrome() {
+      const isMakerworks = librarySource === "makerworks";
+      const sdTab = document.getElementById("libraryTabSd");
+      const makerworksTab = document.getElementById("libraryTabMakerworks");
+      const title = document.getElementById("modelsModalTitle");
+      const search = document.getElementById("modelSearch");
+      const queueTools = document.getElementById("queueTools");
+      const countLabel = document.getElementById("modelCountLabel");
+      const notice = document.getElementById("libraryNotice");
+
+      if (sdTab) {
+        sdTab.classList.toggle("active", !isMakerworks);
+        sdTab.setAttribute("aria-selected", isMakerworks ? "false" : "true");
+      }
+      if (makerworksTab) {
+        makerworksTab.classList.toggle("active", isMakerworks);
+        makerworksTab.setAttribute("aria-selected", isMakerworks ? "true" : "false");
+      }
+      if (title) title.textContent = isMakerworks ? "MakerWorks Library" : "Model Library";
+      if (search) search.placeholder = isMakerworks ? "Search MakerWorks models..." : "Search by filename...";
+      if (queueTools) queueTools.hidden = isMakerworks;
+      if (countLabel) countLabel.textContent = isMakerworks ? "MakerWorks" : "SD Card";
+      if (notice) {
+        notice.textContent = isMakerworks
+          ? "Browse MakerWorks models now. Printer handoff is staged for the next step."
+          : "Browse files already available on this printer and start or queue them immediately.";
+      }
+    }
+
+    function refreshLibrarySource() {
+      if (librarySource === "makerworks") {
+        return loadMakerworksModels();
+      }
+      return loadSdModels();
+    }
+
+    function switchLibrarySource(source) {
+      librarySource = source === "makerworks" ? "makerworks" : "sd";
+      updateLibraryChrome();
+      refreshLibrarySource();
+    }
+
     async function queueModel(filePath) {
       const payload = currentQueuePayload(filePath);
       await post("/api/queue", payload);
@@ -1904,7 +2005,8 @@
 
     function openModelsModal() {
       document.getElementById("modelsModal").classList.add("open");
-      loadSdModels();
+      updateLibraryChrome();
+      refreshLibrarySource();
     }
 
     function closeModelsModal() {
@@ -1919,7 +2021,7 @@
 
     function debouncedLoadModels() {
       if (modelSearchTimer) clearTimeout(modelSearchTimer);
-      modelSearchTimer = setTimeout(() => loadSdModels(), 260);
+      modelSearchTimer = setTimeout(() => refreshLibrarySource(), 260);
     }
 
     async function loadSdModels() {
@@ -1962,6 +2064,56 @@
         });
       } catch (e) {
         grid.innerHTML = "<div class='model-meta'>Failed to load SD card models.</div>";
+      }
+    }
+
+    async function loadMakerworksModels() {
+      const grid = document.getElementById("modelsGrid");
+      const count = document.getElementById("modelCount");
+      const q = (document.getElementById("modelSearch").value || "").trim();
+      grid.innerHTML = "<div class='model-meta'>Loading MakerWorks library...</div>";
+      try {
+        const res = await fetch(`${apiPath("/api/works/makerworks/library")}?query=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.detail || `HTTP ${res.status}`);
+        }
+        const items = data.items || [];
+        count.textContent = String(data.total ?? items.length);
+        if (!items.length) {
+          grid.innerHTML = "<div class='model-meta'>No MakerWorks models matched this search.</div>";
+          return;
+        }
+
+        grid.innerHTML = items.map((item) => {
+          const tags = Array.isArray(item.tags) ? item.tags.filter(Boolean).slice(0, 4) : [];
+          const summary = item.summary || item.description || "No summary available.";
+          const updated = item.updated_at || item.created_at;
+          const routeLabel = item.printer_handoff_ready ? "Assets ready" : "Metadata only";
+          const openUrl = item.model_url || item.download_url || "";
+          return `
+          <article class="model-card">
+            <div class="model-preview">
+              <img src="${escapeHtml(item.thumbnail_url || placeholderThumb)}" alt="model preview" onerror="this.onerror=null;this.src='${placeholderThumb}'">
+            </div>
+            <div class="model-body">
+              <div class="model-name">${escapeHtml(item.name || "Untitled model")}</div>
+              <div class="model-meta">${escapeHtml(item.author || "Unknown creator")}${updated ? ` - Updated ${escapeHtml(formatDate(updated))}` : ""}</div>
+              <div class="model-meta">${escapeHtml(summary)}</div>
+              <div class="model-chip-row">
+                <span class="model-pill">${escapeHtml(routeLabel)}</span>
+                ${tags.map((tag) => `<span class="model-pill">${escapeHtml(tag)}</span>`).join("")}
+              </div>
+              <div class="model-meta">${escapeHtml(item.printer_handoff_note || "Printer routing will be added next.")}</div>
+              <div class="model-actions single">
+                <a class="print-btn secondary" href="${escapeHtml(openUrl || "#")}" target="_blank" rel="noreferrer"${openUrl ? "" : " aria-disabled=\"true\" onclick=\"return false;\""}>Open Model</a>
+              </div>
+            </div>
+          </article>
+        `;
+        }).join("");
+      } catch (e) {
+        grid.innerHTML = `<div class='model-meta'>Failed to load MakerWorks models. ${escapeHtml(String(e?.message || e))}</div>`;
       }
     }
 
@@ -2364,6 +2516,7 @@
     applyTheme(document.documentElement.dataset.theme);
     initPwa();
     initQueueControls();
+    updateLibraryChrome();
     connectPrinterEvents();
     load();
     setInterval(load, 3000);

@@ -70,6 +70,8 @@ Interactive API docs are published at:
 - `POST /api/printers/{printer_id}/actions/...` (printer-scoped equivalents for all action endpoints)
 - `GET /api/works/services`
 - `GET /api/works/{makerworks|orderworks|stockworks}/health?path=/health`
+- `GET /api/works/makerworks/library`
+- `GET /api/works/makerworks/library/{model_id}`
 - `POST /api/works/{makerworks|orderworks|stockworks}/request`
   with:
   `{"method":"GET|POST|PUT|PATCH|DELETE","path":"/v1/resource","query":{},"body":{},"headers":{},"timeout_seconds":20}`
@@ -77,6 +79,8 @@ Interactive API docs are published at:
   with:
   `{"file_path":"/cache/model.3mf","plate_gcode":"Metadata/plate_1.gcode","use_ams":true,"ams_mapping":[0]}`
   (optional query: `?printer_id={printer_id}`)
+- `GET /api/printers/{printer_id}/works/...`
+  printer-scoped equivalents for `health`, `request`, MakerWorks library browsing, and `orderworks/print-job`
 - `GET /api/successful-gcodes`
 - `GET /api/printers/{printer_id}/successful-gcodes`
 - `POST /api/successful-gcodes/{record_id}/sync-makerworks`
@@ -87,6 +91,8 @@ Interactive API docs are published at:
 Configure each external system in `.env`:
 
 - `MAKERWORKS_BASE_URL`, `MAKERWORKS_API_KEY`, `MAKERWORKS_BEARER_TOKEN`, `MAKERWORKS_AUTH_HEADER`, `MAKERWORKS_VERIFY_SSL`, `MAKERWORKS_ALLOWED_PATHS`, `MAKERWORKS_ALLOWED_METHODS`
+- MakerWorks library normalization:
+  `MAKERWORKS_LIBRARY_LIST_PATH`, `MAKERWORKS_LIBRARY_DETAIL_PATH_TEMPLATE`, `MAKERWORKS_LIBRARY_SEARCH_PARAM`, `MAKERWORKS_LIBRARY_PAGE_PARAM`, `MAKERWORKS_LIBRARY_PAGE_SIZE_PARAM`, `MAKERWORKS_LIBRARY_PAGE_SIZE`, `MAKERWORKS_LIBRARY_ITEMS_PATH`, `MAKERWORKS_LIBRARY_TOTAL_PATH`, `MAKERWORKS_LIBRARY_ID_PATH`, `MAKERWORKS_LIBRARY_NAME_PATH`, `MAKERWORKS_LIBRARY_SUMMARY_PATH`, `MAKERWORKS_LIBRARY_DESCRIPTION_PATH`, `MAKERWORKS_LIBRARY_THUMBNAIL_PATH`, `MAKERWORKS_LIBRARY_MODEL_URL_PATH`, `MAKERWORKS_LIBRARY_DOWNLOAD_URL_PATH`, `MAKERWORKS_LIBRARY_AUTHOR_PATH`, `MAKERWORKS_LIBRARY_TAGS_PATH`, `MAKERWORKS_LIBRARY_FILES_PATH`, `MAKERWORKS_LIBRARY_CREATED_AT_PATH`, `MAKERWORKS_LIBRARY_UPDATED_AT_PATH`
 - `ORDERWORKS_BASE_URL`, `ORDERWORKS_API_KEY`, `ORDERWORKS_BEARER_TOKEN`, `ORDERWORKS_AUTH_HEADER`, `ORDERWORKS_VERIFY_SSL`, `ORDERWORKS_ALLOWED_PATHS`, `ORDERWORKS_ALLOWED_METHODS`
 - `STOCKWORKS_BASE_URL`, `STOCKWORKS_API_KEY`, `STOCKWORKS_BEARER_TOKEN`, `STOCKWORKS_AUTH_HEADER`, `STOCKWORKS_VERIFY_SSL`, `STOCKWORKS_ALLOWED_PATHS`, `STOCKWORKS_ALLOWED_METHODS`
 
@@ -98,6 +104,11 @@ Auth behavior:
 - `*_ALLOWED_PATHS` is a comma-separated prefix allowlist. Requests outside the list are rejected.
 - `*_ALLOWED_METHODS` is optional. If set, only those methods are proxied.
 - All env vars also support Docker-style file-based secrets via `*_FILE`.
+
+MakerWorks library notes:
+- The dashboard now has a `MakerWorks` tab inside the model library modal.
+- Responses are normalized into a stable shape (`id`, `name`, `summary`, `thumbnail_url`, `model_url`, `download_url`, `author`, `tags`, `printer_handoff_ready`) so the UI does not need to match your upstream schema exactly.
+- This pass is read-only for external models: it surfaces whether downloadable assets exist, and leaves the actual printer handoff as the next step.
 
 Successful G-code tracking:
 - Every completed print that reaches `FINISH` or `COMPLETE` is persisted to `/data/successful_gcodes_{printer_id}.json`.

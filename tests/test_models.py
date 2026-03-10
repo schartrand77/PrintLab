@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from app.main import create_app
 from app.models import QueuePrintJobRequest, WorksRequest
+from app.views import render_add_printer_html, render_gallery_html, render_makerworks_html
 
 
 def test_works_request_rejects_invalid_method() -> None:
@@ -21,3 +22,19 @@ def test_openapi_contains_queue_schema() -> None:
     schema = create_app().openapi()
     assert "/api/queue" in schema["paths"]
     assert "QueuePrintJobRequest" in schema["components"]["schemas"]
+
+
+def test_sidebar_pages_include_makerworks_navigation() -> None:
+    assert 'href="/makerworks"' in render_gallery_html()
+    assert 'href="/makerworks"' in render_add_printer_html()
+
+
+def test_render_makerworks_page_contains_queue_controls() -> None:
+    html = render_makerworks_html()
+    assert 'id="destinationPrinter"' in html
+    assert 'id="queueList"' in html
+    assert 'id="makerworksPageInfo"' in html
+    assert "Queue To Idle Printer" in html
+    assert "changeMakerworksPage" in html
+    assert "/api/works/makerworks/library" in html
+    assert "/works/makerworks/queue-job" in html

@@ -62,6 +62,20 @@ class QueuePrintJobRequest(OrderworksPrintJobRequest):
     start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
 
 
+class MakerworksQueueJobRequest(BaseModel):
+    model_id: str = Field(min_length=1)
+    start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
+    plate_gcode: str = Field(default="Metadata/plate_1.gcode")
+    use_ams: bool = True
+    ams_mapping: list[int] | None = None
+    bed_type: str = "auto"
+    timelapse: bool = False
+    bed_leveling: bool = True
+    flow_cali: bool = True
+    vibration_cali: bool = True
+    layer_inspect: bool = True
+
+
 class QueueUpdateRequest(BaseModel):
     start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
 

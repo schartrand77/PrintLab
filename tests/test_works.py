@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from app.main import create_app
 from app.services import PrinterService, WorksService
 
 
@@ -38,6 +39,17 @@ def test_request_allowlist_rejects_unlisted_method(monkeypatch) -> None:
         service._ensure_request_allowed(service._get_config("makerworks"), "POST", "/v1/orders")
 
 
+def test_makerworks_library_paths_are_kept_when_env_allowlist_is_legacy(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+    monkeypatch.setenv("MAKERWORKS_ALLOWED_PATHS", "/health")
+    service = WorksService()
+
+    cfg = service._get_config("makerworks")
+
+    assert "/health" in cfg["allowed_paths"]
+    assert "/api/models" in cfg["allowed_paths"]
+
+
 def test_secret_file_is_used_for_service_api_key(monkeypatch) -> None:
     secret_file = Path("data/test-makerworks-api-key.txt")
     secret_file.parent.mkdir(parents=True, exist_ok=True)
@@ -51,6 +63,106 @@ def test_secret_file_is_used_for_service_api_key(monkeypatch) -> None:
         assert service._get_config("makerworks")["api_key"] == "from-file"
     finally:
         secret_file.unlink(missing_ok=True)
+
+
+def test_makerworks_library_normalizes_common_payload(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+
+    class FakeResponse:
+        ok = True
+        status_code = 200
+        headers = {"content-type": "application/json"}
+
+        def json(self) -> dict[str, object]:
+            return {
+                "models": [
+                    {
+                        "id": 42,
+                        "title": "Desk Organizer",
+                        "material": "PLA",
+                        "coverImagePath": "/thumbs/42.png",
+                        "filePath": "/files/42.3mf",
+                        "href": "/models/42",
+                        "creditName": "PrintLab",
+                        "tags": ["storage", "desk"],
+                        "updated_at": "2026-03-09T12:00:00Z",
+                    }
+                ],
+                "total": 1,
+            }
+
+        @property
+        def text(self) -> str:
+            return ""
+
+    monkeypatch.setattr("app.services.requests.request", lambda **kwargs: FakeResponse())
+    service = WorksService()
+
+    result = service.makerworks_library_sync(query="desk")
+
+    assert result["count"] == 1
+    assert result["total"] == 1
+    assert result["items"][0]["id"] == "42"
+    assert result["items"][0]["name"] == "Desk Organizer"
+    assert result["items"][0]["summary"] == "PLA"
+    assert result["items"][0]["author"] == "PrintLab"
+    assert result["items"][0]["thumbnail_url"] == "https://makerworks.local/thumbs/42.png"
+    assert result["items"][0]["download_url"] == "https://makerworks.local/files/42.3mf"
+    assert result["items"][0]["model_url"] == "https://makerworks.local/models/42"
+    assert result["items"][0]["printer_handoff_ready"] is True
+
+
+def test_makerworks_library_item_normalizes_detail_payload(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+
+    class FakeResponse:
+        ok = True
+        status_code = 200
+        headers = {"content-type": "application/json"}
+
+        def json(self) -> dict[str, object]:
+            return {
+                "model": {
+                    "id": "widget-1",
+                    "title": "Widget",
+                    "description": "Test model",
+                    "filePath": "/files/widget-1.3mf",
+                }
+            }
+
+        @property
+        def text(self) -> str:
+            return ""
+
+    monkeypatch.setattr("app.services.requests.request", lambda **kwargs: FakeResponse())
+    service = WorksService()
+
+    result = service.makerworks_library_item_sync("widget-1")
+
+    assert result["item"]["id"] == "widget-1"
+    assert result["item"]["name"] == "Widget"
+    assert result["item"]["printer_handoff_ready"] is True
+    assert result["item"]["download_url"] == "https://makerworks.local/files/widget-1.3mf"
+    assert result["item"]["raw"]["title"] == "Widget"
+
+
+def test_makerworks_library_surfaces_upstream_http_errors(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+
+    class FakeResponse:
+        ok = False
+        status_code = 404
+        headers = {"content-type": "text/html; charset=utf-8"}
+
+        @property
+        def text(self) -> str:
+            return "<html><body>Not found</body></html>"
+
+    monkeypatch.setattr("app.services.requests.request", lambda **kwargs: FakeResponse())
+    service = WorksService()
+
+    with pytest.raises(RuntimeError, match="MakerWorks library request failed"):
+        service.makerworks_library_sync()
 
 
 def test_resolve_sd_path_from_filename_only() -> None:
@@ -108,3 +220,9 @@ def test_resolve_sd_path_from_internal_plate_path_uses_current_subtask_name() ->
 
     resolved = service._resolve_sd_path_sync(FakeFtp(), "/data/Metadata/plate_1.gcode")
     assert resolved == "/cache/CubeStack_desk_lamp_(no_glue,_no_supports).gcode.3mf"
+
+
+def test_openapi_contains_makerworks_library_paths() -> None:
+    schema = create_app().openapi()
+    assert "/api/works/makerworks/library" in schema["paths"]
+    assert "/api/printers/{printer_id}/works/makerworks/library" in schema["paths"]

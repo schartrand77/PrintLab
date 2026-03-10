@@ -185,6 +185,20 @@ class QueuePrintJobRequest(OrderworksPrintJobRequest):
     start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
 
 
+class MakerworksQueueJobRequest(BaseModel):
+    model_id: str = Field(min_length=1)
+    start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
+    plate_gcode: str = Field(default="Metadata/plate_1.gcode")
+    use_ams: bool = True
+    ams_mapping: list[int] | None = None
+    bed_type: str = "auto"
+    timelapse: bool = False
+    bed_leveling: bool = True
+    flow_cali: bool = True
+    vibration_cali: bool = True
+    layer_inspect: bool = True
+
+
 class QueueUpdateRequest(BaseModel):
     start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
 
@@ -239,6 +253,11 @@ class WorksService:
             prefix = self._path_template_prefix(path_template)
             if prefix:
                 prefixes.append(prefix)
+            library_cfg = self._makerworks_library_config()
+            for candidate in (library_cfg["list_path"], library_cfg["detail_path_template"]):
+                library_prefix = self._path_template_prefix(candidate)
+                if library_prefix and library_prefix not in prefixes:
+                    prefixes.append(library_prefix)
         return prefixes
 
     def _path_template_prefix(self, path_template: str) -> str | None:
@@ -253,6 +272,386 @@ class WorksService:
     def _parse_csv(self, raw: str) -> list[str]:
         return [item.strip() for item in raw.split(",") if item.strip()]
 
+    def _clean_optional_path(self, raw: str, default: str = "") -> str:
+        value = str(raw or default).strip()
+        if not value:
+            return ""
+        if not value.startswith("/"):
+            value = f"/{value}"
+        return value
+
+    def _env_int(self, name: str, default: int) -> int:
+        raw = get_env(name, str(default))
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return default
+
+    def _makerworks_library_config(self) -> dict[str, Any]:
+        return {
+            "list_path": self._clean_optional_path(get_env("MAKERWORKS_LIBRARY_LIST_PATH", "/api/models"), "/api/models"),
+            "detail_path_template": self._clean_optional_path(
+                get_env("MAKERWORKS_LIBRARY_DETAIL_PATH_TEMPLATE", "/api/models/{model_id}"),
+                "/api/models/{model_id}",
+            ),
+            "search_param": get_env("MAKERWORKS_LIBRARY_SEARCH_PARAM", "q"),
+            "page_param": get_env("MAKERWORKS_LIBRARY_PAGE_PARAM", "page"),
+            "page_size_param": get_env("MAKERWORKS_LIBRARY_PAGE_SIZE_PARAM", "page_size"),
+            "default_page_size": max(1, min(100, self._env_int("MAKERWORKS_LIBRARY_PAGE_SIZE", 24))),
+            "items_path": get_env("MAKERWORKS_LIBRARY_ITEMS_PATH", "models|items|data.items|results"),
+            "total_path": get_env("MAKERWORKS_LIBRARY_TOTAL_PATH", "total|count|meta.total"),
+            "id_path": get_env("MAKERWORKS_LIBRARY_ID_PATH", "id|model_id|slug"),
+            "name_path": get_env("MAKERWORKS_LIBRARY_NAME_PATH", "title|name"),
+            "summary_path": get_env("MAKERWORKS_LIBRARY_SUMMARY_PATH", "summary|subtitle|excerpt|tagline|material"),
+            "description_path": get_env("MAKERWORKS_LIBRARY_DESCRIPTION_PATH", "description|details|content"),
+            "thumbnail_path": get_env(
+                "MAKERWORKS_LIBRARY_THUMBNAIL_PATH",
+                "coverImagePath|thumbnail_url|thumbnail|thumbnail.url|cover.url|image.url|preview_url",
+            ),
+            "model_url_path": get_env("MAKERWORKS_LIBRARY_MODEL_URL_PATH", "href|url|model_url|links.self|links.web"),
+            "download_url_path": get_env(
+                "MAKERWORKS_LIBRARY_DOWNLOAD_URL_PATH",
+                "filePath|download_url|files.0.download_url|files.0.url|assets.0.download_url|assets.0.url|viewerFilePath",
+            ),
+            "author_path": get_env(
+                "MAKERWORKS_LIBRARY_AUTHOR_PATH",
+                "creditName|author.name|author.display_name|author|owner.name|owner.display_name",
+            ),
+            "tags_path": get_env("MAKERWORKS_LIBRARY_TAGS_PATH", "tags|categories|labels"),
+            "files_path": get_env("MAKERWORKS_LIBRARY_FILES_PATH", "files|assets"),
+            "created_at_path": get_env("MAKERWORKS_LIBRARY_CREATED_AT_PATH", "created_at|createdAt|published_at"),
+            "updated_at_path": get_env("MAKERWORKS_LIBRARY_UPDATED_AT_PATH", "updated_at|updatedAt|modified_at"),
+        }
+
+    def _path_tokens(self, path: str) -> list[str]:
+        normalized = path.replace("[", ".").replace("]", "")
+        return [token for token in normalized.split(".") if token]
+
+    def _extract_path_value(self, payload: Any, path_expr: str) -> Any:
+        for raw_path in str(path_expr or "").split("|"):
+            path = raw_path.strip()
+            if not path or path == ".":
+                if payload is not None:
+                    return payload
+                continue
+
+            current = payload
+            valid = True
+            for token in self._path_tokens(path):
+                if isinstance(current, dict):
+                    if token not in current:
+                        valid = False
+                        break
+                    current = current[token]
+                elif isinstance(current, list):
+                    if not token.isdigit():
+                        valid = False
+                        break
+                    index = int(token)
+                    if index < 0 or index >= len(current):
+                        valid = False
+                        break
+                    current = current[index]
+                else:
+                    valid = False
+                    break
+
+            if valid and current is not None:
+                return current
+        return None
+
+    def _stringify_library_value(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            clean = value.strip()
+            return clean or None
+        if isinstance(value, (int, float)):
+            return str(value)
+        if isinstance(value, dict):
+            for key in ("name", "title", "display_name", "label", "value"):
+                candidate = value.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+        return None
+
+    def _listify_library_value(self, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            items = [self._stringify_library_value(item) for item in value]
+            return [item for item in items if item]
+        if isinstance(value, str):
+            items = [part.strip() for part in value.split(",")]
+            return [item for item in items if item]
+        single = self._stringify_library_value(value)
+        return [single] if single else []
+
+    def _absolutize_external_url(self, base_url: str, value: str | None) -> str | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        if raw.startswith("http://") or raw.startswith("https://"):
+            return raw
+        return f"{base_url.rstrip('/')}/{raw.lstrip('/')}"
+
+    def _request_error_message(self, response: dict[str, Any], fallback: str) -> str:
+        if response.get("ok"):
+            return fallback
+        status_code = response.get("status_code")
+        body = response.get("body")
+        snippet: str | None = None
+        if isinstance(body, dict):
+            for key in ("detail", "error", "message"):
+                value = body.get(key)
+                if isinstance(value, str) and value.strip():
+                    snippet = value.strip()
+                    break
+        elif isinstance(body, str):
+            compact = re.sub(r"\s+", " ", body).strip()
+            if compact:
+                snippet = compact[:180]
+        if snippet:
+            return f"{fallback} (status {status_code}): {snippet}"
+        return f"{fallback} (status {status_code})"
+
+    def _makerworks_queue_supported(self, download_url: str | None, file_type: str | None) -> bool:
+        lowered_url = str(download_url or "").lower()
+        lowered_type = str(file_type or "").lower()
+        if lowered_url.endswith(".gcode.3mf") or lowered_url.endswith(".3mf") or lowered_url.endswith(".gcode"):
+            return True
+        return lowered_type in {"3mf", "gcode", "gcode.3mf"}
+
+    def _normalize_makerworks_item(
+        self,
+        item: Any,
+        cfg: dict[str, Any],
+        *,
+        base_url: str,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        if not isinstance(item, dict):
+            raise ValueError("MakerWorks library item must be a JSON object.")
+
+        item_id = self._stringify_library_value(self._extract_path_value(item, cfg["id_path"]))
+        name = self._stringify_library_value(self._extract_path_value(item, cfg["name_path"])) or "Untitled model"
+        summary = self._stringify_library_value(self._extract_path_value(item, cfg["summary_path"]))
+        description = self._stringify_library_value(self._extract_path_value(item, cfg["description_path"]))
+        thumbnail_url = self._absolutize_external_url(
+            base_url,
+            self._stringify_library_value(self._extract_path_value(item, cfg["thumbnail_path"])),
+        )
+        model_url = self._absolutize_external_url(
+            base_url,
+            self._stringify_library_value(self._extract_path_value(item, cfg["model_url_path"])),
+        )
+        download_url = self._absolutize_external_url(
+            base_url,
+            self._stringify_library_value(self._extract_path_value(item, cfg["download_url_path"])),
+        )
+        author = self._stringify_library_value(self._extract_path_value(item, cfg["author_path"]))
+        tags = self._listify_library_value(self._extract_path_value(item, cfg["tags_path"]))
+        file_type = self._stringify_library_value(self._extract_path_value(item, "fileType|file_type|assetType"))
+        files = self._extract_path_value(item, cfg["files_path"])
+        file_count = len(files) if isinstance(files, list) else 0
+        has_assets = bool(download_url or file_count)
+        queue_supported = self._makerworks_queue_supported(download_url, file_type)
+
+        normalized = {
+            "source": "makerworks",
+            "id": item_id or name.lower().replace(" ", "-"),
+            "name": name,
+            "summary": summary,
+            "description": description,
+            "thumbnail_url": thumbnail_url,
+            "model_url": model_url,
+            "download_url": download_url,
+            "author": author,
+            "tags": tags,
+            "file_type": file_type,
+            "file_count": file_count,
+            "created_at": self._stringify_library_value(self._extract_path_value(item, cfg["created_at_path"])),
+            "updated_at": self._stringify_library_value(self._extract_path_value(item, cfg["updated_at_path"])),
+            "printer_handoff_ready": has_assets,
+            "queue_supported": queue_supported,
+            "printer_handoff_status": "queue_supported" if queue_supported else "metadata_only",
+            "printer_handoff_note": (
+                "Model can be staged and queued to an idle printer."
+                if queue_supported
+                else (
+                    "Model assets are available, but this file type is not queueable yet."
+                    if has_assets
+                    else "Library metadata is available, but no downloadable model asset was found."
+                )
+            ),
+        }
+        if include_raw:
+            normalized["raw"] = item
+        return normalized
+
+    def _service_request_headers(self, cfg: dict[str, Any], extra_headers: dict[str, str] | None = None) -> dict[str, str]:
+        headers: dict[str, str] = {"Accept": "*/*"}
+        if cfg["api_key"]:
+            headers[cfg["auth_header"]] = cfg["api_key"]
+        if cfg["bearer_token"]:
+            headers["Authorization"] = f"Bearer {cfg['bearer_token']}"
+        if extra_headers:
+            headers.update(extra_headers)
+        return headers
+
+    def download_asset_sync(self, service: str, asset_url: str, timeout_seconds: float = 120.0) -> dict[str, Any]:
+        cfg = self._get_config(service)
+        url = asset_url.strip()
+        if not url:
+            raise ValueError("Asset URL is required.")
+        if not (url.startswith("http://") or url.startswith("https://")):
+            url = self._build_url(cfg["base_url"], url)
+
+        response = requests.get(
+            url,
+            headers=self._service_request_headers(cfg),
+            timeout=timeout_seconds,
+            verify=cfg["verify_ssl"],
+        )
+        if not response.ok:
+            error_payload = {
+                "ok": response.ok,
+                "status_code": response.status_code,
+                "body": response.text,
+            }
+            raise RuntimeError(self._request_error_message(error_payload, f"{service} asset download failed"))
+        path = urlsplit(response.url or url).path
+        filename = Path(path).name or Path(urlsplit(url).path).name or "asset.bin"
+        return {"url": response.url or url, "filename": filename, "content": response.content, "content_type": response.headers.get("content-type")}
+
+    async def download_asset(self, service: str, asset_url: str, timeout_seconds: float = 120.0) -> dict[str, Any]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: self.download_asset_sync(service, asset_url, timeout_seconds))
+
+    def _makerworks_library_items(self, body: Any, cfg: dict[str, Any]) -> list[Any]:
+        if isinstance(body, list):
+            return body
+        if isinstance(body, dict):
+            extracted = self._extract_path_value(body, cfg["items_path"])
+            if isinstance(extracted, list):
+                return extracted
+        raise ValueError("MakerWorks library response did not contain a list of items.")
+
+    def _makerworks_library_query_params(self, cfg: dict[str, Any], query: str | None, page: int, page_size: int) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if query and cfg["search_param"]:
+            params[str(cfg["search_param"])] = query
+        if cfg["page_param"]:
+            params[str(cfg["page_param"])] = page
+        if cfg["page_size_param"]:
+            params[str(cfg["page_size_param"])] = page_size
+        return params
+
+    def makerworks_library_sync(
+        self,
+        *,
+        query: str | None = None,
+        page: int = 1,
+        page_size: int | None = None,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        service_cfg = self._get_config("makerworks")
+        library_cfg = self._makerworks_library_config()
+        page_value = max(1, int(page))
+        size_value = page_size if page_size is not None else int(library_cfg["default_page_size"])
+        size_value = max(1, min(100, int(size_value)))
+
+        if not library_cfg["list_path"]:
+            raise RuntimeError("MakerWorks library is not configured (missing MAKERWORKS_LIBRARY_LIST_PATH).")
+
+        payload = WorksRequest(
+            method="GET",
+            path=str(library_cfg["list_path"]),
+            query=self._makerworks_library_query_params(library_cfg, query, page_value, size_value),
+        )
+        response = self.request_sync("makerworks", payload)
+        if not response.get("ok"):
+            raise RuntimeError(self._request_error_message(response, "MakerWorks library request failed"))
+        body = response.get("body")
+        items = [
+            self._normalize_makerworks_item(
+                item,
+                library_cfg,
+                base_url=str(service_cfg["base_url"]),
+                include_raw=include_raw,
+            )
+            for item in self._makerworks_library_items(body, library_cfg)
+        ]
+        total = self._extract_path_value(body, library_cfg["total_path"]) if isinstance(body, dict) else None
+        total_value = int(total) if isinstance(total, (int, float)) else len(items)
+        return {
+            "service": service_cfg["service"],
+            "path": library_cfg["list_path"],
+            "configured": service_cfg["configured"],
+            "count": len(items),
+            "total": total_value,
+            "page": page_value,
+            "page_size": size_value,
+            "items": items,
+        }
+
+    async def makerworks_library(
+        self,
+        *,
+        query: str | None = None,
+        page: int = 1,
+        page_size: int | None = None,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.makerworks_library_sync(
+                query=query,
+                page=page,
+                page_size=page_size,
+                include_raw=include_raw,
+            ),
+        )
+
+    def makerworks_library_item_sync(self, model_id: str, *, include_raw: bool = True) -> dict[str, Any]:
+        library_cfg = self._makerworks_library_config()
+        template = str(library_cfg["detail_path_template"] or "").strip()
+        if not template:
+            raise RuntimeError("MakerWorks model detail is not configured (missing MAKERWORKS_LIBRARY_DETAIL_PATH_TEMPLATE).")
+
+        payload = WorksRequest(
+            method="GET",
+            path=template.format(model_id=quote(str(model_id), safe="")),
+        )
+        response = self.request_sync("makerworks", payload)
+        if not response.get("ok"):
+            raise RuntimeError(self._request_error_message(response, "MakerWorks model detail request failed"))
+        body = response.get("body")
+        if isinstance(body, dict):
+            raw_item = self._extract_path_value(body, "item|data|model") or body
+        else:
+            raw_item = body
+        item = self._normalize_makerworks_item(
+            raw_item,
+            library_cfg,
+            base_url=str(self._get_config("makerworks")["base_url"]),
+            include_raw=include_raw,
+        )
+        return {
+            "service": "makerworks",
+            "path": payload.path,
+            "configured": self._get_config("makerworks")["configured"],
+            "item": item,
+        }
+
+    async def makerworks_library_item(self, model_id: str, *, include_raw: bool = True) -> dict[str, Any]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.makerworks_library_item_sync(model_id, include_raw=include_raw),
+        )
+
     def _get_config(self, service: str) -> dict[str, Any]:
         key = self._service_env.get(service.lower())
         if key is None:
@@ -263,7 +662,12 @@ class WorksService:
         bearer_token = get_env(f"{key}_BEARER_TOKEN", "")
         auth_header = get_env(f"{key}_AUTH_HEADER", "X-API-Key") or "X-API-Key"
         verify_ssl = parse_bool(f"{key}_VERIFY_SSL", True)
-        allowed_paths = self._parse_csv(get_env(f"{key}_ALLOWED_PATHS", "")) or self._default_allowed_paths(service.lower())
+        configured_allowed_paths = self._parse_csv(get_env(f"{key}_ALLOWED_PATHS", ""))
+        default_allowed_paths = self._default_allowed_paths(service.lower())
+        allowed_paths = configured_allowed_paths or list(default_allowed_paths)
+        for default_path in default_allowed_paths:
+            if default_path not in allowed_paths:
+                allowed_paths.append(default_path)
         allowed_methods = [item.upper() for item in self._parse_csv(get_env(f"{key}_ALLOWED_METHODS", ""))]
 
         return {
@@ -282,15 +686,21 @@ class WorksService:
         items: list[dict[str, Any]] = []
         for service in self._service_env:
             cfg = self._get_config(service)
-            items.append(
-                {
-                    "service": cfg["service"],
-                    "configured": cfg["configured"],
-                    "base_url": cfg["base_url"],
-                    "allowed_paths": cfg["allowed_paths"],
-                    "allowed_methods": cfg["allowed_methods"],
+            item = {
+                "service": cfg["service"],
+                "configured": cfg["configured"],
+                "base_url": cfg["base_url"],
+                "allowed_paths": cfg["allowed_paths"],
+                "allowed_methods": cfg["allowed_methods"],
+            }
+            if service == "makerworks":
+                library_cfg = self._makerworks_library_config()
+                item["library"] = {
+                    "list_path": library_cfg["list_path"],
+                    "detail_path_template": library_cfg["detail_path_template"],
+                    "default_page_size": library_cfg["default_page_size"],
                 }
-            )
+            items.append(item)
         return items
 
     def _normalize_path(self, path: str) -> str:
@@ -493,6 +903,9 @@ class PrinterService:
             return False
         idle_markers = ("IDLE", "FINISH", "COMPLETE", "FAILED", "STOP")
         return not any(marker in state for marker in idle_markers)
+
+    def job_busy(self) -> bool:
+        return self._job_busy()
 
     def _queue_due_item(self) -> dict[str, Any] | None:
         now = datetime.now(timezone.utc)
@@ -1348,6 +1761,45 @@ class PrinterService:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._get_sd_thumbnail_sync, path)
 
+    def _project_file_suffix(self, name: str) -> str | None:
+        lowered = name.lower()
+        for suffix in (".gcode.3mf", ".3mf", ".gcode"):
+            if lowered.endswith(suffix):
+                return suffix
+        return None
+
+    def _safe_project_file_name(self, preferred_name: str) -> str:
+        raw = preferred_name.strip()
+        suffix = self._project_file_suffix(raw)
+        if suffix is None:
+            raise ValueError("Only .3mf, .gcode.3mf, and .gcode files can be queued to a printer.")
+        stem = raw[: -len(suffix)] if suffix else raw
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("._-") or "makerworks-model"
+        stem = stem[:96]
+        return f"{stem}{suffix}"
+
+    def _stage_project_bytes_sync(self, content: bytes, preferred_name: str) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Client not initialized.")
+        if not content:
+            raise ValueError("Project file is empty.")
+
+        remote_name = self._safe_project_file_name(preferred_name)
+        remote_path = f"/cache/{remote_name}"
+        ftp = self.client.ftp_connection()
+        try:
+            ftp.storbinary(f"STOR {remote_path}", io.BytesIO(content))
+        finally:
+            try:
+                ftp.quit()
+            except Exception:
+                pass
+        return {"file_name": remote_name, "file_path": remote_path, "size_bytes": len(content)}
+
+    async def stage_project_bytes(self, content: bytes, preferred_name: str) -> dict[str, Any]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._stage_project_bytes_sync, content, preferred_name)
+
     def _rtsp_urls_to_try(self) -> list[str]:
         if self.client is None:
             return []
@@ -1533,9 +1985,16 @@ class PrinterService:
             "subtask_name": command_print.get("subtask_name"),
         }
 
-    async def queue_print_job(self, request: QueuePrintJobRequest, actor: str = "dashboard") -> dict[str, Any]:
+    async def queue_print_job(
+        self,
+        request: QueuePrintJobRequest,
+        actor: str = "dashboard",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         start_at = self._normalize_schedule(request.start_at)
         item = request.model_dump()
+        if metadata:
+            item.update(metadata)
         item["id"] = uuid4().hex
         item["start_at"] = start_at
         item["created_at"] = datetime.now(timezone.utc).isoformat()
