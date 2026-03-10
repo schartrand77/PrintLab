@@ -165,11 +165,44 @@ def test_print_job_manager_auto_selects_idle_connected_printer() -> None:
 
     result = asyncio.run(
         manager.submit_makerworks_job(
-            MakerworksSubmitJobRequest(model_id="widget-1", idempotency_key="mw-123"),
+            MakerworksSubmitJobRequest(
+                model_id="widget-1",
+                idempotency_key="mw-123",
+                source_job_id="source-job-1",
+                source_order_id="source-order-1",
+            ),
             actor="makerworks",
         )
     )
 
-    assert result["created"] is True
-    assert result["job"]["printer_id"] == "idle-printer"
+    assert result["printer_id"] == "idle-printer"
     assert idle.created_jobs[0]["idempotency_key"] == "mw-123"
+
+
+def test_print_job_manager_reuses_existing_idempotent_job_across_printers() -> None:
+    first = _FakePrinter("first-printer", connected=True, busy=False, queue_count=0)
+    second = _FakePrinter("second-printer", connected=True, busy=False, queue_count=0)
+    first.created_jobs.append(
+        {
+            "id": "job-existing",
+            "printer_id": "first-printer",
+            "idempotency_key": "mw-123",
+            "status": "queued",
+        }
+    )
+    manager = PrintJobManager(_FakePrinterManager([first, second]), _FakeWorksService())
+
+    result = asyncio.run(
+        manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(
+                model_id="widget-1",
+                idempotency_key="mw-123",
+                source_job_id="source-job-1",
+                source_order_id="source-order-1",
+            ),
+            actor="makerworks",
+        )
+    )
+
+    assert result["id"] == "job-existing"
+    assert len(second.created_jobs) == 0

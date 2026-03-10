@@ -87,6 +87,43 @@
       margin-bottom: 10px;
       gap: 8px;
     }
+    .top-nav-left {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .menu-btn {
+      border: 0;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.68);
+      color: #2a4f73;
+      cursor: pointer;
+      width: 42px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 8px 22px rgba(22, 54, 86, 0.18);
+    }
+    .menu-lines {
+      width: 16px;
+      height: 12px;
+      position: relative;
+    }
+    .menu-lines::before,
+    .menu-lines::after,
+    .menu-lines span {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: currentColor;
+      border-radius: 2px;
+    }
+    .menu-lines::before { top: 0; }
+    .menu-lines span { top: 5px; }
+    .menu-lines::after { top: 10px; }
     .back-link {
       display: inline-flex;
       align-items: center;
@@ -113,6 +150,80 @@
       cursor: pointer;
     }
     .install-btn[hidden] { display: none !important; }
+    .sidebar-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(18, 34, 52, 0.36);
+      display: none;
+      z-index: 40;
+    }
+    .sidebar-backdrop.open { display: block; }
+    .sidebar {
+      position: fixed;
+      z-index: 41;
+      top: 0;
+      left: 0;
+      height: 100vh;
+      width: 320px;
+      max-width: 85vw;
+      background: rgba(255, 255, 255, 0.92);
+      border-right: 1px solid rgba(207, 224, 243, 0.86);
+      box-shadow: 18px 0 30px rgba(21, 50, 80, .18);
+      transform: translateX(-101%);
+      transition: transform .18s ease;
+      padding: 18px 14px 16px;
+      overflow: auto;
+      backdrop-filter: blur(18px) saturate(130%);
+      -webkit-backdrop-filter: blur(18px) saturate(130%);
+    }
+    .sidebar.open { transform: translateX(0); }
+    .sidebar-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .sidebar-head-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sidebar-close {
+      border: 0;
+      background: transparent;
+      color: #365877;
+      cursor: pointer;
+      font-size: 20px;
+      line-height: 1;
+      padding: 2px 4px;
+    }
+    .sidebar h2 {
+      margin: 0;
+      font-size: 20px;
+    }
+    .sidebar p {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .sidebar-tabs {
+      display: grid;
+      gap: 8px;
+      margin: 0 0 12px;
+    }
+    .sidebar-tab {
+      display: block;
+      text-decoration: none;
+      border: 1px solid rgba(189, 210, 232, 0.9);
+      background: rgba(237, 244, 251, 0.94);
+      color: #375a79;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      text-align: left;
+    }
+    .sidebar-tab:hover { filter: brightness(1.02); }
 
     .print-top {
       display: grid;
@@ -976,6 +1087,7 @@
     :root[data-theme="dark"] .queue-remove,
     :root[data-theme="dark"] .print-btn.secondary,
     :root[data-theme="dark"] .back-link,
+    :root[data-theme="dark"] .menu-btn,
     :root[data-theme="dark"] .install-btn,
     :root[data-theme="dark"] .theme-toggle,
     :root[data-theme="dark"] .cam-toggle,
@@ -989,7 +1101,8 @@
     }
     :root[data-theme="dark"] .right-rail,
     :root[data-theme="dark"] .model-preview,
-    :root[data-theme="dark"] .ams-body {
+    :root[data-theme="dark"] .ams-body,
+    :root[data-theme="dark"] .sidebar {
       background: rgba(16, 27, 41, 0.74);
       border-color: rgba(120, 151, 186, 0.28);
     }
@@ -1004,6 +1117,7 @@
       border-color: rgba(131, 162, 197, 0.18);
     }
     :root[data-theme="dark"] .back-link,
+    :root[data-theme="dark"] .sidebar-close,
     :root[data-theme="dark"] .install-btn,
     :root[data-theme="dark"] .theme-toggle,
     :root[data-theme="dark"] .dashboard-tab,
@@ -1037,13 +1151,37 @@
     :root[data-theme="dark"] .bar {
       background: rgba(131, 162, 197, 0.16);
     }
+    :root[data-theme="dark"] .sidebar-tab {
+      background: rgba(17, 28, 42, 0.82);
+      border-color: rgba(120, 151, 186, 0.28);
+      color: var(--text);
+    }
   </style>
 </head>
 <body>
+  <div id="sidebarBackdrop" class="sidebar-backdrop" onclick="closeSidebar()"></div>
+  <aside id="sidebar" class="sidebar" aria-hidden="true">
+    <div class="sidebar-head">
+      <h2>Menu</h2>
+      <div class="sidebar-head-actions">
+        <button class="sidebar-close" type="button" aria-label="Close menu" onclick="closeSidebar()">&times;</button>
+      </div>
+    </div>
+    <p>Use the sidebar for navigation.</p>
+    <div class="sidebar-tabs">
+      <a class="sidebar-tab" href="/">Dashboard</a>
+      <a class="sidebar-tab" href="/makerworks">MakerWorks</a>
+      <a class="sidebar-tab" href="/makerworks-routing">Routing Board</a>
+      <a class="sidebar-tab" href="/add-printer">Add Printer</a>
+    </div>
+  </aside>
   <main>
     <section class="card">
       <div class="top-nav">
-        <a class="back-link" href="/">&#8592; Printers</a>
+        <div class="top-nav-left">
+          <button class="menu-btn" type="button" aria-label="Open menu" onclick="openSidebar()"><div class="menu-lines"><span></span></div></button>
+          <a class="back-link" href="/">&#8592; Printers</a>
+        </div>
         <div class="top-actions">
           <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color theme">Dark Mode</button>
           <button id="installBtn" class="install-btn" type="button" hidden>Install App</button>
@@ -1372,6 +1510,24 @@
     function toggleTheme() {
       const current = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
       applyTheme(current === "dark" ? "light" : "dark");
+    }
+
+    function openSidebar() {
+      const sidebar = document.getElementById("sidebar");
+      const backdrop = document.getElementById("sidebarBackdrop");
+      if (!sidebar || !backdrop) return;
+      sidebar.classList.add("open");
+      backdrop.classList.add("open");
+      sidebar.setAttribute("aria-hidden", "false");
+    }
+
+    function closeSidebar() {
+      const sidebar = document.getElementById("sidebar");
+      const backdrop = document.getElementById("sidebarBackdrop");
+      if (!sidebar || !backdrop) return;
+      sidebar.classList.remove("open");
+      backdrop.classList.remove("open");
+      sidebar.setAttribute("aria-hidden", "true");
     }
 
     function setSettingsStatus(message, isError = false) {
@@ -2513,6 +2669,9 @@
     if (themeToggle) {
       themeToggle.addEventListener("click", toggleTheme);
     }
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeSidebar();
+    });
     applyTheme(document.documentElement.dataset.theme);
     initPwa();
     initQueueControls();

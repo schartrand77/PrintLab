@@ -3,7 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, HTMLResponse
 
-from app.views import render_add_printer_html, render_gallery_html, render_makerworks_html, render_printer_dashboard, static_dir
+from app.views import (
+    render_add_printer_html,
+    render_gallery_html,
+    render_makerworks_routing_html,
+    render_makerworks_search_html,
+    render_printer_dashboard,
+    static_dir,
+)
 
 router = APIRouter()
 
@@ -25,7 +32,12 @@ async def add_printer_page() -> str:
 
 @router.get("/makerworks", response_class=HTMLResponse)
 async def makerworks_page() -> str:
-    return render_makerworks_html()
+    return render_makerworks_search_html()
+
+
+@router.get("/makerworks-routing", response_class=HTMLResponse)
+async def makerworks_routing_page() -> str:
+    return render_makerworks_routing_html()
 
 
 @router.get("/manifest.webmanifest")

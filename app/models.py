@@ -40,6 +40,7 @@ class WorksRequest(BaseModel):
     path: str = Field(default="/")
     query: dict[str, Any] | None = None
     body: Any = None
+    body_text: str | None = None
     headers: dict[str, str] | None = None
     timeout_seconds: float = Field(default=20.0, ge=1.0, le=120.0)
 
@@ -79,9 +80,9 @@ class MakerworksQueueJobRequest(BaseModel):
 class MakerworksSubmitJobRequest(BaseModel):
     model_id: str = Field(min_length=1)
     printer_id: str | None = Field(default=None, min_length=1, max_length=64)
-    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
-    source_job_id: str | None = Field(default=None, min_length=1, max_length=128)
-    source_order_id: str | None = Field(default=None, min_length=1, max_length=128)
+    idempotency_key: str = Field(min_length=1, max_length=128)
+    source_job_id: str = Field(min_length=1, max_length=128)
+    source_order_id: str = Field(min_length=1, max_length=128)
     start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
     plate_gcode: str = Field(default="Metadata/plate_1.gcode")
     use_ams: bool = True
@@ -92,7 +93,7 @@ class MakerworksSubmitJobRequest(BaseModel):
     flow_cali: bool = True
     vibration_cali: bool = True
     layer_inspect: bool = True
-    metadata: dict[str, Any] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class QueueUpdateRequest(BaseModel):

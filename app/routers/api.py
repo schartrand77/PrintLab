@@ -5,7 +5,7 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.auth import actor_from_request
 from app.runtime import job_manager, printer_manager, service_or_404, works_service
@@ -17,6 +17,7 @@ from app.services import (
     ControlPresetRequest,
     FanRequest,
     MakerworksQueueJobRequest,
+    MakerworksSubmitError,
     MakerworksSubmitJobRequest,
     OrderworksPrintJobRequest,
     PrinterNameRequest,
@@ -273,10 +274,26 @@ async def makerworks_queue_job_by_printer(
 @router.post("/api/works/makerworks/jobs")
 async def makerworks_submit_job(request: Request, payload: MakerworksSubmitJobRequest) -> dict[str, Any]:
     try:
-        result = await job_manager.submit_makerworks_job(payload, actor=actor_from_request(request))
-        return {"ok": True, **result}
+        return await job_manager.submit_makerworks_job(payload, actor=actor_from_request(request))
+    except MakerworksSubmitError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "submit_failed",
+                "message": str(exc),
+                "job": exc.job,
+            },
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api/works/makerworks/jobs/{job_id}")
+async def makerworks_get_job(job_id: str) -> dict[str, Any]:
+    try:
+        return job_manager.get_job(job_id)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/api/jobs")

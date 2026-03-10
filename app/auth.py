@@ -150,6 +150,29 @@ def actor_from_request(request: Request) -> str:
     return "dashboard"
 
 
+def _is_makerworks_boundary_request(path: str) -> bool:
+    return path == "/api/works/makerworks/jobs" or path.startswith("/api/works/makerworks/jobs/")
+
+
+def _valid_makerworks_boundary_auth(request: Request) -> str | None:
+    bearer_token = get_env("MAKERWORKS_SUBMIT_BEARER_TOKEN", "")
+    api_key = get_env("MAKERWORKS_SUBMIT_API_KEY", "")
+    auth_header = get_env("MAKERWORKS_SUBMIT_AUTH_HEADER", "X-API-Key") or "X-API-Key"
+
+    authorization = request.headers.get("authorization", "")
+    if bearer_token and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+        if token and hmac.compare_digest(token, bearer_token):
+            return "makerworks"
+
+    if api_key:
+        supplied = request.headers.get(auth_header, "").strip()
+        if supplied and hmac.compare_digest(supplied, api_key):
+            return "makerworks"
+
+    return None
+
+
 def _clear_auth_cookies(response: Response, config: AuthConfig) -> None:
     response.delete_cookie(SESSION_COOKIE_NAME, path="/", domain=config.cookie_domain)
     response.delete_cookie(CSRF_COOKIE_NAME, path="/", domain=config.cookie_domain)
@@ -317,6 +340,13 @@ def register_admin_auth(app: FastAPI) -> None:
         path = request.url.path
         if path in {"/login", "/auth/login", "/auth/session"}:
             return await call_next(request)
+
+        if _is_makerworks_boundary_request(path):
+            makerworks_user = _valid_makerworks_boundary_auth(request)
+            if makerworks_user is not None:
+                request.state.auth_user = makerworks_user
+                request.state.auth_scheme = "makerworks"
+                return await call_next(request)
 
         basic_user = _valid_basic_credentials(request, config) if config.enabled else None
         if basic_user is not None:
