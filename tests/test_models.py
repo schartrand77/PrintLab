@@ -92,11 +92,14 @@ def test_render_makerworks_routing_page_contains_board_layout() -> None:
     assert "updateWireDrag" in html
     assert "deleteQueuedJob" in html
     assert "data-printer-id" in html
-    assert "Drag cord from left node to printer." in html
+    assert "Models In Queue" in html
+    assert "Printers" in html
     assert "drag-handle right" in html
     assert "drag-cord" in html
     assert "drag-knob" in html
     assert "node routeable" in html
+    assert "collapse-toggle" in html
+    assert "toggleCardCollapse" in html
     assert "load-confirmation" in html
     assert "Model Loaded" in html
     assert "printerGlowClass" in html

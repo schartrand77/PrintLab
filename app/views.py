@@ -15,8 +15,14 @@ def render_gallery_html() -> str:
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta id="themeColorMeta" name="theme-color" content="#cfe2f7">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PrintLab">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
   <title>PrintLab - Printers</title>
   <script>
     (function() {
@@ -26,6 +32,10 @@ def render_gallery_html() -> str:
   </script>
   <style>
     :root {
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
       --bg: #e6f0fb;
       --text: #213245;
       --panel: linear-gradient(180deg, #f4f8fc 0%, #eaf2fb 100%);
@@ -70,10 +80,10 @@ def render_gallery_html() -> str:
       --theme-color: #0e1723;
     }
     * { box-sizing:border-box; }
-    html { color-scheme: light; }
+    html { color-scheme: light; min-height:100%; background:var(--bg); }
     :root[data-theme="dark"] { color-scheme: dark; }
-    body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin:0; background:var(--bg); color:var(--text); }
-    .wrap { max-width:1100px; margin:0 auto; padding:24px 16px 40px; }
+    body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin:0; background:var(--bg); color:var(--text); min-height:100vh; min-height:100dvh; }
+    .wrap { max-width:1100px; margin:0 auto; padding:calc(var(--safe-top) + 24px) calc(var(--safe-right) + 16px) calc(var(--safe-bottom) + 40px) calc(var(--safe-left) + 16px); }
     .top-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:14px; }
     .title-block { display:grid; gap:8px; }
     .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:16px; }
@@ -208,7 +218,7 @@ def render_gallery_html() -> str:
     .hamburger-lines::after { top:10px; }
     .sidebar-backdrop { position:fixed; inset:0; background:var(--overlay); display:none; z-index:40; }
     .sidebar-backdrop.open { display:block; }
-    .sidebar { position:fixed; z-index:41; top:0; left:0; height:100vh; width:320px; max-width:85vw; background:var(--panel); border-right:1px solid var(--panel-border); box-shadow:var(--panel-shadow); transform:translateX(-101%); transition:transform .18s ease; padding:18px 14px 16px; overflow:auto; }
+    .sidebar { position:fixed; z-index:41; top:0; left:0; height:100vh; height:100dvh; width:320px; max-width:85vw; background:var(--panel); border-right:1px solid var(--panel-border); box-shadow:var(--panel-shadow); transform:translateX(-101%); transition:transform .18s ease; padding:calc(var(--safe-top) + 18px) calc(var(--safe-right) + 14px) calc(var(--safe-bottom) + 16px) calc(var(--safe-left) + 14px); overflow:auto; }
     .sidebar.open { transform:translateX(0); }
     .sidebar-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
     .sidebar-head-actions { display:flex; align-items:center; gap:8px; }
@@ -470,8 +480,14 @@ def render_add_printer_html() -> str:
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta id="themeColorMeta" name="theme-color" content="#cfe2f7">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PrintLab">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
   <title>PrintLab - Add Printer</title>
   <script>
     (function() {
@@ -481,6 +497,10 @@ def render_add_printer_html() -> str:
   </script>
   <style>
     :root {
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
       --bg: #e6f0fb;
       --text: #213245;
       --panel: linear-gradient(180deg, #f4f8fc 0%, #eaf2fb 100%);
@@ -535,10 +555,10 @@ def render_add_printer_html() -> str:
       --item-border: #29425a;
     }
     * { box-sizing:border-box; }
-    html { color-scheme: light; }
+    html { color-scheme: light; min-height:100%; background:var(--bg); }
     :root[data-theme="dark"] { color-scheme: dark; }
-    body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin:0; background:var(--bg); color:var(--text); }
-    .wrap { max-width:1100px; margin:0 auto; padding:24px 16px 40px; }
+    body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin:0; background:var(--bg); color:var(--text); min-height:100vh; min-height:100dvh; }
+    .wrap { max-width:1100px; margin:0 auto; padding:calc(var(--safe-top) + 24px) calc(var(--safe-right) + 16px) calc(var(--safe-bottom) + 40px) calc(var(--safe-left) + 16px); }
     .top-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:14px; }
     .title-block { display:grid; gap:8px; }
     .hamburger { border:0; border-radius:10px; background:var(--button-bg); color:var(--button-text); cursor:pointer; width:42px; height:34px; display:grid; place-items:center; box-shadow:0 8px 22px rgba(22,54,86,.34); }
@@ -549,7 +569,7 @@ def render_add_printer_html() -> str:
     .hamburger-lines::after { top:10px; }
     .sidebar-backdrop { position:fixed; inset:0; background:var(--overlay); display:none; z-index:40; }
     .sidebar-backdrop.open { display:block; }
-    .sidebar { position:fixed; z-index:41; top:0; left:0; height:100vh; width:320px; max-width:85vw; background:var(--panel); border-right:1px solid var(--panel-border); box-shadow:var(--panel-shadow); transform:translateX(-101%); transition:transform .18s ease; padding:18px 14px 16px; overflow:auto; }
+    .sidebar { position:fixed; z-index:41; top:0; left:0; height:100vh; height:100dvh; width:320px; max-width:85vw; background:var(--panel); border-right:1px solid var(--panel-border); box-shadow:var(--panel-shadow); transform:translateX(-101%); transition:transform .18s ease; padding:calc(var(--safe-top) + 18px) calc(var(--safe-right) + 14px) calc(var(--safe-bottom) + 16px) calc(var(--safe-left) + 14px); overflow:auto; }
     .sidebar.open { transform:translateX(0); }
     .sidebar-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
     .sidebar-head-actions { display:flex; align-items:center; gap:8px; }
@@ -901,7 +921,14 @@ def render_makerworks_search_html() -> str:
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta id="themeColorMeta" name="theme-color" content="#e6f0fb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PrintLab">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
   <title>PrintLab - MakerWorks Search</title>
   <script>
     (function() {
@@ -910,11 +937,12 @@ def render_makerworks_search_html() -> str:
     })();
   </script>
   <style>
-    :root { --bg:#e6f0fb; --text:#213245; --panel:#fff; --line:#cfe0f3; --soft:#edf4fb; --muted:#5d738a; --button:#1f4f7b; --button-text:#fff; --accent:#1f84ea; }
+    :root { --safe-top:env(safe-area-inset-top, 0px); --safe-right:env(safe-area-inset-right, 0px); --safe-bottom:env(safe-area-inset-bottom, 0px); --safe-left:env(safe-area-inset-left, 0px); --bg:#e6f0fb; --text:#213245; --panel:#fff; --line:#cfe0f3; --soft:#edf4fb; --muted:#5d738a; --button:#1f4f7b; --button-text:#fff; --accent:#1f84ea; }
     :root[data-theme="dark"] { --bg:#0e1723; --text:#edf5ff; --panel:#162231; --line:#24384d; --soft:#132131; --muted:#9db5cf; --button:#2c6aa0; --button-text:#f5faff; --accent:#63b3ff; }
     * { box-sizing:border-box; }
-    body { margin:0; font-family:"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
-    .wrap { max-width:1280px; margin:0 auto; padding:24px 16px 40px; }
+    html { min-height:100%; background:var(--bg); }
+    body { margin:0; font-family:"Segoe UI",sans-serif; background:var(--bg); color:var(--text); min-height:100vh; min-height:100dvh; }
+    .wrap { max-width:1280px; margin:0 auto; padding:calc(var(--safe-top) + 24px) calc(var(--safe-right) + 16px) calc(var(--safe-bottom) + 40px) calc(var(--safe-left) + 16px); }
     .top { display:flex; gap:12px; align-items:flex-start; margin-bottom:14px; }
     .menu { border:0; border-radius:12px; background:var(--button); color:var(--button-text); padding:10px 12px; font-weight:700; cursor:pointer; }
     .layout { display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:16px; }
@@ -942,7 +970,7 @@ def render_makerworks_search_html() -> str:
     .route-item { border:1px solid var(--line); border-radius:14px; padding:10px; background:var(--soft); }
     .sidebar-backdrop { position:fixed; inset:0; background:rgba(18,34,52,.36); display:none; z-index:40; }
     .sidebar-backdrop.open { display:block; }
-    .sidebar { position:fixed; z-index:41; top:0; left:0; height:100vh; width:320px; max-width:85vw; background:var(--panel); border-right:1px solid var(--line); transform:translateX(-101%); transition:transform .18s ease; padding:18px 14px 16px; overflow:auto; }
+    .sidebar { position:fixed; z-index:41; top:0; left:0; height:100vh; height:100dvh; width:320px; max-width:85vw; background:var(--panel); border-right:1px solid var(--line); transform:translateX(-101%); transition:transform .18s ease; padding:calc(var(--safe-top) + 18px) calc(var(--safe-right) + 14px) calc(var(--safe-bottom) + 16px) calc(var(--safe-left) + 14px); overflow:auto; }
     .sidebar.open { transform:translateX(0); }
     .sidebar-tabs { display:grid; gap:8px; margin-top:12px; }
     .sidebar-tab { display:block; text-decoration:none; border:1px solid var(--line); background:var(--soft); color:var(--text); border-radius:999px; padding:6px 10px; font-size:12px; font-weight:600; }
@@ -1149,7 +1177,14 @@ def render_makerworks_routing_html() -> str:
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta id="themeColorMeta" name="theme-color" content="#ecf3fb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PrintLab">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
   <title>PrintLab - Routing Board</title>
   <script>
     (function() {
@@ -1158,16 +1193,17 @@ def render_makerworks_routing_html() -> str:
     })();
   </script>
   <style>
-    :root { --bg:#ecf3fb; --text:#1d2f45; --panel:#fff; --line:#cbddef; --soft:#eff5fb; --button:#1f4f7b; --button-text:#fff; --muted:#617991; --accent:#2d94ff; --success:#2f9b65; }
-    :root[data-theme="dark"] { --bg:#0d1722; --text:#edf5ff; --panel:#162231; --line:#294056; --soft:#122031; --button:#2c6aa0; --button-text:#fff; --muted:#9fb8d0; --accent:#63b3ff; --success:#6fd39f; }
+    :root { --safe-top:env(safe-area-inset-top, 0px); --safe-right:env(safe-area-inset-right, 0px); --safe-bottom:env(safe-area-inset-bottom, 0px); --safe-left:env(safe-area-inset-left, 0px); --bg:#ecf3fb; --text:#1d2f45; --panel:#fff; --line:#cbddef; --soft:#eff5fb; --button:#1f4f7b; --button-text:#fff; --muted:#617991; --accent:#2d94ff; --success:#2f9b65; --queue-fresh:#3296ff; }
+    :root[data-theme="dark"] { --bg:#0d1722; --text:#edf5ff; --panel:#162231; --line:#294056; --soft:#122031; --button:#2c6aa0; --button-text:#fff; --muted:#9fb8d0; --accent:#63b3ff; --success:#6fd39f; --queue-fresh:#78c2ff; }
     * { box-sizing:border-box; }
-    body { margin:0; font-family:"Segoe UI",sans-serif; background:radial-gradient(circle at top left, rgba(45,148,255,.08), transparent 32%), var(--bg); color:var(--text); }
-    .wrap { max-width:1380px; margin:0 auto; padding:24px 16px 40px; }
-    .top { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:16px; }
+    html { min-height:100%; background:var(--bg); }
+    body { margin:0; font-family:"Segoe UI",sans-serif; background:radial-gradient(circle at top left, rgba(45,148,255,.08), transparent 32%), var(--bg); color:var(--text); min-height:100vh; min-height:100dvh; }
+    .wrap { max-width:1600px; margin:0 auto; padding:calc(var(--safe-top) + 18px) calc(var(--safe-right) + 14px) calc(var(--safe-bottom) + 28px) calc(var(--safe-left) + 14px); }
+    .top { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:12px; }
     .top-head { display:grid; gap:10px; }
     .menu { border:0; border-radius:12px; background:var(--button); color:var(--button-text); padding:10px 12px; font-weight:700; cursor:pointer; width:max-content; }
     .top-actions { display:flex; gap:10px; flex-wrap:wrap; }
-    .btn, .link-btn { border:0; border-radius:14px; background:var(--button); color:var(--button-text); padding:12px 14px; font-weight:700; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
+    .btn, .link-btn { border:0; border-radius:12px; background:var(--button); color:var(--button-text); padding:10px 12px; font-weight:700; font-size:13px; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
     .btn.secondary { background:var(--soft); color:var(--text); border:1px solid var(--line); }
     .status-row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
     .pill { display:inline-flex; border-radius:999px; background:var(--soft); border:1px solid var(--line); padding:6px 10px; font-size:12px; font-weight:700; }
@@ -1175,41 +1211,69 @@ def render_makerworks_routing_html() -> str:
     .notice.show { display:block; }
     .sidebar-backdrop { position:fixed; inset:0; background:rgba(18,34,52,.36); display:none; z-index:40; }
     .sidebar-backdrop.open { display:block; }
-    .sidebar { position:fixed; z-index:41; top:0; left:0; height:100vh; width:320px; max-width:85vw; background:var(--panel); border-right:1px solid var(--line); transform:translateX(-101%); transition:transform .18s ease; padding:18px 14px 16px; overflow:auto; }
+    .sidebar { position:fixed; z-index:41; top:0; left:0; height:100vh; height:100dvh; width:320px; max-width:85vw; background:var(--panel); border-right:1px solid var(--line); transform:translateX(-101%); transition:transform .18s ease; padding:calc(var(--safe-top) + 18px) calc(var(--safe-right) + 14px) calc(var(--safe-bottom) + 16px) calc(var(--safe-left) + 14px); overflow:auto; }
     .sidebar.open { transform:translateX(0); }
     .sidebar-tabs { display:grid; gap:8px; margin-top:12px; }
     .sidebar-tab { display:block; text-decoration:none; border:1px solid var(--line); background:var(--soft); color:var(--text); border-radius:999px; padding:6px 10px; font-size:12px; font-weight:600; }
     .sidebar-tab.active { background:var(--button); color:var(--button-text); border-color:var(--button); }
-    .board { position:relative; background:var(--panel); border:1px solid var(--line); border-radius:24px; min-height:720px; overflow:hidden; }
+    .toolbar { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:10px; margin-bottom:12px; align-items:end; }
+    .field { display:grid; gap:6px; }
+    .field label { font-size:11px; letter-spacing:.35px; text-transform:uppercase; color:var(--muted); font-weight:800; }
+    .field input { width:100%; border:1px solid var(--line); border-radius:12px; padding:10px 12px; background:var(--panel); color:var(--text); font:inherit; }
+    .board { position:relative; background:var(--panel); border:1px solid var(--line); border-radius:20px; min-height:640px; height:calc(100vh - 220px); overflow:hidden; }
     .board-svg { position:absolute; inset:0; z-index:1; pointer-events:none; }
-    .board-grid { position:relative; z-index:2; display:grid; grid-template-columns:minmax(320px,0.95fr) 140px minmax(320px,1fr); gap:12px; padding:18px; align-items:start; }
-    .column { display:grid; gap:12px; }
+    .board-grid { position:relative; z-index:2; display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.95fr); gap:10px; padding:12px; align-items:start; height:100%; }
+    .column { display:grid; gap:10px; min-height:0; }
     .lane-title { font-size:12px; letter-spacing:.4px; text-transform:uppercase; color:var(--muted); font-weight:800; }
-    .stack { display:grid; gap:12px; }
-    .node { position:relative; border:1px solid var(--line); background:linear-gradient(180deg, rgba(255,255,255,.95), rgba(239,245,251,.98)); border-radius:20px; padding:14px; display:grid; gap:8px; }
-    .node.routeable { padding-right:86px; }
+    .lane-frame { border:1px solid var(--line); border-radius:16px; background:rgba(255,255,255,.45); padding:10px; display:grid; gap:10px; min-height:0; overflow:auto; }
+    :root[data-theme="dark"] .lane-frame { background:rgba(13,23,34,.4); }
+    .stack { display:grid; gap:8px; align-content:start; }
+    .stack-section { display:grid; gap:8px; }
+    .stack-heading { display:flex; justify-content:space-between; gap:8px; align-items:center; font-size:11px; letter-spacing:.35px; text-transform:uppercase; color:var(--muted); font-weight:800; }
+    .stack-count { border-radius:999px; background:var(--soft); border:1px solid var(--line); padding:2px 8px; }
+    .node { position:relative; border:1px solid var(--line); background:linear-gradient(180deg, rgba(255,255,255,.95), rgba(239,245,251,.98)); border-radius:14px; padding:10px; display:grid; gap:6px; }
+    .node.routeable { padding-right:68px; }
+    .node.collapsed { padding-top:8px; padding-bottom:8px; }
+    .node-header { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; min-width:0; }
+    .node-heading { display:grid; gap:4px; min-width:0; }
+    .empty-state { border:1px dashed var(--line); border-radius:14px; padding:12px; color:var(--muted); font-size:12px; text-align:center; }
     :root[data-theme="dark"] .node { background:linear-gradient(180deg, rgba(22,34,49,.98), rgba(18,32,49,.98)); }
     .node.selected { border-color:var(--accent); box-shadow:0 0 0 2px rgba(45,148,255,.18); }
     .node.connected { border-color:var(--success); }
+    .node.queue-fresh {
+      border-color: rgba(50,150,255,.55);
+      box-shadow: inset 0 -16px 28px rgba(50,150,255,.16), 0 16px 34px rgba(50,150,255,.22);
+      animation: queueFreshPulse 2.8s ease-out infinite;
+    }
+    .node.queue-connected {
+      border-color: rgba(47,155,101,.55);
+      box-shadow: inset 0 -18px 30px rgba(47,155,101,.18), 0 16px 34px rgba(47,155,101,.24);
+    }
     .printer-open { box-shadow: inset 0 -14px 24px rgba(47,155,101,.16), 0 12px 28px rgba(47,155,101,.12); }
     .printer-running { box-shadow: inset 0 -14px 24px rgba(210,68,68,.22), 0 12px 28px rgba(210,68,68,.14); border-color: rgba(210,68,68,.42); }
-    .node-title { font-size:18px; font-weight:800; line-height:1.1; }
-    .node-meta { color:var(--muted); font-size:13px; line-height:1.35; }
-    .node-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-    .node-admin { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px; }
+    .node-title { font-size:15px; font-weight:800; line-height:1.15; }
+    .node-meta { color:var(--muted); font-size:12px; line-height:1.3; }
+    .node-actions { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+    .node-actions.single { grid-template-columns:1fr; }
+    .node-admin { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px; }
+    .node-row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+    .node-body { display:grid; gap:6px; }
+    .state-chip { display:inline-flex; width:max-content; border-radius:999px; padding:3px 8px; background:var(--soft); border:1px solid var(--line); color:var(--text); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.35px; }
+    .collapse-toggle { border:1px solid var(--line); border-radius:999px; background:var(--soft); color:var(--text); padding:4px 8px; font-size:11px; font-weight:800; cursor:pointer; white-space:nowrap; }
+    .node.collapsed .node-body { display:none; }
+    .node.collapsed .node-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .dot { position:absolute; top:50%; width:14px; height:14px; margin-top:-7px; border-radius:999px; background:var(--accent); box-shadow:0 0 0 4px rgba(45,148,255,.14); touch-action:none; }
     .dot.left { left:-7px; }
     .dot.right { right:-7px; }
     .dot.dragging { background:var(--success); box-shadow:0 0 0 6px rgba(47,155,101,.18); }
     .drag-handle { position:absolute; top:50%; display:flex; align-items:center; gap:0; transform:translateY(-50%); cursor:grab; touch-action:none; }
-    .drag-handle.right { right:16px; }
+    .drag-handle.right { right:10px; }
     .drag-handle.dragging { cursor:grabbing; }
-    .drag-cord { width:28px; height:6px; border-radius:999px; background:linear-gradient(90deg, rgba(45,148,255,.2), rgba(45,148,255,.9)); box-shadow:0 0 0 1px rgba(45,148,255,.18); }
-    .drag-knob { position:relative; width:18px; height:18px; margin-left:-2px; border-radius:999px; background:var(--accent); box-shadow:0 0 0 5px rgba(45,148,255,.14); }
+    .drag-cord { width:20px; height:5px; border-radius:999px; background:linear-gradient(90deg, rgba(45,148,255,.2), rgba(45,148,255,.9)); box-shadow:0 0 0 1px rgba(45,148,255,.18); }
+    .drag-knob { position:relative; width:16px; height:16px; margin-left:-2px; border-radius:999px; background:var(--accent); box-shadow:0 0 0 4px rgba(45,148,255,.14); }
     .drag-handle.dragging .drag-cord { background:linear-gradient(90deg, rgba(47,155,101,.25), rgba(47,155,101,.95)); box-shadow:0 0 0 1px rgba(47,155,101,.2); }
     .drag-handle.dragging .drag-knob { background:var(--success); box-shadow:0 0 0 6px rgba(47,155,101,.18); }
     .load-confirmation { display:inline-flex; width:max-content; border-radius:999px; padding:6px 10px; background:rgba(47,155,101,.14); border:1px solid rgba(47,155,101,.32); color:var(--success); font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.35px; }
-    .connector-note { align-self:center; justify-self:center; color:var(--muted); font-size:13px; text-align:center; }
     .wire-base { opacity:.34; }
     .wire-live {
       stroke-dasharray: 14 10;
@@ -1217,7 +1281,12 @@ def render_makerworks_routing_html() -> str:
       filter: drop-shadow(0 0 6px rgba(45,148,255,.28));
     }
     @keyframes wireFlow { from { stroke-dashoffset: 24; } to { stroke-dashoffset: 0; } }
-    @media (max-width: 980px) { .board-grid { grid-template-columns:1fr; } .connector-note { display:none; } .dot { display:none; } .board { min-height:unset; } }
+    @keyframes queueFreshPulse {
+      0% { box-shadow: inset 0 -12px 22px rgba(50,150,255,.10), 0 10px 22px rgba(50,150,255,.12); }
+      50% { box-shadow: inset 0 -18px 32px rgba(50,150,255,.18), 0 18px 38px rgba(50,150,255,.26); }
+      100% { box-shadow: inset 0 -12px 22px rgba(50,150,255,.10), 0 10px 22px rgba(50,150,255,.12); }
+    }
+    @media (max-width: 980px) { .toolbar { grid-template-columns:1fr; } .board-grid { grid-template-columns:1fr; height:auto; } .dot { display:none; } .board { min-height:unset; height:auto; } .lane-frame { overflow:visible; } }
   </style>
 </head>
 <body>
@@ -1237,7 +1306,7 @@ def render_makerworks_routing_html() -> str:
         <button class="menu" type="button" onclick="openSidebar()">Menu</button>
         <div>
         <h1 style="margin:0 0 8px;">MakerWorks Routing Board</h1>
-        <p style="margin:0;color:var(--muted);max-width:760px;">Chosen models and queued PrintLab jobs line up on the left. Available printers stay on the right. Drag the cord from a left node into a printer node to create the routing line.</p>
+        <p style="margin:0;color:var(--muted);max-width:760px;">Models stay in the left queue column and printers stay in the right column. Each column scrolls independently, and cards can collapse to a single summary row.</p>
         </div>
       </div>
       <div class="top-actions">
@@ -1251,17 +1320,31 @@ def render_makerworks_routing_html() -> str:
       <span id="printerCount" class="pill">0 available printers</span>
     </div>
     <div id="pageNotice" class="notice" role="status" aria-live="polite"></div>
+    <div class="toolbar">
+      <div class="field">
+        <label for="leftSearch">Find models or queued jobs</label>
+        <input id="leftSearch" type="search" placeholder="Search by name, author, status, or job id" oninput="setLeftSearch(this.value)" />
+      </div>
+      <div class="field">
+        <label for="printerSearch">Find printers</label>
+        <input id="printerSearch" type="search" placeholder="Search by printer name, type, or state" oninput="setPrinterSearch(this.value)" />
+      </div>
+      <button class="btn secondary" type="button" onclick="clearFilters()">Clear Filters</button>
+    </div>
     <section id="routingBoard" class="board">
       <svg id="boardSvg" class="board-svg"></svg>
       <div class="board-grid">
         <div class="column">
-          <div class="lane-title">Chosen Models And Queued Jobs</div>
-          <div id="leftStack" class="stack"></div>
+          <div class="lane-title">Models In Queue</div>
+          <div class="lane-frame">
+            <div id="leftStack" class="stack"></div>
+          </div>
         </div>
-        <div class="connector-note">Drag cord from left node to printer.</div>
         <div class="column">
-          <div class="lane-title">Available Printers</div>
-          <div id="rightStack" class="stack"></div>
+          <div class="lane-title">Printers</div>
+          <div class="lane-frame">
+            <div id="rightStack" class="stack"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -1271,12 +1354,18 @@ def render_makerworks_routing_html() -> str:
     const slicerProtocolTemplate = __SLICER_PROTOCOL_TEMPLATE__;
     const nativeFetch = window.fetch.bind(window);
     const routingKey = 'printlab.makerworks.routingModels';
+    const collapsedCardKey = 'printlab.makerworks.routingCollapsed';
+    const queueFreshWindowMs = 12000;
     let chosenModels = [];
     let submittedJobs = [];
     let printers = [];
     let activeLeft = null;
     let draftAssignments = {};
     let dragState = null;
+    let recentQueuedJobs = {};
+    let collapsedCards = {};
+    let leftSearch = '';
+    let printerSearch = '';
     function readCookie(name) {
       const prefix = `${name}=`;
       return document.cookie.split(';').map((item) => item.trim()).find((item) => item.startsWith(prefix))?.slice(prefix.length) || '';
@@ -1297,6 +1386,9 @@ def render_makerworks_routing_html() -> str:
     function closeSidebar() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebarBackdrop').classList.remove('open'); document.getElementById('sidebar').setAttribute('aria-hidden', 'true'); }
     function getChosenModels() { try { return JSON.parse(localStorage.getItem(routingKey) || '[]'); } catch (_error) { return []; } }
     function saveChosenModels(items) { localStorage.setItem(routingKey, JSON.stringify(items)); chosenModels = items; renderBoard(); }
+    function getCollapsedCards() { try { return JSON.parse(localStorage.getItem(collapsedCardKey) || '{}'); } catch (_error) { return {}; } }
+    function saveCollapsedCards() { localStorage.setItem(collapsedCardKey, JSON.stringify(collapsedCards)); }
+    collapsedCards = getCollapsedCards();
     function showNotice(message) {
       const el = document.getElementById('pageNotice');
       el.textContent = message;
@@ -1305,7 +1397,130 @@ def render_makerworks_routing_html() -> str:
       showNotice._timer = window.setTimeout(() => { el.className = 'notice'; }, 3600);
     }
     function leftNodeId(kind, id) { return `${kind}:${id}`; }
+    function pruneRecentQueuedJobs() {
+      const now = Date.now();
+      recentQueuedJobs = Object.fromEntries(
+        Object.entries(recentQueuedJobs).filter(([, queuedAt]) => (now - Number(queuedAt || 0)) < queueFreshWindowMs)
+      );
+    }
     function availablePrinters() { return printers.filter((printer) => !!printer.connected); }
+    function matchesSearch(parts, query) {
+      if (!query) return true;
+      const haystack = parts.filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(query);
+    }
+    function setLeftSearch(value) { leftSearch = String(value || '').trim().toLowerCase(); renderBoard(); }
+    function setPrinterSearch(value) { printerSearch = String(value || '').trim().toLowerCase(); renderBoard(); }
+    function clearFilters() {
+      leftSearch = '';
+      printerSearch = '';
+      const leftInput = document.getElementById('leftSearch');
+      const printerInput = document.getElementById('printerSearch');
+      if (leftInput) leftInput.value = '';
+      if (printerInput) printerInput.value = '';
+      renderBoard();
+    }
+    function isCollapsed(cardId) { return !!collapsedCards[String(cardId || '')]; }
+    function toggleCardCollapse(cardId, event) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      const key = String(cardId || '');
+      if (!key) return;
+      if (collapsedCards[key]) delete collapsedCards[key];
+      else collapsedCards[key] = true;
+      saveCollapsedCards();
+      renderBoard();
+    }
+    function upgradeCards() {
+      document.querySelectorAll('#leftStack article.node.routeable, #rightStack article.node[data-printer-id]').forEach((card) => {
+        const cardId = String(card.id || '');
+        const handle = card.querySelector('.drag-handle, .dot');
+        const title = card.querySelector(':scope > .node-title');
+        if (!title) {
+          card.classList.toggle('collapsed', isCollapsed(cardId));
+          const existingToggle = card.querySelector('.collapse-toggle');
+          if (existingToggle) existingToggle.textContent = isCollapsed(cardId) ? 'Expand' : 'Collapse';
+          return;
+        }
+        const summary = title.nextElementSibling && title.nextElementSibling.classList.contains('node-meta')
+          ? title.nextElementSibling
+          : null;
+        const header = document.createElement('div');
+        header.className = 'node-header';
+        const heading = document.createElement('div');
+        heading.className = 'node-heading';
+        heading.appendChild(title);
+        if (summary) heading.appendChild(summary);
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'collapse-toggle';
+        toggle.textContent = isCollapsed(cardId) ? 'Expand' : 'Collapse';
+        toggle.addEventListener('click', (event) => toggleCardCollapse(cardId, event));
+        header.appendChild(heading);
+        header.appendChild(toggle);
+        const body = document.createElement('div');
+        body.className = 'node-body';
+        const remaining = Array.from(card.children).filter((child) => child !== handle && child !== title && child !== summary);
+        remaining.forEach((child) => body.appendChild(child));
+        if (handle) card.appendChild(handle);
+        card.appendChild(header);
+        card.appendChild(body);
+        card.classList.toggle('collapsed', isCollapsed(cardId));
+      });
+    }
+    function updateCount(id, visible, total, label) {
+      document.getElementById(id).textContent = visible === total ? `${total} ${label}` : `${visible}/${total} ${label}`;
+    }
+    function applyBoardFilters() {
+      const leftStack = document.getElementById('leftStack');
+      const rightStack = document.getElementById('rightStack');
+      if (!leftStack || !rightStack) return;
+      let visibleChosen = 0;
+      let visibleJobs = 0;
+      let visiblePrinters = 0;
+      leftStack.querySelectorAll('article.node.routeable').forEach((node) => {
+        const isVisible = matchesSearch([node.textContent || ''], leftSearch);
+        node.style.display = isVisible ? '' : 'none';
+        if (!isVisible) return;
+        if (String(node.id || '').startsWith('chosen:')) visibleChosen += 1;
+        else visibleJobs += 1;
+      });
+      rightStack.querySelectorAll('article.node[data-printer-id]').forEach((node) => {
+        const isVisible = matchesSearch([node.textContent || ''], printerSearch);
+        node.style.display = isVisible ? '' : 'none';
+        if (isVisible) visiblePrinters += 1;
+      });
+      updateCount('chosenCount', visibleChosen, chosenModels.length, 'chosen');
+      updateCount('queuedCount', visibleJobs, submittedJobs.length, 'queued jobs');
+      updateCount('printerCount', visiblePrinters, availablePrinters().length, 'available printers');
+      let leftEmpty = leftStack.querySelector('[data-empty-state="left"]');
+      const hasVisibleLeft = visibleChosen + visibleJobs > 0;
+      if (!hasVisibleLeft) {
+        if (!leftEmpty) {
+          leftEmpty = document.createElement('div');
+          leftEmpty.className = 'empty-state';
+          leftEmpty.dataset.emptyState = 'left';
+          leftStack.appendChild(leftEmpty);
+        }
+        leftEmpty.textContent = leftSearch ? 'No models or queued jobs match the current search.' : 'No models or queued jobs to route yet.';
+      } else if (leftEmpty) {
+        leftEmpty.remove();
+      }
+      let rightEmpty = rightStack.querySelector('[data-empty-state="right"]');
+      if (!visiblePrinters) {
+        if (!rightEmpty) {
+          rightEmpty = document.createElement('div');
+          rightEmpty.className = 'empty-state';
+          rightEmpty.dataset.emptyState = 'right';
+          rightStack.appendChild(rightEmpty);
+        }
+        rightEmpty.textContent = printerSearch ? 'No printers match the current search.' : 'No connected printers are available.';
+      } else if (rightEmpty) {
+        rightEmpty.remove();
+      }
+    }
     function printerGlowClass(printer) {
       const state = String(printer?.job?.state || '').toLowerCase();
       if (['running', 'printing', 'started', 'busy', 'processing'].includes(state)) return 'printer-running';
@@ -1556,9 +1771,13 @@ def render_makerworks_routing_html() -> str:
           const item = entry.item;
           const isChosen = entry.kind === 'chosen';
           const assignedPrinter = draftAssignments[entry.id] || item.printer_id || '';
+          const isFreshQueuedJob = !isChosen && recentQueuedJobs[String(item.id || '')];
+          const queuedJobStateClass = !isChosen
+            ? (isFreshQueuedJob ? 'queue-fresh' : (assignedPrinter ? 'queue-connected' : ''))
+            : '';
           const encodedItem = encodeURIComponent(JSON.stringify(item));
           return `
-            <article id="${escapeHtml(entry.id)}" class="node routeable ${activeLeft === entry.id ? 'selected' : ''} ${assignedPrinter ? 'connected' : ''}" onclick="selectLeftNode('${escapeHtml(entry.id)}')">
+            <article id="${escapeHtml(entry.id)}" class="node routeable ${activeLeft === entry.id ? 'selected' : ''} ${assignedPrinter ? 'connected' : ''} ${queuedJobStateClass}" onclick="selectLeftNode('${escapeHtml(entry.id)}')">
               <span class="drag-handle right" title="Drag to printer" onpointerdown="startWireDrag('${escapeHtml(entry.id)}', event)">
                 <span class="drag-cord"></span>
                 <span class="drag-knob"></span>
@@ -1598,9 +1817,12 @@ def render_makerworks_routing_html() -> str:
           </div>
         </article>
       `).join('') : "<div class='node'><div class='node-title'>No printers available</div><div class='node-meta'>Bring a printer online to start routing.</div></div>";
+      upgradeCards();
+      applyBoardFilters();
       window.requestAnimationFrame(drawConnections);
     }
     async function refreshBoard() {
+      const previousSubmittedIds = new Set(submittedJobs.map((item) => String(item.id || '')));
       chosenModels = getChosenModels();
       const [printerRes, jobRes] = await Promise.all([fetch('/api/printers'), fetch('/api/jobs?status=queued')]);
       const printerData = await printerRes.json();
@@ -1609,6 +1831,19 @@ def render_makerworks_routing_html() -> str:
       if (!jobRes.ok) throw new Error(jobData?.detail || `HTTP ${jobRes.status}`);
       printers = Array.isArray(printerData.items) ? printerData.items : [];
       submittedJobs = (Array.isArray(jobData.items) ? jobData.items : []).filter((item) => String(item.source || '').toLowerCase() === 'makerworks');
+      const now = Date.now();
+      submittedJobs.forEach((item) => {
+        const itemId = String(item.id || '');
+        if (itemId && !previousSubmittedIds.has(itemId) && !item.printer_id) {
+          recentQueuedJobs[itemId] = now;
+        }
+      });
+      submittedJobs.forEach((item) => {
+        if (item?.printer_id) {
+          delete recentQueuedJobs[String(item.id || '')];
+        }
+      });
+      pruneRecentQueuedJobs();
       renderBoard();
     }
     window.addEventListener('pointermove', updateWireDrag);
@@ -1617,6 +1852,9 @@ def render_makerworks_routing_html() -> str:
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeSidebar(); });
     window.addEventListener('resize', drawConnections);
     refreshBoard().catch((error) => showNotice(`Failed to load routing board: ${String(error?.message || error)}`));
+    window.setInterval(() => {
+      refreshBoard().catch(() => {});
+    }, 5000);
   </script>
 </body>
 </html>"""

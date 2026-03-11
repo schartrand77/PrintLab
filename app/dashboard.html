@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta id="themeColorMeta" name="theme-color" content="#cfe2f7">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="PrintLab">
   <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
   <link rel="manifest" href="/manifest.webmanifest">
@@ -20,6 +20,10 @@
   </script>
   <style>
     :root {
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
       --bg: #dfeaf8;
       --bg-2: #c7ddf5;
       --bg-glow-1: rgba(255, 255, 255, 0.9);
@@ -52,7 +56,11 @@
       --glass-shadow: 0 22px 44px rgba(1, 6, 14, 0.42);
     }
     * { box-sizing: border-box; }
-    html { color-scheme: light; }
+    html {
+      color-scheme: light;
+      min-height: 100%;
+      background: var(--bg);
+    }
     :root[data-theme="dark"] { color-scheme: dark; }
     body {
       margin: 0;
@@ -63,11 +71,16 @@
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
       min-height: 100vh;
+      min-height: 100dvh;
     }
     main {
       max-width: 980px;
       margin: 20px auto;
-      padding: 0 14px 18px;
+      padding:
+        calc(var(--safe-top) + 4px)
+        calc(var(--safe-right) + 14px)
+        calc(var(--safe-bottom) + 18px)
+        calc(var(--safe-left) + 14px);
       display: grid;
       gap: 14px;
     }
@@ -164,6 +177,7 @@
       top: 0;
       left: 0;
       height: 100vh;
+      height: 100dvh;
       width: 320px;
       max-width: 85vw;
       background: rgba(255, 255, 255, 0.92);
@@ -171,7 +185,11 @@
       box-shadow: 18px 0 30px rgba(21, 50, 80, .18);
       transform: translateX(-101%);
       transition: transform .18s ease;
-      padding: 18px 14px 16px;
+      padding:
+        calc(var(--safe-top) + 18px)
+        calc(var(--safe-right) + 14px)
+        calc(var(--safe-bottom) + 16px)
+        calc(var(--safe-left) + 14px);
       overflow: auto;
       backdrop-filter: blur(18px) saturate(130%);
       -webkit-backdrop-filter: blur(18px) saturate(130%);
@@ -745,7 +763,11 @@
       align-items: center;
       justify-content: center;
       z-index: 50;
-      padding: 12px;
+      padding:
+        calc(var(--safe-top) + 12px)
+        calc(var(--safe-right) + 12px)
+        calc(var(--safe-bottom) + 12px)
+        calc(var(--safe-left) + 12px);
     }
     .modal.open { display: flex; }
     .modal-panel {
