@@ -20,6 +20,7 @@
   </script>
   <style>
     :root {
+      --ui-scale: 1;
       --safe-top: env(safe-area-inset-top, 0px);
       --safe-right: env(safe-area-inset-right, 0px);
       --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -40,6 +41,16 @@
       --red: #ff645a;
       --btn: rgba(255, 255, 255, 0.5);
       --glass-shadow: 0 10px 30px rgba(48, 90, 135, 0.2);
+    }
+    :root[data-font-scale="large"] { --ui-scale: 1.08; }
+    :root[data-font-scale="x-large"] { --ui-scale: 1.16; }
+    :root[data-contrast="high"] {
+      --card: rgba(255, 255, 255, 0.72);
+      --card-edge: rgba(21, 53, 87, 0.52);
+      --panel: rgba(255, 255, 255, 0.68);
+      --line: rgba(37, 72, 109, 0.42);
+      --text: #0d1c2b;
+      --muted: #23405b;
     }
     :root[data-theme="dark"] {
       --bg: #0e1723;
@@ -70,6 +81,7 @@
         linear-gradient(150deg, var(--bg), var(--bg-2));
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      font-size: calc(16px * var(--ui-scale));
       min-height: 100vh;
       min-height: 100dvh;
     }
@@ -615,6 +627,45 @@
       color: #334b62;
       font-size: 13px;
       line-height: 1.4;
+    }
+    .status-list {
+      display: grid;
+      gap: 8px;
+    }
+    .status-list-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13px;
+      color: #334b62;
+    }
+    .status-list-row strong {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .25px;
+      color: #5a748f;
+    }
+    .access-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .muted-note {
+      font-size: 12px;
+      color: #5f7891;
+      line-height: 1.4;
+    }
+    .session-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: rgba(255, 255, 255, 0.56);
+      border: 1px solid rgba(255, 255, 255, 0.68);
+      font-size: 12px;
+      font-weight: 700;
+      color: #2e4b67;
     }
     .queue-list,
     .timeline-list,
@@ -1186,6 +1237,7 @@
     <div class="sidebar-head">
       <h2>Menu</h2>
       <div class="sidebar-head-actions">
+        <span id="sessionRoleChip" class="session-chip">Role: admin</span>
         <button class="sidebar-close" type="button" aria-label="Close menu" onclick="closeSidebar()">&times;</button>
       </div>
     </div>
@@ -1194,7 +1246,22 @@
       <a class="sidebar-tab" href="/">Dashboard</a>
       <a class="sidebar-tab" href="/makerworks">MakerWorks</a>
       <a class="sidebar-tab" href="/makerworks-routing">Routing Board</a>
-      <a class="sidebar-tab" href="/add-printer">Add Printer</a>
+      <a id="addPrinterNav" class="sidebar-tab" href="/add-printer">Add Printer</a>
+    </div>
+    <div class="status-card">
+      <h3>Accessibility</h3>
+      <div class="access-grid">
+        <button class="text-btn" type="button" onclick="setFontScale('default')">Text Default</button>
+        <button class="text-btn" type="button" onclick="setFontScale('large')">Text Large</button>
+        <button class="text-btn" type="button" onclick="setFontScale('x-large')">Text XL</button>
+        <button id="contrastToggle" class="text-btn" type="button" onclick="toggleHighContrast()">High Contrast</button>
+      </div>
+      <div class="muted-note">Keyboard shortcuts: `r` refresh, `l` chamber light, `p` pause/resume, `s` stop, `g` open overview, `t` open settings.</div>
+    </div>
+    <div class="status-card">
+      <h3>Session</h3>
+      <div id="sessionSummary" class="status-message">Loading session…</div>
+      <button id="logoutBtn" class="text-btn" type="button" onclick="logoutSession()">Sign Out</button>
     </div>
   </aside>
   <main>
@@ -1300,6 +1367,15 @@
               </div>
             </section>
           </div>
+          <section class="status-card" aria-labelledby="systemStatusTitle">
+            <h3 id="systemStatusTitle">System Status</h3>
+            <div id="systemStatusList" class="status-list">
+              <div class="status-list-row"><strong>MQTT</strong><span>-</span></div>
+              <div class="status-list-row"><strong>Callbacks</strong><span>-</span></div>
+              <div class="status-list-row"><strong>Webhooks</strong><span>-</span></div>
+              <div class="status-list-row"><strong>Last Sync Error</strong><span>-</span></div>
+            </div>
+          </section>
         </div>
         <div id="settingsPanel" class="dashboard-panel" role="tabpanel" aria-labelledby="settingsTab">
           <section class="status-card settings-hero" aria-labelledby="printerSettingsTitle">
@@ -1313,10 +1389,36 @@
             </div>
             <div id="printerSettingsStatus" class="settings-status" aria-live="polite"></div>
           </section>
+          <section class="status-card" aria-labelledby="webhooksTitle">
+            <h3 id="webhooksTitle">Webhook Subscriptions</h3>
+            <div class="mini-form">
+              <label class="label">Webhook URL
+                <input id="webhookUrl" class="field" type="url" placeholder="https://example.com/printlab">
+              </label>
+              <div class="mini-form-grid">
+                <label class="label">Description
+                  <input id="webhookDescription" class="field" type="text" placeholder="Ops notifier">
+                </label>
+                <label class="label">Secret
+                  <input id="webhookSecret" class="field" type="text" placeholder="optional shared secret">
+                </label>
+              </div>
+              <button class="btn cyan" type="button" onclick="saveWebhook()"><span class="btn-icon">+</span><span class="btn-label">Save Webhook</span></button>
+            </div>
+            <div id="webhookList" class="preset-list">
+              <div class="timeline-meta">No webhook subscriptions configured.</div>
+            </div>
+          </section>
           <section class="status-card" aria-labelledby="timelineTitle">
             <h3 id="timelineTitle">Action Timeline</h3>
             <div id="timelineList" class="timeline-list">
               <div class="timeline-meta">No activity yet.</div>
+            </div>
+          </section>
+          <section class="status-card" aria-labelledby="auditTitle">
+            <h3 id="auditTitle">Audit Log</h3>
+            <div id="auditList" class="timeline-list">
+              <div class="timeline-meta">No audit entries yet.</div>
             </div>
           </section>
           <div class="settings-grid">
@@ -1457,6 +1559,88 @@
       return nativeFetch(input, next);
     };
 
+    function currentRole() {
+      return accessState.role || "viewer";
+    }
+
+    function canAccess(minRole) {
+      return (roleRank[currentRole()] || 0) >= (roleRank[minRole] || 0);
+    }
+
+    function ensureRole(minRole) {
+      if (canAccess(minRole)) return true;
+      const needed = String(minRole || "operator");
+      alert(`This action requires ${needed} access.`);
+      return false;
+    }
+
+    function setFontScale(scale) {
+      const next = scale === "large" || scale === "x-large" ? scale : "default";
+      document.documentElement.dataset.fontScale = next === "default" ? "" : next;
+      localStorage.setItem(fontScaleStorageKey, next);
+    }
+
+    function toggleHighContrast() {
+      const enabled = document.documentElement.dataset.contrast === "high";
+      document.documentElement.dataset.contrast = enabled ? "" : "high";
+      localStorage.setItem(contrastStorageKey, enabled ? "default" : "high");
+      const toggle = document.getElementById("contrastToggle");
+      if (toggle) toggle.textContent = enabled ? "High Contrast" : "Standard Contrast";
+    }
+
+    function applyAccessibilitySettings() {
+      const fontScale = localStorage.getItem(fontScaleStorageKey) || "default";
+      document.documentElement.dataset.fontScale = fontScale === "default" ? "" : fontScale;
+      const contrast = localStorage.getItem(contrastStorageKey) || "default";
+      document.documentElement.dataset.contrast = contrast === "high" ? "high" : "";
+      const toggle = document.getElementById("contrastToggle");
+      if (toggle) toggle.textContent = contrast === "high" ? "Standard Contrast" : "High Contrast";
+    }
+
+    function extractErrorMessage(payload, fallback) {
+      if (payload?.error?.message) return String(payload.error.message);
+      if (payload?.message) return String(payload.message);
+      if (payload?.detail?.message) return String(payload.detail.message);
+      if (payload?.detail) return typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
+      return fallback;
+    }
+
+    function updateRoleUi() {
+      const chip = document.getElementById("sessionRoleChip");
+      if (chip) chip.textContent = `Role: ${currentRole()}`;
+      const summary = document.getElementById("sessionSummary");
+      if (summary) {
+        summary.textContent = accessState.authEnabled
+          ? `${accessState.username || "Unknown"} signed in as ${currentRole()}.`
+          : "Authentication is disabled; full local access is allowed.";
+      }
+      const addPrinterNav = document.getElementById("addPrinterNav");
+      if (addPrinterNav) addPrinterNav.hidden = !canAccess("admin");
+    }
+
+    async function fetchAuthSession() {
+      try {
+        const response = await fetch("/auth/session");
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok && response.status !== 401) throw new Error(extractErrorMessage(payload, `HTTP ${response.status}`));
+        accessState.username = payload.username || null;
+        accessState.role = payload.role || (payload.auth_enabled === false ? "admin" : "viewer");
+        accessState.authenticated = !!payload.authenticated;
+        accessState.authEnabled = payload.auth_enabled !== false;
+      } catch (_error) {
+        accessState.username = null;
+        accessState.role = "viewer";
+        accessState.authenticated = false;
+        accessState.authEnabled = true;
+      }
+      updateRoleUi();
+    }
+
+    async function logoutSession() {
+      await fetch("/auth/logout", { method: "POST" }).catch(() => null);
+      window.location.assign("/login?next=/printer/" + encodeURIComponent(PRINTER_ID));
+    }
+
     function apiPath(path) {
       if (!path) return API_BASE;
       if (path.startsWith("http://") || path.startsWith("https://")) return path;
@@ -1483,8 +1667,12 @@
     let printerEventSource = null;
     let printerEventRetryTimer = null;
     const themeStorageKey = "printlab-theme";
+    const fontScaleStorageKey = "printlab-font-scale";
+    const contrastStorageKey = "printlab-contrast";
     const amsPresetStorageKey = `printlab.amsPreset.${PRINTER_ID}`;
     const notifyEnabledShownKey = "printlab.notify.enabled.v1";
+    const roleRank = { viewer: 1, operator: 2, admin: 3 };
+    const accessState = { username: null, role: "admin", authenticated: true, authEnabled: false };
     const notifyState = {
       connected: null,
       jobState: null,
@@ -1572,6 +1760,7 @@
     }
 
     async function savePrinterName() {
+      if (!ensureRole("admin")) return;
       const input = document.getElementById("printerDisplayName");
       const name = (input?.value || "").trim();
       if (!name) {
@@ -1585,12 +1774,8 @@
           body: JSON.stringify({ name })
         });
         if (!res.ok) {
-          let msg = `HTTP ${res.status}`;
-          try {
-            const payload = await res.json();
-            if (payload?.detail) msg = String(payload.detail);
-          } catch (_e) {}
-          throw new Error(msg);
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(extractErrorMessage(payload, `HTTP ${res.status}`));
         }
         setPrinterDisplayName(name);
         setSettingsStatus(`Saved printer name: ${name}`);
@@ -1801,6 +1986,7 @@
     }
 
     async function post(url, body) {
+      if (!ensureRole("operator")) return;
       if (printErrorGate.active && String(url || "").includes("/api/actions/resume")) {
         const errors = document.getElementById("errors");
         if (errors) {
@@ -1815,12 +2001,8 @@
           body: body ? JSON.stringify(body) : null
         });
         if (!res.ok) {
-          let msg = `HTTP ${res.status}`;
-          try {
-            const payload = await res.json();
-            if (payload?.detail) msg = String(payload.detail);
-          } catch (_e) {}
-          throw new Error(msg);
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(extractErrorMessage(payload, `HTTP ${res.status}`));
         }
         await load();
       } catch (err) {
@@ -2018,9 +2200,10 @@
     }
 
     async function removeQueueItem(itemId) {
+      if (!ensureRole("operator")) return;
       try {
         const res = await fetch(apiPath(`/api/queue/${encodeURIComponent(itemId)}`), { method: "DELETE" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw new Error(extractErrorMessage(await res.json().catch(() => ({})), `HTTP ${res.status}`));
         await load();
       } catch (err) {
         const errors = document.getElementById("errors");
@@ -2029,6 +2212,7 @@
     }
 
     async function updateQueueItemSchedule(itemId, localValue) {
+      if (!ensureRole("operator")) return;
       const payload = { start_at: localValue ? new Date(localValue).toISOString() : null };
       try {
         const res = await fetch(apiPath(`/api/queue/${encodeURIComponent(itemId)}`), {
@@ -2037,12 +2221,8 @@
           body: JSON.stringify(payload)
         });
         if (!res.ok) {
-          let msg = `HTTP ${res.status}`;
-          try {
-            const body = await res.json();
-            if (body?.detail) msg = String(body.detail);
-          } catch (_e) {}
-          throw new Error(msg);
+          const body = await res.json().catch(() => ({}));
+          throw new Error(extractErrorMessage(body, `HTTP ${res.status}`));
         }
         await load();
       } catch (err) {
@@ -2052,6 +2232,7 @@
     }
 
     async function reorderQueueItem(itemId, direction) {
+      if (!ensureRole("operator")) return;
       try {
         const res = await fetch(apiPath(`/api/queue/${encodeURIComponent(itemId)}/reorder`), {
           method: "POST",
@@ -2059,12 +2240,8 @@
           body: JSON.stringify({ direction })
         });
         if (!res.ok) {
-          let msg = `HTTP ${res.status}`;
-          try {
-            const body = await res.json();
-            if (body?.detail) msg = String(body.detail);
-          } catch (_e) {}
-          throw new Error(msg);
+          const body = await res.json().catch(() => ({}));
+          throw new Error(extractErrorMessage(body, `HTTP ${res.status}`));
         }
         await load();
       } catch (err) {
@@ -2074,7 +2251,60 @@
     }
 
     async function toggleChamberLight() {
+      if (!ensureRole("operator")) return;
       await post("/api/actions/chamber-light", { on: !chamberLightOn });
+    }
+
+    async function saveWebhook() {
+      if (!ensureRole("admin")) return;
+      const url = (document.getElementById("webhookUrl")?.value || "").trim();
+      if (!url) return;
+      const description = (document.getElementById("webhookDescription")?.value || "").trim();
+      const secret = (document.getElementById("webhookSecret")?.value || "").trim();
+      try {
+        const res = await fetch(apiPath(`/api/printers/${encodeURIComponent(PRINTER_ID)}/webhooks`), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ url, description, secret, events: ["printer.state", "printer.timeline", "audit"], enabled: true })
+        });
+        if (!res.ok) throw new Error(extractErrorMessage(await res.json().catch(() => ({})), `HTTP ${res.status}`));
+        ["webhookUrl", "webhookDescription", "webhookSecret"].forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.value = "";
+        });
+        await load();
+      } catch (err) {
+        const errors = document.getElementById("errors");
+        if (errors) errors.textContent = `Webhook save failed: ${String(err?.message || err)}`;
+      }
+    }
+
+    async function updateWebhook(webhookId, payload) {
+      if (!ensureRole("admin")) return;
+      try {
+        const res = await fetch(apiPath(`/api/printers/${encodeURIComponent(PRINTER_ID)}/webhooks/${encodeURIComponent(webhookId)}`), {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(extractErrorMessage(await res.json().catch(() => ({})), `HTTP ${res.status}`));
+        await load();
+      } catch (err) {
+        const errors = document.getElementById("errors");
+        if (errors) errors.textContent = `Webhook update failed: ${String(err?.message || err)}`;
+      }
+    }
+
+    async function removeWebhook(webhookId) {
+      if (!ensureRole("admin")) return;
+      try {
+        const res = await fetch(apiPath(`/api/printers/${encodeURIComponent(PRINTER_ID)}/webhooks/${encodeURIComponent(webhookId)}`), { method: "DELETE" });
+        if (!res.ok) throw new Error(extractErrorMessage(await res.json().catch(() => ({})), `HTTP ${res.status}`));
+        await load();
+      } catch (err) {
+        const errors = document.getElementById("errors");
+        if (errors) errors.textContent = `Webhook remove failed: ${String(err?.message || err)}`;
+      }
     }
 
     function numberOrNull(id) {
@@ -2085,6 +2315,7 @@
     }
 
     async function saveControlPreset() {
+      if (!ensureRole("operator")) return;
       const name = (document.getElementById("presetName")?.value || "").trim();
       if (!name) return;
       await post("/api/control-presets", {
@@ -2102,6 +2333,7 @@
     }
 
     async function removeControlPreset(presetId) {
+      if (!ensureRole("operator")) return;
       try {
         const res = await fetch(apiPath(`/api/control-presets/${encodeURIComponent(presetId)}`), { method: "DELETE" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -2113,6 +2345,7 @@
     }
 
     async function applyControlPreset(encodedPreset) {
+      if (!ensureRole("operator")) return;
       const preset = JSON.parse(decodeURIComponent(encodedPreset));
       const ops = [];
       if (Number.isFinite(Number(preset.nozzle_target))) ops.push(post("/api/actions/temperature", { target: "nozzle", value: Number(preset.nozzle_target) }));
@@ -2125,6 +2358,7 @@
     }
 
     async function saveAlertRule() {
+      if (!ensureRole("operator")) return;
       const name = (document.getElementById("ruleName")?.value || "").trim();
       const type = (document.getElementById("ruleType")?.value || "").trim();
       if (!name || !type) return;
@@ -2149,6 +2383,7 @@
     }
 
     async function removeAlertRule(ruleId) {
+      if (!ensureRole("operator")) return;
       try {
         const res = await fetch(apiPath(`/api/alert-rules/${encodeURIComponent(ruleId)}`), { method: "DELETE" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -2160,6 +2395,7 @@
     }
 
     async function updateAlertRule(ruleId, payload) {
+      if (!ensureRole("operator")) return;
       try {
         const res = await fetch(apiPath(`/api/alert-rules/${encodeURIComponent(ruleId)}`), {
           method: "PATCH",
@@ -2167,12 +2403,8 @@
           body: JSON.stringify(payload)
         });
         if (!res.ok) {
-          let msg = `HTTP ${res.status}`;
-          try {
-            const body = await res.json();
-            if (body?.detail) msg = String(body.detail);
-          } catch (_e) {}
-          throw new Error(msg);
+          const body = await res.json().catch(() => ({}));
+          throw new Error(extractErrorMessage(body, `HTTP ${res.status}`));
         }
         await load();
       } catch (err) {
@@ -2458,6 +2690,67 @@
       `).join("");
     }
 
+    function renderAudit(items) {
+      const list = document.getElementById("auditList");
+      if (!list) return;
+      const entries = Array.isArray(items) ? items : [];
+      if (!entries.length) {
+        list.innerHTML = "<div class='timeline-meta'>No audit entries yet.</div>";
+        return;
+      }
+      list.innerHTML = entries.map((entry) => `
+        <article class="timeline-item">
+          <div class="timeline-head">
+            <div class="timeline-title">${escapeHtml(entry.message || entry.event || "Audit entry")}</div>
+            <span class="severity-chip ${escapeHtml(entry.severity || "info")}">${escapeHtml(entry.severity || "info")}</span>
+          </div>
+          <div class="timeline-meta">${escapeHtml(formatDateTime(entry.at))} • ${escapeHtml(entry.actor || "system")}</div>
+        </article>
+      `).join("");
+    }
+
+    function renderWebhooks(items) {
+      const list = document.getElementById("webhookList");
+      if (!list) return;
+      const hooks = Array.isArray(items) ? items : [];
+      if (!hooks.length) {
+        list.innerHTML = "<div class='timeline-meta'>No webhook subscriptions configured.</div>";
+        return;
+      }
+      list.innerHTML = hooks.map((hook) => `
+        <article class="preset-item">
+          <div class="queue-item-title">${escapeHtml(hook.description || hook.url || "Webhook")}</div>
+          <div class="queue-item-meta">${escapeHtml((hook.events || []).join(", ") || "printer.state")} • ${escapeHtml(hook.enabled ? "enabled" : "disabled")}</div>
+          <div class="queue-item-meta">${escapeHtml(hook.last_error ? `Last error: ${hook.last_error}` : (hook.last_delivered_at ? `Delivered ${formatDateTime(hook.last_delivered_at)}` : "No deliveries yet"))}</div>
+          <div class="preset-actions">
+            <button class="text-btn webhook-toggle" type="button" data-webhook-id="${escapeHtml(hook.id || "")}" data-enabled="${hook.enabled ? "1" : "0"}">${hook.enabled ? "Disable" : "Enable"}</button>
+            <button class="text-btn webhook-remove" type="button" data-webhook-id="${escapeHtml(hook.id || "")}">Remove</button>
+          </div>
+        </article>
+      `).join("");
+      list.querySelectorAll(".webhook-toggle").forEach((button) => {
+        button.addEventListener("click", () => updateWebhook(button.dataset.webhookId || "", { enabled: button.dataset.enabled !== "1" }));
+      });
+      list.querySelectorAll(".webhook-remove").forEach((button) => {
+        button.addEventListener("click", () => removeWebhook(button.dataset.webhookId || ""));
+      });
+    }
+
+    function renderSystemStatus(systemStatus) {
+      const list = document.getElementById("systemStatusList");
+      if (!list) return;
+      const mqtt = systemStatus?.mqtt || {};
+      const callback = systemStatus?.callback || {};
+      const webhooks = systemStatus?.webhooks || {};
+      const sync = systemStatus?.sync || {};
+      list.innerHTML = `
+        <div class="status-list-row"><strong>MQTT</strong><span>${escapeHtml(mqtt.connected ? "Connected" : (mqtt.configured ? "Disconnected" : "Not configured"))}</span></div>
+        <div class="status-list-row"><strong>Callbacks</strong><span>${escapeHtml(callback.last_error ? `Error (${callback.status_code || "-"})` : (callback.last_delivered_at ? `Healthy at ${formatDateTime(callback.last_delivered_at)}` : (callback.enabled ? "Waiting for first delivery" : "Disabled")))}</span></div>
+        <div class="status-list-row"><strong>Webhooks</strong><span>${escapeHtml(webhooks.enabled_count ? `${webhooks.enabled_count} enabled` : "None configured")}</span></div>
+        <div class="status-list-row"><strong>Last Sync Error</strong><span>${escapeHtml(sync.last_error || "-")}</span></div>
+      `;
+    }
+
     function renderPresets(items) {
       const list = document.getElementById("presetList");
       if (!list) return;
@@ -2628,8 +2921,11 @@
       renderStatusChips(s, errText);
       renderQueue(s.queue);
       renderTimeline(s.timeline);
+      renderAudit(s.audit);
       renderPresets(s.control_presets);
       renderAlertRules(s.alert_rules);
+      renderWebhooks(s.webhooks);
+      renderSystemStatus(s.system_status);
       renderAms(s.ams);
 
       const jobStateRaw = (s.job?.state || "").toString();
@@ -2693,13 +2989,27 @@
     }
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeSidebar();
+      if (event.target && ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) return;
+      if (event.key === "r") load();
+      if (event.key === "l") toggleChamberLight();
+      if (event.key === "p") {
+        if (String(window.__lastJobState || "").toUpperCase().includes("PAUSE")) {
+          post("/api/actions/resume");
+        } else {
+          post("/api/actions/pause");
+        }
+      }
+      if (event.key === "s") post("/api/actions/stop");
+      if (event.key === "g") switchDashboardPanel("overview");
+      if (event.key === "t") switchDashboardPanel("settings");
     });
     applyTheme(document.documentElement.dataset.theme);
+    applyAccessibilitySettings();
     initPwa();
     initQueueControls();
     updateLibraryChrome();
     connectPrinterEvents();
-    load();
+    fetchAuthSession().finally(load);
     setInterval(load, 3000);
   </script>
 </body>

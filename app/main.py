@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.auth import auth_router, register_admin_auth, validate_auth_configuration
+from app.errors import ApiError, api_error, from_http_exception
 from app.routers.api import router as api_router
 from app.routers.ui import router as ui_router
 from app.runtime import start_runtime, stop_runtime
@@ -43,6 +46,20 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(ui_router)
     app.include_router(api_router)
+
+    @app.exception_handler(ApiError)
+    async def api_error_handler(_request, exc: ApiError) -> JSONResponse:
+        return JSONResponse(status_code=exc.status_code, content=exc.to_payload())
+
+    @app.exception_handler(HTTPException)
+    async def http_error_handler(_request, exc: HTTPException) -> JSONResponse:
+        normalized = from_http_exception(exc)
+        return JSONResponse(status_code=normalized.status_code, content=normalized.to_payload())
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(_request, exc: RequestValidationError) -> JSONResponse:
+        normalized = api_error("validation_error", "Request validation failed.", 422, fields=exc.errors())
+        return JSONResponse(status_code=normalized.status_code, content=normalized.to_payload())
 
     @app.get("/openapi.json/export", include_in_schema=False)
     async def export_openapi() -> dict[str, object]:

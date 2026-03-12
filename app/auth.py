@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from urllib.parse import quote
 
-from fastapi import APIRouter, FastAPI, Request, Response
+from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.config import get_bool, get_env
@@ -19,26 +19,95 @@ SESSION_COOKIE_NAME = "printlab_session"
 CSRF_COOKIE_NAME = "printlab_csrf"
 CSRF_HEADER_NAME = "x-csrf-token"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+ROLE_RANK = {"viewer": 1, "operator": 2, "admin": 3}
+ROLE_PERMISSIONS = {
+    "viewer": ["dashboard:read", "printer:read", "queue:read", "audit:read"],
+    "operator": ["dashboard:read", "printer:read", "queue:read", "audit:read", "printer:operate", "queue:write", "job:write"],
+    "admin": [
+        "dashboard:read",
+        "printer:read",
+        "queue:read",
+        "audit:read",
+        "printer:operate",
+        "queue:write",
+        "job:write",
+        "printer:manage",
+        "integration:manage",
+        "auth:manage",
+    ],
+}
+
+
+@dataclass(frozen=True)
+class AuthUser:
+    username: str
+    password: str
+    role: str
 
 
 @dataclass(frozen=True)
 class AuthConfig:
     enabled: bool
     require_auth: bool
-    username: str
-    password: str
+    users: tuple[AuthUser, ...]
     session_secret: str
     session_ttl_seconds: int
     cookie_secure: bool
     cookie_domain: str | None
 
 
+def normalize_role(role: str | None, default: str = "viewer") -> str:
+    normalized = str(role or default).strip().lower()
+    return normalized if normalized in ROLE_RANK else default
+
+
+def permissions_for_role(role: str | None) -> list[str]:
+    normalized = normalize_role(role)
+    return list(ROLE_PERMISSIONS.get(normalized, ROLE_PERMISSIONS["viewer"]))
+
+
+def _load_auth_users() -> tuple[AuthUser, ...]:
+    raw = get_env("AUTH_USERS_JSON", "")
+    users: list[AuthUser] = []
+    if raw:
+        try:
+            payload = json.loads(raw)
+            if not isinstance(payload, list):
+                raise ValueError("AUTH_USERS_JSON must be a JSON array.")
+            for entry in payload:
+                if not isinstance(entry, dict):
+                    continue
+                username = str(entry.get("username") or "").strip()
+                password = str(entry.get("password") or "")
+                if not username or not password:
+                    continue
+                users.append(AuthUser(username=username, password=password, role=normalize_role(entry.get("role"), "viewer")))
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Invalid AUTH_USERS_JSON: {exc}") from exc
+
+    for role_name, default_username, password_env in (
+        ("admin", "admin", "ADMIN_PASSWORD"),
+        ("operator", "operator", "OPERATOR_PASSWORD"),
+        ("viewer", "viewer", "VIEWER_PASSWORD"),
+    ):
+        password = get_env(password_env, "")
+        if not password:
+            continue
+        username = get_env(f"{role_name.upper()}_USERNAME", default_username) or default_username
+        users.append(AuthUser(username=username.strip(), password=password, role=role_name))
+
+    deduped: dict[str, AuthUser] = {}
+    for user in users:
+        deduped[user.username] = user
+    return tuple(deduped.values())
+
+
 def _auth_config() -> AuthConfig:
-    username = get_env("ADMIN_USERNAME", "admin") or "admin"
-    password = get_env("ADMIN_PASSWORD", "")
     require_auth = get_bool("REQUIRE_AUTH", False)
-    enabled = bool(password)
-    session_secret = get_env("SESSION_SECRET", "") or hashlib.sha256(f"{username}:{password}".encode("utf-8")).hexdigest()
+    users = _load_auth_users()
+    enabled = bool(users)
+    secret_basis = "|".join(f"{user.username}:{user.role}:{user.password}" for user in users) or "printlab"
+    session_secret = get_env("SESSION_SECRET", "") or hashlib.sha256(secret_basis.encode("utf-8")).hexdigest()
     ttl_raw = get_env("SESSION_TTL_SECONDS", "1800") or "1800"
     try:
         ttl_seconds = max(300, min(86400, int(ttl_raw)))
@@ -48,8 +117,7 @@ def _auth_config() -> AuthConfig:
     return AuthConfig(
         enabled=enabled,
         require_auth=require_auth,
-        username=username,
-        password=password,
+        users=users,
         session_secret=session_secret,
         session_ttl_seconds=ttl_seconds,
         cookie_secure=get_bool("SESSION_COOKIE_SECURE", False),
@@ -59,8 +127,8 @@ def _auth_config() -> AuthConfig:
 
 def validate_auth_configuration() -> None:
     config = _auth_config()
-    if config.require_auth and (not config.username.strip() or not config.password.strip()):
-        raise RuntimeError("REQUIRE_AUTH is enabled but ADMIN_USERNAME or ADMIN_PASSWORD is not configured.")
+    if config.require_auth and not config.users:
+        raise RuntimeError("REQUIRE_AUTH is enabled but no auth users are configured.")
 
 
 def parse_basic_auth(authorization: str | None) -> tuple[str, str] | None:
@@ -85,8 +153,8 @@ def _session_signer(secret_value: str, payload: bytes) -> str:
     return hmac.new(secret_value.encode("utf-8"), payload, hashlib.sha256).hexdigest()
 
 
-def _encode_session(username: str, csrf_token: str, expires_at: int, *, secret_value: str) -> str:
-    payload = json.dumps({"u": username, "csrf": csrf_token, "exp": expires_at}, separators=(",", ":")).encode("utf-8")
+def _encode_session(username: str, role: str, csrf_token: str, expires_at: int, *, secret_value: str) -> str:
+    payload = json.dumps({"u": username, "r": role, "csrf": csrf_token, "exp": expires_at}, separators=(",", ":")).encode("utf-8")
     payload_b64 = base64.urlsafe_b64encode(payload).decode("ascii")
     signature = _session_signer(secret_value, payload)
     return f"{payload_b64}.{signature}"
@@ -117,25 +185,42 @@ def _decode_session(raw_value: str | None, *, secret_value: str) -> dict[str, ob
     return data
 
 
-def _valid_basic_credentials(request: Request, config: AuthConfig) -> str | None:
+def _find_user(config: AuthConfig, username: str) -> AuthUser | None:
+    target = username.strip()
+    if not target:
+        return None
+    for user in config.users:
+        if hmac.compare_digest(user.username, target):
+            return user
+    return None
+
+
+def _find_user_by_credentials(request_username: str, request_password: str, config: AuthConfig) -> AuthUser | None:
+    for user in config.users:
+        if hmac.compare_digest(request_username, user.username) and hmac.compare_digest(request_password, user.password):
+            return user
+    return None
+
+
+def _valid_basic_credentials(request: Request, config: AuthConfig) -> AuthUser | None:
     credentials = parse_basic_auth(request.headers.get("authorization"))
     if credentials is None:
         return None
     username, password = credentials
-    if hmac.compare_digest(username, config.username) and hmac.compare_digest(password, config.password):
-        return username
-    return None
+    return _find_user_by_credentials(username, password, config)
 
 
-def _valid_session(request: Request, config: AuthConfig) -> tuple[str, dict[str, object]] | None:
+def _valid_session(request: Request, config: AuthConfig) -> tuple[AuthUser, dict[str, object]] | None:
     raw = request.cookies.get(SESSION_COOKIE_NAME)
     session = _decode_session(raw, secret_value=config.session_secret)
     if session is None:
         return None
     username = str(session.get("u") or "").strip()
-    if not username:
+    role = normalize_role(str(session.get("r") or "viewer"))
+    user = _find_user(config, username)
+    if user is None or user.role != role:
         return None
-    return username, session
+    return user, session
 
 
 def actor_from_request(request: Request) -> str:
@@ -148,6 +233,32 @@ def actor_from_request(request: Request) -> str:
         if username.strip():
             return username.strip()
     return "dashboard"
+
+
+def role_from_request(request: Request) -> str:
+    role = getattr(request.state, "auth_role", None)
+    if isinstance(role, str) and role.strip():
+        return normalize_role(role)
+    config = _auth_config()
+    if not config.enabled and not config.require_auth:
+        return "admin"
+    return "viewer"
+
+
+def require_role(request: Request, minimum_role: str) -> str:
+    current = role_from_request(request)
+    required = normalize_role(minimum_role)
+    if ROLE_RANK.get(current, 0) < ROLE_RANK.get(required, 0):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "permission_denied",
+                "message": f"{required.title()} role required.",
+                "required_role": required,
+                "role": current,
+            },
+        )
+    return current
 
 
 def _is_makerworks_boundary_request(path: str) -> bool:
@@ -178,10 +289,10 @@ def _clear_auth_cookies(response: Response, config: AuthConfig) -> None:
     response.delete_cookie(CSRF_COOKIE_NAME, path="/", domain=config.cookie_domain)
 
 
-def _set_auth_cookies(response: Response, *, username: str, config: AuthConfig) -> dict[str, object]:
+def _set_auth_cookies(response: Response, *, username: str, role: str, config: AuthConfig) -> dict[str, object]:
     csrf_token = secrets.token_urlsafe(24)
     expires_at = int(time.time()) + config.session_ttl_seconds
-    session_value = _encode_session(username, csrf_token, expires_at, secret_value=config.session_secret)
+    session_value = _encode_session(username, role, csrf_token, expires_at, secret_value=config.session_secret)
     response.set_cookie(
         SESSION_COOKIE_NAME,
         session_value,
@@ -202,7 +313,7 @@ def _set_auth_cookies(response: Response, *, username: str, config: AuthConfig) 
         path="/",
         domain=config.cookie_domain,
     )
-    return {"csrf_token": csrf_token, "expires_at": expires_at}
+    return {"csrf_token": csrf_token, "expires_at": expires_at, "role": role}
 
 
 def _login_html(next_path: str) -> str:
@@ -289,12 +400,21 @@ async def login_endpoint(request: Request) -> JSONResponse:
     payload = await request.json()
     username = str(payload.get("username") or "").strip()
     password = str(payload.get("password") or "")
-    if not (hmac.compare_digest(username, config.username) and hmac.compare_digest(password, config.password)):
+    user = _find_user_by_credentials(username, password, config)
+    if user is None:
         response = JSONResponse(status_code=401, content={"detail": "Invalid credentials."})
         _clear_auth_cookies(response, config)
         return response
-    response = JSONResponse(content={"ok": True, "username": username, "ttl_seconds": config.session_ttl_seconds})
-    _set_auth_cookies(response, username=username, config=config)
+    response = JSONResponse(
+        content={
+            "ok": True,
+            "username": user.username,
+            "role": user.role,
+            "permissions": permissions_for_role(user.role),
+            "ttl_seconds": config.session_ttl_seconds,
+        }
+    )
+    _set_auth_cookies(response, username=user.username, role=user.role, config=config)
     return response
 
 
@@ -311,15 +431,29 @@ async def session_endpoint(request: Request) -> JSONResponse:
     config = _auth_config()
     session_match = _valid_session(request, config)
     if not config.enabled:
-        return JSONResponse(content={"auth_enabled": False, "authenticated": True, "username": None, "csrf_token": None})
+        return JSONResponse(
+            content={
+                "auth_enabled": False,
+                "authenticated": True,
+                "username": None,
+                "role": "admin",
+                "permissions": permissions_for_role("admin"),
+                "csrf_token": None,
+            }
+        )
     if session_match is None:
-        return JSONResponse(content={"auth_enabled": True, "authenticated": False, "username": None, "csrf_token": None}, status_code=401)
-    username, session = session_match
+        return JSONResponse(
+            content={"auth_enabled": True, "authenticated": False, "username": None, "role": None, "permissions": [], "csrf_token": None},
+            status_code=401,
+        )
+    user, session = session_match
     return JSONResponse(
         content={
             "auth_enabled": True,
             "authenticated": True,
-            "username": username,
+            "username": user.username,
+            "role": user.role,
+            "permissions": permissions_for_role(user.role),
             "csrf_token": session.get("csrf"),
             "expires_at": session.get("exp"),
             "ttl_seconds": config.session_ttl_seconds,
@@ -332,9 +466,13 @@ def register_admin_auth(app: FastAPI) -> None:
     async def admin_auth_middleware(request: Request, call_next):
         config = _auth_config()
         request.state.auth_user = None
+        request.state.auth_role = None
+        request.state.auth_permissions = []
         request.state.auth_scheme = None
 
         if not config.enabled and not config.require_auth:
+            request.state.auth_role = "admin"
+            request.state.auth_permissions = permissions_for_role("admin")
             return await call_next(request)
 
         path = request.url.path
@@ -345,12 +483,16 @@ def register_admin_auth(app: FastAPI) -> None:
             makerworks_user = _valid_makerworks_boundary_auth(request)
             if makerworks_user is not None:
                 request.state.auth_user = makerworks_user
+                request.state.auth_role = "operator"
+                request.state.auth_permissions = permissions_for_role("operator")
                 request.state.auth_scheme = "makerworks"
                 return await call_next(request)
 
         basic_user = _valid_basic_credentials(request, config) if config.enabled else None
         if basic_user is not None:
-            request.state.auth_user = basic_user
+            request.state.auth_user = basic_user.username
+            request.state.auth_role = basic_user.role
+            request.state.auth_permissions = permissions_for_role(basic_user.role)
             request.state.auth_scheme = "basic"
             return await call_next(request)
 
@@ -365,7 +507,9 @@ def register_admin_auth(app: FastAPI) -> None:
                     return JSONResponse(status_code=403, content={"detail": "CSRF token required."})
                 if not (hmac.compare_digest(csrf_cookie, csrf_header) and hmac.compare_digest(csrf_cookie, csrf_session)):
                     return JSONResponse(status_code=403, content={"detail": "CSRF token mismatch."})
-            request.state.auth_user = session_user
+            request.state.auth_user = session_user.username
+            request.state.auth_role = session_user.role
+            request.state.auth_permissions = permissions_for_role(session_user.role)
             request.state.auth_scheme = "session"
             return await call_next(request)
 

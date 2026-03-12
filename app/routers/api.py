@@ -7,7 +7,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.auth import actor_from_request
+from app.auth import actor_from_request, require_role
+from app.errors import api_error, from_exception
 from app.runtime import job_manager, printer_manager, service_or_404, works_service
 from app.services import (
     AddPrinterRequest,
@@ -27,10 +28,24 @@ from app.services import (
     SuccessfulGcodeSyncRequest,
     TemperatureRequest,
     UpdatePrinterRequest,
+    WebhookSubscriptionRequest,
+    WebhookSubscriptionUpdateRequest,
     WorksRequest,
 )
 
 router = APIRouter()
+
+
+def _require_operator(request: Request) -> None:
+    require_role(request, "operator")
+
+
+def _require_admin(request: Request) -> None:
+    require_role(request, "admin")
+
+
+def _raise_api_error(exc: Exception) -> None:
+    raise from_exception(exc) from exc
 
 
 @router.get("/health")
@@ -99,38 +114,42 @@ async def list_printers() -> dict[str, Any]:
 
 
 @router.post("/api/printers")
-async def add_printer(request: AddPrinterRequest) -> dict[str, Any]:
+async def add_printer(http_request: Request, request: AddPrinterRequest) -> dict[str, Any]:
+    _require_admin(http_request)
     try:
         printer = await printer_manager.add(request)
         return {"ok": True, "printer": printer}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.patch("/api/printers/{printer_id}")
-async def update_printer(printer_id: str, request: UpdatePrinterRequest) -> dict[str, Any]:
+async def update_printer(printer_id: str, http_request: Request, request: UpdatePrinterRequest) -> dict[str, Any]:
+    _require_admin(http_request)
     try:
         printer = await printer_manager.update(printer_id, request)
         return {"ok": True, "printer": printer}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.delete("/api/printers/{printer_id}")
-async def delete_printer(printer_id: str) -> dict[str, Any]:
+async def delete_printer(printer_id: str, request: Request) -> dict[str, Any]:
+    _require_admin(request)
     try:
         return await printer_manager.remove(printer_id)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/name")
-async def rename_printer(printer_id: str, request: PrinterNameRequest) -> dict[str, Any]:
+async def rename_printer(printer_id: str, http_request: Request, request: PrinterNameRequest) -> dict[str, Any]:
+    _require_admin(http_request)
     try:
         printer = printer_manager.rename(printer_id, request.name)
         return {"ok": True, "printer": printer}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/state")
@@ -156,7 +175,7 @@ async def works_health(service_name: str, path: str = "/health", printer_id: str
             result["printer_filament"] = service_or_404(printer_id).filament_snapshot()
         return result
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/printers/{printer_id}/works/{service_name}/health")
@@ -168,22 +187,24 @@ async def works_health_by_printer(printer_id: str, service_name: str, path: str 
             result["printer_filament"] = service.filament_snapshot()
         return result
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/works/{service_name}/request")
-async def works_request(service_name: str, request: WorksRequest, printer_id: str | None = None) -> dict[str, Any]:
+async def works_request(service_name: str, http_request: Request, request: WorksRequest, printer_id: str | None = None) -> dict[str, Any]:
+    _require_operator(http_request)
     try:
         result = await works_service.request(service_name, request)
         if service_name.lower() == "stockworks":
             result["printer_filament"] = service_or_404(printer_id).filament_snapshot()
         return result
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/works/{service_name}/request")
-async def works_request_by_printer(printer_id: str, service_name: str, request: WorksRequest) -> dict[str, Any]:
+async def works_request_by_printer(printer_id: str, service_name: str, http_request: Request, request: WorksRequest) -> dict[str, Any]:
+    _require_operator(http_request)
     service = service_or_404(printer_id)
     try:
         result = await works_service.request(service_name, request)
@@ -191,7 +212,7 @@ async def works_request_by_printer(printer_id: str, service_name: str, request: 
             result["printer_filament"] = service.filament_snapshot()
         return result
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/works/makerworks/library")
@@ -204,7 +225,7 @@ async def makerworks_library(
     try:
         return await works_service.makerworks_library(query=query, page=page, page_size=page_size, include_raw=include_raw)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/printers/{printer_id}/works/makerworks/library")
@@ -219,7 +240,7 @@ async def makerworks_library_by_printer(
     try:
         return await works_service.makerworks_library(query=query, page=page, page_size=page_size, include_raw=include_raw)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/works/makerworks/library/{model_id}")
@@ -227,7 +248,7 @@ async def makerworks_library_item(model_id: str, include_raw: bool = True) -> di
     try:
         return await works_service.makerworks_library_item(model_id, include_raw=include_raw)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/printers/{printer_id}/works/makerworks/library/{model_id}")
@@ -236,7 +257,7 @@ async def makerworks_library_item_by_printer(printer_id: str, model_id: str, inc
     try:
         return await works_service.makerworks_library_item(model_id, include_raw=include_raw)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/works/makerworks/queue-job")
@@ -245,10 +266,11 @@ async def makerworks_queue_job_by_printer(
     request: Request,
     payload: MakerworksQueueJobRequest,
 ) -> dict[str, Any]:
+    _require_operator(request)
     service = service_or_404(printer_id)
     try:
         if not (await service.state()).get("connected"):
-            raise ValueError("Printer is not connected. Choose a connected printer before queueing a MakerWorks model.")
+            raise api_error("printer_offline", "Printer is not connected. Choose a connected printer before queueing a MakerWorks model.", 409)
         result = await job_manager.submit_makerworks_job(
             MakerworksSubmitJobRequest(
                 model_id=payload.model_id,
@@ -268,24 +290,23 @@ async def makerworks_queue_job_by_printer(
         )
         return {"ok": True, "queued": True, "printer_id": printer_id, "source_item": result.get("source_item"), **result}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/works/makerworks/jobs")
 async def makerworks_submit_job(request: Request, payload: MakerworksSubmitJobRequest) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await job_manager.submit_makerworks_job(payload, actor=actor_from_request(request))
     except MakerworksSubmitError as exc:
         return JSONResponse(
-            status_code=400,
+            status_code=409,
             content={
-                "error": "submit_failed",
-                "message": str(exc),
-                "job": exc.job,
+                "error": {"code": "submit_failed", "message": str(exc), "details": {"job": exc.job}},
             },
         )
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/works/makerworks/jobs/{job_id}")
@@ -293,7 +314,7 @@ async def makerworks_get_job(job_id: str) -> dict[str, Any]:
     try:
         return job_manager.get_job(job_id)
     except Exception as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/jobs")
@@ -307,16 +328,17 @@ async def get_job(job_id: str) -> dict[str, Any]:
     try:
         return {"item": job_manager.get_job(job_id)}
     except Exception as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/jobs/{job_id}/sync-makerworks")
-async def sync_job(job_id: str, payload: SuccessfulGcodeSyncRequest | None = None) -> dict[str, Any]:
+async def sync_job(job_id: str, request: Request, payload: SuccessfulGcodeSyncRequest | None = None) -> dict[str, Any]:
+    _require_operator(request)
     try:
         job = await job_manager.sync_job_to_makerworks(job_id, force=bool(payload and payload.force))
         return {"ok": True, "item": job}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/printers/{printer_id}/jobs")
@@ -325,7 +347,7 @@ async def list_jobs_by_printer(printer_id: str, status: str | None = None) -> di
         items = job_manager.list_jobs(printer_id=printer_id, status=status)
         return {"items": items, "count": len(items)}
     except Exception as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/printers/{printer_id}/jobs/{job_id}")
@@ -333,36 +355,40 @@ async def get_job_by_printer(printer_id: str, job_id: str) -> dict[str, Any]:
     try:
         return {"item": job_manager.get_job(job_id, printer_id=printer_id)}
     except Exception as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/jobs/{job_id}/sync-makerworks")
 async def sync_job_by_printer(
     printer_id: str,
     job_id: str,
+    request: Request,
     payload: SuccessfulGcodeSyncRequest | None = None,
 ) -> dict[str, Any]:
+    _require_operator(request)
     try:
         job = await job_manager.sync_job_to_makerworks(job_id, printer_id=printer_id, force=bool(payload and payload.force))
         return {"ok": True, "item": job}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/works/orderworks/print-job")
 async def orderworks_print_job(request: Request, payload: OrderworksPrintJobRequest, printer_id: str | None = None) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404(printer_id).start_orderworks_print_job(payload, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/works/orderworks/print-job")
 async def orderworks_print_job_by_printer(printer_id: str, request: Request, payload: OrderworksPrintJobRequest) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404(printer_id).start_orderworks_print_job(payload, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/queue")
@@ -377,66 +403,74 @@ async def queue_snapshot_by_printer(printer_id: str) -> dict[str, Any]:
 
 @router.post("/api/queue")
 async def queue_print_job(request: Request, payload: QueuePrintJobRequest) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404().queue_print_job(payload, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/queue")
 async def queue_print_job_by_printer(printer_id: str, request: Request, payload: QueuePrintJobRequest) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404(printer_id).queue_print_job(payload, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.patch("/api/queue/{item_id}")
 async def update_queue(item_id: str, request: Request, payload: QueueUpdateRequest) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404().update_queue_item(item_id, payload, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/queue/{item_id}/reorder")
 async def reorder_queue(item_id: str, request: Request, payload: QueueReorderRequest) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404().reorder_queue_item(item_id, payload.direction, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.patch("/api/printers/{printer_id}/queue/{item_id}")
 async def update_queue_by_printer(printer_id: str, item_id: str, request: Request, payload: QueueUpdateRequest) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404(printer_id).update_queue_item(item_id, payload, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/queue/{item_id}/reorder")
 async def reorder_queue_by_printer(printer_id: str, item_id: str, request: Request, payload: QueueReorderRequest) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404(printer_id).reorder_queue_item(item_id, payload.direction, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.delete("/api/queue/{item_id}")
 async def remove_queue(item_id: str, request: Request) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404().remove_queue_item(item_id, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.delete("/api/printers/{printer_id}/queue/{item_id}")
 async def remove_queue_by_printer(printer_id: str, item_id: str, request: Request) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404(printer_id).remove_queue_item(item_id, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/timeline")
@@ -447,6 +481,18 @@ async def timeline_snapshot() -> dict[str, Any]:
 @router.get("/api/printers/{printer_id}/timeline")
 async def timeline_snapshot_by_printer(printer_id: str) -> dict[str, Any]:
     return {"items": service_or_404(printer_id).timeline_snapshot()}
+
+
+@router.get("/api/audit")
+async def audit_snapshot(limit: int = 100) -> dict[str, Any]:
+    items = printer_manager.audit_snapshot(limit=limit)
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/api/printers/{printer_id}/audit")
+async def audit_snapshot_by_printer(printer_id: str, limit: int = 100) -> dict[str, Any]:
+    items = printer_manager.audit_snapshot(limit=limit, printer_id=printer_id)
+    return {"items": items, "count": len(items)}
 
 
 @router.get("/api/successful-gcodes")
@@ -462,25 +508,28 @@ async def successful_gcodes_by_printer(printer_id: str) -> dict[str, Any]:
 
 
 @router.post("/api/successful-gcodes/{record_id}/sync-makerworks")
-async def sync_successful_gcode(record_id: str, payload: SuccessfulGcodeSyncRequest | None = None) -> dict[str, Any]:
+async def sync_successful_gcode(record_id: str, request: Request, payload: SuccessfulGcodeSyncRequest | None = None) -> dict[str, Any]:
+    _require_operator(request)
     try:
         record = await service_or_404().sync_successful_gcode(record_id, force=bool(payload and payload.force))
         return {"ok": True, "item": record}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/successful-gcodes/{record_id}/sync-makerworks")
 async def sync_successful_gcode_by_printer(
     printer_id: str,
     record_id: str,
+    request: Request,
     payload: SuccessfulGcodeSyncRequest | None = None,
 ) -> dict[str, Any]:
+    _require_operator(request)
     try:
         record = await service_or_404(printer_id).sync_successful_gcode(record_id, force=bool(payload and payload.force))
         return {"ok": True, "item": record}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/control-presets")
@@ -495,34 +544,38 @@ async def control_presets_by_printer(printer_id: str) -> dict[str, Any]:
 
 @router.post("/api/control-presets")
 async def save_control_preset(request: Request, payload: ControlPresetRequest) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404().save_control_preset(payload, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/control-presets")
 async def save_control_preset_by_printer(printer_id: str, request: Request, payload: ControlPresetRequest) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404(printer_id).save_control_preset(payload, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.delete("/api/control-presets/{preset_id}")
 async def remove_control_preset(preset_id: str, request: Request) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404().remove_control_preset(preset_id, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.delete("/api/printers/{printer_id}/control-presets/{preset_id}")
 async def remove_control_preset_by_printer(printer_id: str, preset_id: str, request: Request) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404(printer_id).remove_control_preset(preset_id, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/alert-rules")
@@ -537,50 +590,56 @@ async def alert_rules_by_printer(printer_id: str) -> dict[str, Any]:
 
 @router.post("/api/alert-rules")
 async def save_alert_rule(request: Request, payload: AlertRuleRequest) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404().save_alert_rule(payload, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.patch("/api/alert-rules/{rule_id}")
 async def update_alert_rule(rule_id: str, request: Request, payload: AlertRuleUpdateRequest) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404().update_alert_rule(rule_id, payload, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/alert-rules")
 async def save_alert_rule_by_printer(printer_id: str, request: Request, payload: AlertRuleRequest) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404(printer_id).save_alert_rule(payload, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.patch("/api/printers/{printer_id}/alert-rules/{rule_id}")
 async def update_alert_rule_by_printer(printer_id: str, rule_id: str, request: Request, payload: AlertRuleUpdateRequest) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404(printer_id).update_alert_rule(rule_id, payload, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.delete("/api/alert-rules/{rule_id}")
 async def remove_alert_rule(rule_id: str, request: Request) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404().remove_alert_rule(rule_id, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.delete("/api/printers/{printer_id}/alert-rules/{rule_id}")
 async def remove_alert_rule_by_printer(printer_id: str, rule_id: str, request: Request) -> dict[str, Any]:
+    _require_operator(request)
     try:
         return await service_or_404(printer_id).remove_alert_rule(rule_id, actor=actor_from_request(request))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/events")
@@ -640,13 +699,82 @@ async def event_stream_by_printer(request: Request, printer_id: str) -> Streamin
     )
 
 
+@router.get("/api/system/status")
+async def system_status() -> dict[str, Any]:
+    printer_items: list[dict[str, Any]] = []
+    for entry in printer_manager.list_items():
+        service = service_or_404(entry["id"])
+        snapshot = await service.state()
+        printer_items.append(
+            {
+                "printer_id": entry["id"],
+                "printer_name": entry["name"],
+                "connected": snapshot.get("connected"),
+                "last_error": snapshot.get("last_error"),
+                "system_status": snapshot.get("system_status"),
+            }
+        )
+    return {
+        "printers": printer_items,
+        "services": works_service.list_services(),
+        "audit_count": len(printer_manager.audit_snapshot(limit=500)),
+    }
+
+
+@router.get("/api/webhooks")
+async def webhooks() -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    for entry in printer_manager.list_items():
+        for hook in service_or_404(entry["id"]).webhooks_snapshot():
+            items.append({"printer_id": entry["id"], "printer_name": entry["name"], **hook})
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/api/printers/{printer_id}/webhooks")
+async def webhooks_by_printer(printer_id: str) -> dict[str, Any]:
+    items = service_or_404(printer_id).webhooks_snapshot()
+    return {"items": items, "count": len(items)}
+
+
+@router.post("/api/printers/{printer_id}/webhooks")
+async def save_webhook_by_printer(printer_id: str, request: Request, payload: WebhookSubscriptionRequest) -> dict[str, Any]:
+    _require_admin(request)
+    try:
+        return service_or_404(printer_id).save_webhook(payload, actor=actor_from_request(request))
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.patch("/api/printers/{printer_id}/webhooks/{webhook_id}")
+async def update_webhook_by_printer(
+    printer_id: str,
+    webhook_id: str,
+    request: Request,
+    payload: WebhookSubscriptionUpdateRequest,
+) -> dict[str, Any]:
+    _require_admin(request)
+    try:
+        return service_or_404(printer_id).update_webhook(webhook_id, payload, actor=actor_from_request(request))
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.delete("/api/printers/{printer_id}/webhooks/{webhook_id}")
+async def remove_webhook_by_printer(printer_id: str, webhook_id: str, request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    try:
+        return service_or_404(printer_id).remove_webhook(webhook_id, actor=actor_from_request(request))
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
 @router.get("/api/sd/models")
 async def sd_models(query: str | None = None) -> dict[str, Any]:
     try:
         models = await service_or_404().list_sd_models(query=query)
         return {"items": models, "count": len(models)}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/printers/{printer_id}/sd/models")
@@ -655,7 +783,7 @@ async def sd_models_by_printer(printer_id: str, query: str | None = None) -> dic
         models = await service_or_404(printer_id).list_sd_models(query=query)
         return {"items": models, "count": len(models)}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/sd/thumbnail")
@@ -668,7 +796,7 @@ async def sd_thumbnail(path: str) -> Response:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/printers/{printer_id}/sd/thumbnail")
@@ -681,7 +809,7 @@ async def sd_thumbnail_by_printer(printer_id: str, path: str) -> Response:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/live/chamber.jpg")
@@ -692,7 +820,7 @@ async def chamber_image() -> Response:
             return Response(status_code=204)
         return Response(content=content, media_type=mime, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/live/stream.mjpg")
@@ -708,7 +836,7 @@ async def chamber_image_by_printer(printer_id: str) -> Response:
             return Response(status_code=204)
         return Response(content=content, media_type=mime, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.get("/api/printers/{printer_id}/live/stream.mjpg")
@@ -829,90 +957,100 @@ async def chamber_stream_by_printer(printer_id: str) -> StreamingResponse:
 
 
 @router.post("/api/actions/refresh")
-async def refresh() -> dict[str, bool]:
+async def refresh(request: Request) -> dict[str, bool]:
+    _require_operator(request)
     try:
         await service_or_404().refresh()
         return {"ok": True}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/actions/chamber-light")
 async def chamber_light(request: Request, payload: ChamberLightRequest) -> dict[str, bool]:
+    _require_operator(request)
     try:
         await service_or_404().set_chamber_light(payload.on, actor=actor_from_request(request))
         return {"ok": True}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/actions/temperature")
 async def temperature(request: Request, payload: TemperatureRequest) -> dict[str, bool]:
+    _require_operator(request)
     try:
         await service_or_404().set_temperature(payload, actor=actor_from_request(request))
         return {"ok": True}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/actions/fan")
 async def fan(request: Request, payload: FanRequest) -> dict[str, bool]:
+    _require_operator(request)
     try:
         await service_or_404().set_fan(payload, actor=actor_from_request(request))
         return {"ok": True}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/actions/{action}")
 async def action(request: Request, action: str) -> dict[str, bool]:
+    _require_operator(request)
     try:
         ok = await service_or_404().action(action, actor=actor_from_request(request))
         return {"ok": ok}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/actions/refresh")
-async def refresh_by_printer(printer_id: str) -> dict[str, bool]:
+async def refresh_by_printer(printer_id: str, request: Request) -> dict[str, bool]:
+    _require_operator(request)
     try:
         await service_or_404(printer_id).refresh()
         return {"ok": True}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/actions/chamber-light")
 async def chamber_light_by_printer(printer_id: str, request: Request, payload: ChamberLightRequest) -> dict[str, bool]:
+    _require_operator(request)
     try:
         await service_or_404(printer_id).set_chamber_light(payload.on, actor=actor_from_request(request))
         return {"ok": True}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/actions/temperature")
 async def temperature_by_printer(printer_id: str, request: Request, payload: TemperatureRequest) -> dict[str, bool]:
+    _require_operator(request)
     try:
         await service_or_404(printer_id).set_temperature(payload, actor=actor_from_request(request))
         return {"ok": True}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/actions/fan")
 async def fan_by_printer(printer_id: str, request: Request, payload: FanRequest) -> dict[str, bool]:
+    _require_operator(request)
     try:
         await service_or_404(printer_id).set_fan(payload, actor=actor_from_request(request))
         return {"ok": True}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/actions/{action}")
 async def action_by_printer(printer_id: str, request: Request, action: str) -> dict[str, bool]:
+    _require_operator(request)
     try:
         ok = await service_or_404(printer_id).action(action, actor=actor_from_request(request))
         return {"ok": ok}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_api_error(exc)

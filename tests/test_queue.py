@@ -80,6 +80,16 @@ def test_submitted_job_lifecycle_updates_status() -> None:
     assert updated["history"][0]["message"] == "Widget completed."
 
 
+def test_timeline_entries_are_copied_to_audit_log() -> None:
+    service = _service()
+    service._record_timeline("queue_add", "Queued widget.", actor="tester", details={"queue_item_id": "q-1"})
+
+    audit = service.audit_snapshot()
+
+    assert audit[0]["event"] == "queue_add"
+    assert audit[0]["actor"] == "tester"
+
+
 class _FakePrinter:
     def __init__(self, printer_id: str, *, connected: bool, busy: bool, queue_count: int) -> None:
         self.printer_id = printer_id

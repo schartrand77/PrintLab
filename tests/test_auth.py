@@ -3,10 +3,10 @@ from __future__ import annotations
 import base64
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from app.auth import CSRF_COOKIE_NAME, SESSION_COOKIE_NAME, auth_router, register_admin_auth, validate_auth_configuration
+from app.auth import CSRF_COOKIE_NAME, SESSION_COOKIE_NAME, auth_router, register_admin_auth, require_role, validate_auth_configuration
 
 
 def _basic(username: str, password: str) -> dict[str, str]:
@@ -25,6 +25,11 @@ def _build_app() -> FastAPI:
 
     @app.post("/mutate")
     async def mutate() -> dict[str, bool]:
+        return {"ok": True}
+
+    @app.post("/operator-only")
+    async def operator_only(request: Request) -> dict[str, bool]:
+        require_role(request, "operator")
         return {"ok": True}
 
     return app
@@ -87,6 +92,38 @@ def test_login_sets_session_and_session_endpoint_returns_csrf(monkeypatch) -> No
     assert session.json()["authenticated"] is True
     assert session.json()["csrf_token"]
     assert session.json()["username"] == "admin"
+    assert session.json()["role"] == "admin"
+
+
+def test_auth_supports_role_specific_users(monkeypatch) -> None:
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    monkeypatch.setenv(
+        "AUTH_USERS_JSON",
+        '[{"username":"viewer","password":"view","role":"viewer"},{"username":"ops","password":"operate","role":"operator"}]',
+    )
+    app = _build_app()
+
+    with TestClient(app) as client:
+        login = client.post("/auth/login", json={"username": "ops", "password": "operate"})
+        session = client.get("/auth/session")
+
+    assert login.status_code == 200
+    assert session.status_code == 200
+    assert session.json()["role"] == "operator"
+
+
+def test_viewer_cannot_access_operator_route(monkeypatch) -> None:
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    monkeypatch.setenv("AUTH_USERS_JSON", '[{"username":"viewer","password":"view","role":"viewer"}]')
+    app = _build_app()
+
+    with TestClient(app) as client:
+        login = client.post("/auth/login", json={"username": "viewer", "password": "view"})
+        csrf = login.cookies.get(CSRF_COOKIE_NAME)
+        response = client.post("/operator-only", headers={"X-CSRF-Token": csrf})
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "permission_denied"
 
 
 def test_session_auth_requires_csrf_for_mutations(monkeypatch) -> None:

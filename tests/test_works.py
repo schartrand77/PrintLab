@@ -436,6 +436,6 @@ def test_makerworks_submit_route_returns_clear_submit_failure_payload(monkeypatc
             },
         )
 
-    assert response.status_code == 400
-    assert response.json()["error"] == "submit_failed"
-    assert response.json()["job"]["status"] == "submit_failed"
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "submit_failed"
+    assert response.json()["error"]["details"]["job"]["status"] == "submit_failed"

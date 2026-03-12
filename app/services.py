@@ -258,6 +258,22 @@ class SuccessfulGcodeSyncRequest(BaseModel):
     force: bool = False
 
 
+class WebhookSubscriptionRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=2048)
+    description: str | None = Field(default=None, max_length=200)
+    events: list[str] = Field(default_factory=lambda: ["printer.state", "printer.timeline", "audit"])
+    secret: str | None = Field(default=None, max_length=256)
+    enabled: bool = True
+
+
+class WebhookSubscriptionUpdateRequest(BaseModel):
+    url: str | None = Field(default=None, min_length=1, max_length=2048)
+    description: str | None = Field(default=None, max_length=200)
+    events: list[str] | None = None
+    secret: str | None = Field(default=None, max_length=256)
+    enabled: bool | None = None
+
+
 class WorksService:
     def __init__(self) -> None:
         self._service_env: dict[str, str] = {
@@ -829,12 +845,16 @@ class PrinterService:
         root = data_root()
         self._queue_file = root / f"queue_{printer_id}.json"
         self._timeline_file = root / f"timeline_{printer_id}.json"
+        self._audit_file = root / f"audit_{printer_id}.json"
+        self._webhooks_file = root / f"webhooks_{printer_id}.json"
         self._presets_file = root / f"control_presets_{printer_id}.json"
         self._alert_rules_file = root / f"alert_rules_{printer_id}.json"
         self._successful_gcodes_file = root / f"successful_gcodes_{printer_id}.json"
         self._submitted_jobs_file = root / f"submitted_jobs_{printer_id}.json"
         self._queue_items: list[dict[str, Any]] = self._load_json_list(self._queue_file)
         self._timeline_entries: list[dict[str, Any]] = self._load_json_list(self._timeline_file)
+        self._audit_entries: list[dict[str, Any]] = self._load_json_list(self._audit_file)
+        self._webhooks: list[dict[str, Any]] = self._load_json_list(self._webhooks_file)
         self._control_presets: list[dict[str, Any]] = self._load_json_list(self._presets_file)
         self._alert_rules: list[dict[str, Any]] = self._load_json_list(self._alert_rules_file)
         self._successful_gcodes: list[dict[str, Any]] = self._load_json_list(self._successful_gcodes_file)
@@ -868,6 +888,12 @@ class PrinterService:
 
     def _save_timeline(self) -> None:
         self._save_json_list(self._timeline_file, self._timeline_entries)
+
+    def _save_audit(self) -> None:
+        self._save_json_list(self._audit_file, self._audit_entries)
+
+    def _save_webhooks(self) -> None:
+        self._save_json_list(self._webhooks_file, self._webhooks)
 
     def _save_presets(self) -> None:
         self._save_json_list(self._presets_file, self._control_presets)
@@ -912,6 +938,38 @@ class PrinterService:
         entry = self._timeline_entry(event, message, severity=severity, actor=actor, details=details)
         self._timeline_entries = [entry, *self._timeline_entries[:199]]
         self._save_timeline()
+        self._record_audit(event, message, severity=severity, actor=actor, details=details)
+        self._broadcast_event(
+            event,
+            kind="printer.timeline",
+            details={"entry": entry, "severity": severity, "message": message},
+        )
+
+    def _record_audit(
+        self,
+        event: str,
+        message: str,
+        *,
+        severity: str = "info",
+        actor: str = "system",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        entry = {
+            "id": uuid4().hex,
+            "printer_id": self.printer_id,
+            "printer_name": self.display_name,
+            "event": event,
+            "message": message,
+            "severity": severity,
+            "actor": actor,
+            "details": details or {},
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._audit_entries = [entry, *self._audit_entries[:499]]
+        self._save_audit()
+
+    def audit_snapshot(self, limit: int = 100) -> list[dict[str, Any]]:
+        return list(self._audit_entries[: max(1, min(limit, 500))])
 
     def _normalize_schedule(self, start_at: str | None) -> str | None:
         raw = (start_at or "").strip()
@@ -1535,6 +1593,76 @@ class PrinterService:
     def alert_rules_snapshot(self) -> list[dict[str, Any]]:
         return list(self._alert_rules)
 
+    def webhooks_snapshot(self) -> list[dict[str, Any]]:
+        return list(self._webhooks)
+
+    def save_webhook(self, request: WebhookSubscriptionRequest, actor: str = "dashboard") -> dict[str, Any]:
+        url = str(request.url or "").strip()
+        if not url.startswith("http://") and not url.startswith("https://"):
+            raise ValueError("Webhook URL must start with http:// or https://.")
+        item = {
+            "id": uuid4().hex,
+            "url": url,
+            "description": str(request.description or "").strip() or None,
+            "events": [str(event).strip() for event in (request.events or []) if str(event).strip()],
+            "secret": str(request.secret or "").strip() or None,
+            "enabled": bool(request.enabled),
+            "last_attempt_at": None,
+            "last_delivered_at": None,
+            "last_error": None,
+            "status_code": None,
+        }
+        if not item["events"]:
+            item["events"] = ["printer.state", "printer.timeline", "audit"]
+        self._webhooks = [item, *self._webhooks[:99]]
+        self._save_webhooks()
+        self._record_timeline("webhook_saved", f"Saved webhook for {url}.", actor=actor, details={"webhook_id": item["id"], "url": url})
+        return {"ok": True, "item": item, "items": self.webhooks_snapshot()}
+
+    def update_webhook(self, webhook_id: str, request: WebhookSubscriptionUpdateRequest, actor: str = "dashboard") -> dict[str, Any]:
+        for item in self._webhooks:
+            if item.get("id") != webhook_id:
+                continue
+            if request.url is not None:
+                url = str(request.url or "").strip()
+                if not url.startswith("http://") and not url.startswith("https://"):
+                    raise ValueError("Webhook URL must start with http:// or https://.")
+                item["url"] = url
+            if request.description is not None:
+                item["description"] = str(request.description or "").strip() or None
+            if request.events is not None:
+                events = [str(event).strip() for event in request.events if str(event).strip()]
+                item["events"] = events or ["printer.state", "printer.timeline", "audit"]
+            if request.secret is not None:
+                item["secret"] = str(request.secret or "").strip() or None
+            if request.enabled is not None:
+                item["enabled"] = bool(request.enabled)
+            self._save_webhooks()
+            self._record_timeline(
+                "webhook_updated",
+                f"Updated webhook for {item.get('url')}.",
+                actor=actor,
+                details={"webhook_id": item.get("id"), "url": item.get("url")},
+            )
+            return {"ok": True, "item": item, "items": self.webhooks_snapshot()}
+        raise ValueError(f"Unknown webhook subscription: {webhook_id}")
+
+    def remove_webhook(self, webhook_id: str, actor: str = "dashboard") -> dict[str, Any]:
+        for index, item in enumerate(self._webhooks):
+            if item.get("id") != webhook_id:
+                continue
+            removed = self._webhooks.pop(index)
+            self._save_webhooks()
+            self._record_timeline(
+                "webhook_removed",
+                f"Removed webhook for {removed.get('url')}.",
+                actor=actor,
+                severity="warning",
+                details={"webhook_id": removed.get("id"), "url": removed.get("url")},
+            )
+            return {"ok": True, "removed": removed, "items": self.webhooks_snapshot()}
+        raise ValueError(f"Unknown webhook subscription: {webhook_id}")
+
     def _ensure_default_alert_rules(self) -> None:
         if self._alert_rules:
             return
@@ -1632,7 +1760,7 @@ class PrinterService:
     def _mark_event(self, event: str) -> None:
         self.last_event = event
         self.last_update_utc = datetime.now(timezone.utc).isoformat()
-        self._broadcast_event(event)
+        self._broadcast_event(event, kind="printer.state")
 
     def _on_client_event(self, event: str) -> None:
         self._mark_event(event)
@@ -1645,8 +1773,64 @@ class PrinterService:
             self._disconnected_since_utc = None
         self._record_timeline(event_name or "printer_event", f"Printer event: {event_name or 'unknown'}", severity=severity)
 
-    def _broadcast_event(self, event: str) -> None:
-        payload = {"event": event, "at": self.last_update_utc}
+    def _event_payload(self, event: str, *, kind: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "kind": kind,
+            "event": event,
+            "at": self.last_update_utc or datetime.now(timezone.utc).isoformat(),
+            "printer_id": self.printer_id,
+            "printer_name": self.display_name,
+            "connected": bool(self.client and self.client.connected),
+            "queue_count": len(self._queue_items),
+            "details": details or {},
+        }
+
+    def _schedule_webhook_delivery(self, payload: dict[str, Any]) -> None:
+        enabled_hooks = [item for item in self._webhooks if item.get("enabled", True)]
+        if not enabled_hooks:
+            return
+
+        async def _runner() -> None:
+            for hook in enabled_hooks:
+                events = [str(item).strip() for item in hook.get("events") or [] if str(item).strip()]
+                if events and payload.get("kind") not in events:
+                    continue
+                await asyncio.get_running_loop().run_in_executor(None, self._deliver_webhook_sync, hook, payload)
+
+        if self._main_loop and self._main_loop.is_running():
+            try:
+                running_loop = asyncio.get_running_loop()
+                if running_loop is self._main_loop:
+                    asyncio.create_task(_runner())
+                    return
+            except RuntimeError:
+                pass
+            self._main_loop.call_soon_threadsafe(lambda: asyncio.create_task(_runner()))
+
+    def _deliver_webhook_sync(self, hook: dict[str, Any], payload: dict[str, Any]) -> None:
+        body_text = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+        headers = {"Content-Type": "application/json"}
+        secret = str(hook.get("secret") or "").strip()
+        timestamp = datetime.now(timezone.utc).isoformat()
+        if secret:
+            signature = hmac.new(secret.encode("utf-8"), f"{timestamp}.{body_text}".encode("utf-8"), hashlib.sha256).hexdigest()
+            headers["X-PrintLab-Timestamp"] = timestamp
+            headers["X-PrintLab-Signature"] = f"sha256={signature}"
+        hook["last_attempt_at"] = timestamp
+        try:
+            response = requests.post(str(hook.get("url") or ""), data=body_text, headers=headers, timeout=8.0)
+            hook["status_code"] = response.status_code
+            if not response.ok:
+                raise RuntimeError(f"Webhook returned HTTP {response.status_code}.")
+            hook["last_delivered_at"] = datetime.now(timezone.utc).isoformat()
+            hook["last_error"] = None
+        except Exception as exc:
+            hook["last_error"] = str(exc)
+        finally:
+            self._save_webhooks()
+
+    def _broadcast_event(self, event: str, *, kind: str = "printer.state", details: dict[str, Any] | None = None) -> None:
+        payload = self._event_payload(event, kind=kind, details=details)
 
         def _send() -> None:
             for queue in list(self._event_subscribers):
@@ -1668,11 +1852,12 @@ class PrinterService:
             self._main_loop.call_soon_threadsafe(_send)
             return
         _send()
+        self._schedule_webhook_delivery(payload)
 
     def subscribe_events(self) -> asyncio.Queue[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=40)
         self._event_subscribers.add(queue)
-        queue.put_nowait({"event": self.last_event, "at": self.last_update_utc})
+        queue.put_nowait(self._event_payload(self.last_event, kind="printer.state"))
         return queue
 
     def unsubscribe_events(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
@@ -2582,6 +2767,49 @@ class PrinterService:
             "slots": selected.get("slots", []),
         }
 
+    def system_status_snapshot(self) -> dict[str, Any]:
+        latest_callback = next((job.get("callback") for job in self._submitted_jobs if isinstance(job.get("callback"), dict)), {}) or {}
+        latest_sync_error = None
+        for record in self._successful_gcodes:
+            makerworks = record.get("makerworks") or {}
+            if makerworks.get("last_error"):
+                latest_sync_error = str(makerworks.get("last_error"))
+                break
+        if latest_sync_error is None and latest_callback.get("last_error"):
+            latest_sync_error = str(latest_callback.get("last_error"))
+        enabled_webhooks = [item for item in self._webhooks if item.get("enabled", True)]
+        latest_webhook = next((item for item in enabled_webhooks if item.get("last_attempt_at") or item.get("last_delivered_at")), None)
+        return {
+            "mqtt": {
+                "configured": self.configured,
+                "connected": bool(self.client and self.client.connected),
+                "last_event": self.last_event,
+                "last_update_utc": self.last_update_utc,
+            },
+            "callback": {
+                "enabled": self._makerworks_job_callback_config()["enabled"],
+                "last_delivered_at": latest_callback.get("last_delivered_at"),
+                "last_attempt_at": latest_callback.get("last_attempt_at"),
+                "last_error": latest_callback.get("last_error"),
+                "status_code": latest_callback.get("status_code"),
+            },
+            "webhooks": {
+                "enabled_count": len(enabled_webhooks),
+                "last_delivered_at": (latest_webhook or {}).get("last_delivered_at"),
+                "last_attempt_at": (latest_webhook or {}).get("last_attempt_at"),
+                "last_error": (latest_webhook or {}).get("last_error"),
+                "status_code": (latest_webhook or {}).get("status_code"),
+            },
+            "sync": {
+                "last_error": latest_sync_error,
+                "submitted_jobs": len(self._submitted_jobs),
+                "successful_gcodes": len(self._successful_gcodes),
+            },
+            "sse": {
+                "subscriber_count": len(self._event_subscribers),
+            },
+        }
+
     async def state(self) -> dict[str, Any]:
         async with self._lock:
             queue = self.queue_snapshot()
@@ -2597,6 +2825,9 @@ class PrinterService:
                 "successful_gcodes": self.successful_gcodes_snapshot()[:8],
                 "control_presets": self.presets_snapshot(),
                 "alert_rules": self.alert_rules_snapshot(),
+                "webhooks": self.webhooks_snapshot(),
+                "audit": self.audit_snapshot(limit=8),
+                "system_status": self.system_status_snapshot(),
                 "active_alerts": [],
             }
 
@@ -2712,6 +2943,15 @@ class MultiPrinterManager:
             }
             for service in self._services.values()
         ]
+
+    def audit_snapshot(self, limit: int = 200, printer_id: str | None = None) -> list[dict[str, Any]]:
+        if printer_id:
+            return self.get(printer_id).audit_snapshot(limit=limit)
+        items: list[dict[str, Any]] = []
+        for service in self._services.values():
+            items.extend(service.audit_snapshot(limit=limit))
+        items.sort(key=lambda item: str(item.get("at") or ""), reverse=True)
+        return items[: max(1, min(limit, 500))]
 
     def _load_name_overrides(self) -> dict[str, str]:
         try:

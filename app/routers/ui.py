@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
+from app.auth import require_role
 from app.views import (
     render_add_printer_html,
     render_gallery_html,
@@ -26,7 +27,8 @@ async def printer_dashboard(printer_id: str) -> str:
 
 
 @router.get("/add-printer", response_class=HTMLResponse)
-async def add_printer_page() -> str:
+async def add_printer_page(request: Request) -> str:
+    require_role(request, "admin")
     return render_add_printer_html()
 
 
