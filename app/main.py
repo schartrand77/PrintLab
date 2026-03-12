@@ -25,6 +25,8 @@ async def lifespan(_app: FastAPI):
 
 def create_app() -> FastAPI:
     validate_auth_configuration()
+    root = data_root()
+    root.mkdir(parents=True, exist_ok=True)
     app = FastAPI(
         title="PrintLab",
         version="0.1.0",
@@ -36,7 +38,7 @@ def create_app() -> FastAPI:
     )
 
     register_admin_auth(app)
-    app.mount("/data", StaticFiles(directory=str(data_root())), name="data")
+    app.mount("/data", StaticFiles(directory=str(root)), name="data")
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     app.include_router(auth_router)
     app.include_router(ui_router)
