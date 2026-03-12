@@ -1198,7 +1198,7 @@ def render_makerworks_routing_html() -> str:
     * { box-sizing:border-box; }
     html { min-height:100%; background:var(--bg); }
     body { margin:0; font-family:"Segoe UI",sans-serif; background:radial-gradient(circle at top left, rgba(45,148,255,.08), transparent 32%), var(--bg); color:var(--text); min-height:100vh; min-height:100dvh; }
-    .wrap { max-width:1600px; margin:0 auto; padding:calc(var(--safe-top) + 18px) calc(var(--safe-right) + 14px) calc(var(--safe-bottom) + 28px) calc(var(--safe-left) + 14px); }
+    .wrap { max-width:1600px; margin:0 auto; padding:calc(var(--safe-top) + 18px) calc(var(--safe-right) + 14px) calc(var(--safe-bottom) + 28px) calc(var(--safe-left) + 14px); min-height:100vh; min-height:100dvh; display:flex; flex-direction:column; }
     .top { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:12px; }
     .top-head { display:grid; gap:10px; }
     .menu { border:0; border-radius:12px; background:var(--button); color:var(--button-text); padding:10px 12px; font-weight:700; cursor:pointer; width:max-content; }
@@ -1220,12 +1220,12 @@ def render_makerworks_routing_html() -> str:
     .field { display:grid; gap:6px; }
     .field label { font-size:11px; letter-spacing:.35px; text-transform:uppercase; color:var(--muted); font-weight:800; }
     .field input { width:100%; border:1px solid var(--line); border-radius:12px; padding:10px 12px; background:var(--panel); color:var(--text); font:inherit; }
-    .board { position:relative; background:var(--panel); border:1px solid var(--line); border-radius:20px; min-height:640px; height:calc(100vh - 220px); overflow:hidden; }
+    .board { position:relative; background:var(--panel); border:1px solid var(--line); border-radius:20px; min-height:640px; height:calc(100vh - 220px); height:calc(100dvh - 220px); overflow:hidden; flex:1 1 auto; }
     .board-svg { position:absolute; inset:0; z-index:1; pointer-events:none; }
-    .board-grid { position:relative; z-index:2; display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.95fr); gap:10px; padding:12px; align-items:start; height:100%; }
-    .column { display:grid; gap:10px; min-height:0; }
+    .board-grid { position:relative; z-index:2; display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.95fr); gap:10px; padding:12px; align-items:stretch; height:100%; min-height:0; }
+    .column { display:grid; grid-template-rows:auto minmax(0,1fr); gap:10px; min-height:0; height:100%; }
     .lane-title { font-size:12px; letter-spacing:.4px; text-transform:uppercase; color:var(--muted); font-weight:800; }
-    .lane-frame { border:1px solid var(--line); border-radius:16px; background:rgba(255,255,255,.45); padding:10px; display:grid; gap:10px; min-height:0; overflow:auto; }
+    .lane-frame { border:1px solid var(--line); border-radius:16px; background:rgba(255,255,255,.45); padding:10px; display:grid; gap:10px; min-height:0; height:100%; overflow:auto; overscroll-behavior:contain; }
     :root[data-theme="dark"] .lane-frame { background:rgba(13,23,34,.4); }
     .stack { display:grid; gap:8px; align-content:start; }
     .stack-section { display:grid; gap:8px; }
@@ -1286,7 +1286,7 @@ def render_makerworks_routing_html() -> str:
       50% { box-shadow: inset 0 -18px 32px rgba(50,150,255,.18), 0 18px 38px rgba(50,150,255,.26); }
       100% { box-shadow: inset 0 -12px 22px rgba(50,150,255,.10), 0 10px 22px rgba(50,150,255,.12); }
     }
-    @media (max-width: 980px) { .toolbar { grid-template-columns:1fr; } .board-grid { grid-template-columns:1fr; height:auto; } .dot { display:none; } .board { min-height:unset; height:auto; } .lane-frame { overflow:visible; } }
+    @media (max-width: 980px) { .toolbar { grid-template-columns:1fr; } .board-grid { grid-template-columns:1fr; height:auto; } .column { grid-template-rows:auto auto; height:auto; } .dot { display:none; } .board { min-height:unset; height:auto; } .lane-frame { height:auto; overflow:visible; } }
   </style>
 </head>
 <body>
@@ -1355,6 +1355,7 @@ def render_makerworks_routing_html() -> str:
     const nativeFetch = window.fetch.bind(window);
     const routingKey = 'printlab.makerworks.routingModels';
     const collapsedCardKey = 'printlab.makerworks.routingCollapsed';
+    const assignmentKey = 'printlab.makerworks.routingAssignments';
     const queueFreshWindowMs = 12000;
     let chosenModels = [];
     let submittedJobs = [];
@@ -1388,7 +1389,10 @@ def render_makerworks_routing_html() -> str:
     function saveChosenModels(items) { localStorage.setItem(routingKey, JSON.stringify(items)); chosenModels = items; renderBoard(); }
     function getCollapsedCards() { try { return JSON.parse(localStorage.getItem(collapsedCardKey) || '{}'); } catch (_error) { return {}; } }
     function saveCollapsedCards() { localStorage.setItem(collapsedCardKey, JSON.stringify(collapsedCards)); }
+    function getDraftAssignments() { try { return JSON.parse(localStorage.getItem(assignmentKey) || '{}'); } catch (_error) { return {}; } }
+    function saveDraftAssignments() { localStorage.setItem(assignmentKey, JSON.stringify(draftAssignments)); }
     collapsedCards = getCollapsedCards();
+    draftAssignments = getDraftAssignments();
     function showNotice(message) {
       const el = document.getElementById('pageNotice');
       el.textContent = message;
@@ -1593,10 +1597,30 @@ def render_makerworks_routing_html() -> str:
         return;
       }
       draftAssignments[activeLeft] = printerId;
+      saveDraftAssignments();
       renderBoard();
       showNotice(`Model loaded on ${printers.find((printer) => printer.id === printerId)?.name || printerId}.`);
     }
-    function removeChosenModel(modelId) { saveChosenModels(chosenModels.filter((item) => String(item.id) !== String(modelId))); }
+    function getAssignedPrinter(entryId, item) {
+      if (Object.prototype.hasOwnProperty.call(draftAssignments, entryId)) {
+        return draftAssignments[entryId] || '';
+      }
+      return item?.printer_id || '';
+    }
+    function disconnectPrinter(nodeId) {
+      const key = String(nodeId || '');
+      if (!key) return;
+      draftAssignments[key] = '';
+      saveDraftAssignments();
+      renderBoard();
+      showNotice('Model disconnected from printer.');
+    }
+    function removeChosenModel(modelId) {
+      const nodeId = leftNodeId('chosen', modelId);
+      delete draftAssignments[nodeId];
+      saveDraftAssignments();
+      saveChosenModels(chosenModels.filter((item) => String(item.id) !== String(modelId)));
+    }
     function moveChosenModel(modelId, direction) {
       const items = [...chosenModels];
       const index = items.findIndex((item) => String(item.id) === String(modelId));
@@ -1627,6 +1651,7 @@ def render_makerworks_routing_html() -> str:
         if (!response.ok) throw new Error(data?.message || data?.detail || `HTTP ${response.status}`);
         removeChosenModel(String(item.id));
         delete draftAssignments[nodeId];
+        saveDraftAssignments();
         await refreshBoard();
         showNotice(`${item.name || 'Model'} queued to ${printers.find((printer) => printer.id === printerId)?.name || printerId}.`);
       } catch (error) {
@@ -1715,6 +1740,7 @@ def render_makerworks_routing_html() -> str:
         const data = await response.json();
         if (!response.ok) throw new Error(data?.detail || `HTTP ${response.status}`);
         delete draftAssignments[nodeId];
+        saveDraftAssignments();
         if (activeLeft === nodeId) activeLeft = null;
         await refreshBoard();
         showNotice(`${label || 'Queued job'} removed from the queue.`);
@@ -1770,7 +1796,7 @@ def render_makerworks_routing_html() -> str:
         leftStack.innerHTML = leftItems.map((entry) => {
           const item = entry.item;
           const isChosen = entry.kind === 'chosen';
-          const assignedPrinter = draftAssignments[entry.id] || item.printer_id || '';
+          const assignedPrinter = getAssignedPrinter(entry.id, item);
           const isFreshQueuedJob = !isChosen && recentQueuedJobs[String(item.id || '')];
           const queuedJobStateClass = !isChosen
             ? (isFreshQueuedJob ? 'queue-fresh' : (assignedPrinter ? 'queue-connected' : ''))
@@ -1794,7 +1820,7 @@ def render_makerworks_routing_html() -> str:
                 </div>
               ` : ''}
               <div class="node-actions">
-                ${isChosen ? `<button class="btn secondary" type="button" onclick="event.stopPropagation(); delete draftAssignments['${escapeHtml(entry.id)}']; renderBoard();">Clear Wire</button>` : `<a class="link-btn" href="/printer/${encodeURIComponent(item.printer_id || '')}" onclick="event.stopPropagation();">Open</a>`}
+                ${assignedPrinter ? `<button class="btn secondary" type="button" onclick="event.stopPropagation(); disconnectPrinter('${escapeHtml(entry.id)}')">Disconnect Printer</button>` : (isChosen ? `<button class="btn secondary" type="button" disabled>No Printer Connected</button>` : `<a class="link-btn" href="/printer/${encodeURIComponent(item.printer_id || '')}" onclick="event.stopPropagation();">Open</a>`)}
                 ${isChosen ? `<button class="btn" type="button" onclick="event.stopPropagation(); submitChosenModel('${escapeHtml(entry.id)}')" ${assignedPrinter ? '' : 'disabled'}>Queue Now</button>` : `<button class="btn secondary" type="button" onclick="event.stopPropagation(); deleteQueuedJob('${escapeHtml(entry.id)}', '${escapeHtml(String(item.queue_item_id || ''))}', '${escapeHtml(String(item.model_name || item.file_name || item.id || 'Queued job'))}')">Delete Queue</button>`}
               </div>
               ${isChosen ? '' : `<div class="node-actions"><button class="btn secondary" type="button" onclick="event.stopPropagation(); sendQueuedJobToSlicer('${escapeHtml(encodedItem)}')">Send to slicer</button><button class="btn secondary" type="button" onclick="event.stopPropagation(); importQueuedRevision('${escapeHtml(encodedItem)}')">Import revision</button></div>`}
