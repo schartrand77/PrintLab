@@ -149,12 +149,14 @@ def test_render_makerworks_routing_page_contains_board_layout() -> None:
     assert ">Up<" in html
     assert ">Down<" in html
     assert ">Delete<" in html
-    assert "Clear Wire" in html
+    assert "Disconnect Printer" in html
     assert "Delete Queue" in html
     assert "Send to slicer" in html
     assert "Import revision" in html
     assert "sendQueuedJobToSlicer" in html
     assert "importQueuedRevision" in html
+    assert "queued-routing-row" in html
+    assert "queued-meta-row" in html
     assert "bambustudioopen://open?file=" in html
 
 

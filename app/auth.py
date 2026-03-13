@@ -41,6 +41,7 @@ ROLE_PERMISSIONS = {
 @dataclass(frozen=True)
 class AuthUser:
     username: str
+    email: str | None
     password: str
     role: str
 
@@ -78,10 +79,18 @@ def _load_auth_users() -> tuple[AuthUser, ...]:
                 if not isinstance(entry, dict):
                     continue
                 username = str(entry.get("username") or "").strip()
+                email = str(entry.get("email") or "").strip().lower() or None
                 password = str(entry.get("password") or "")
                 if not username or not password:
                     continue
-                users.append(AuthUser(username=username, password=password, role=normalize_role(entry.get("role"), "viewer")))
+                users.append(
+                    AuthUser(
+                        username=username,
+                        email=email,
+                        password=password,
+                        role=normalize_role(entry.get("role"), "viewer"),
+                    )
+                )
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"Invalid AUTH_USERS_JSON: {exc}") from exc
 
@@ -94,7 +103,8 @@ def _load_auth_users() -> tuple[AuthUser, ...]:
         if not password:
             continue
         username = get_env(f"{role_name.upper()}_USERNAME", default_username) or default_username
-        users.append(AuthUser(username=username.strip(), password=password, role=role_name))
+        email = get_env(f"{role_name.upper()}_EMAIL", "") or None
+        users.append(AuthUser(username=username.strip(), email=(email.strip().lower() if email else None), password=password, role=role_name))
 
     deduped: dict[str, AuthUser] = {}
     for user in users:
@@ -106,7 +116,7 @@ def _auth_config() -> AuthConfig:
     require_auth = get_bool("REQUIRE_AUTH", False)
     users = _load_auth_users()
     enabled = bool(users)
-    secret_basis = "|".join(f"{user.username}:{user.role}:{user.password}" for user in users) or "printlab"
+    secret_basis = "|".join(f"{user.username}:{user.email or ''}:{user.role}:{user.password}" for user in users) or "printlab"
     session_secret = get_env("SESSION_SECRET", "") or hashlib.sha256(secret_basis.encode("utf-8")).hexdigest()
     ttl_raw = get_env("SESSION_TTL_SECONDS", "1800") or "1800"
     try:
@@ -185,19 +195,30 @@ def _decode_session(raw_value: str | None, *, secret_value: str) -> dict[str, ob
     return data
 
 
+def _user_matches_identifier(user: AuthUser, identifier: str) -> bool:
+    target = identifier.strip()
+    if not target:
+        return False
+    if hmac.compare_digest(user.username, target):
+        return True
+    if user.email and hmac.compare_digest(user.email, target.lower()):
+        return True
+    return False
+
+
 def _find_user(config: AuthConfig, username: str) -> AuthUser | None:
     target = username.strip()
     if not target:
         return None
     for user in config.users:
-        if hmac.compare_digest(user.username, target):
+        if _user_matches_identifier(user, target):
             return user
     return None
 
 
 def _find_user_by_credentials(request_username: str, request_password: str, config: AuthConfig) -> AuthUser | None:
     for user in config.users:
-        if hmac.compare_digest(request_username, user.username) and hmac.compare_digest(request_password, user.password):
+        if _user_matches_identifier(user, request_username) and hmac.compare_digest(request_password, user.password):
             return user
     return None
 
@@ -349,7 +370,7 @@ def _login_html(next_path: str) -> str:
   <form class="panel" id="loginForm">
     <h1>PrintLab</h1>
     <p>Sign in to access the dashboard and API.</p>
-    <label for="username">Username</label>
+    <label for="username">Username or email</label>
     <input id="username" name="username" autocomplete="username" required>
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required>

@@ -76,8 +76,21 @@ def test_auth_middleware_accepts_valid_basic_credentials(monkeypatch) -> None:
     assert response.status_code == 200
 
 
+def test_auth_middleware_accepts_admin_email_basic_credentials(monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    app = _build_app()
+
+    with TestClient(app) as client:
+        response = client.get("/health", headers=_basic("admin@example.com", "secret"))
+
+    assert response.status_code == 200
+
+
 def test_login_sets_session_and_session_endpoint_returns_csrf(monkeypatch) -> None:
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("ADMIN_PASSWORD", "secret")
     app = _build_app()
 
@@ -95,11 +108,25 @@ def test_login_sets_session_and_session_endpoint_returns_csrf(monkeypatch) -> No
     assert session.json()["role"] == "admin"
 
 
+def test_login_accepts_admin_email(monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    app = _build_app()
+
+    with TestClient(app) as client:
+        login = client.post("/auth/login", json={"username": "admin@example.com", "password": "secret"})
+
+    assert login.status_code == 200
+    assert login.json()["username"] == "admin"
+    assert login.json()["role"] == "admin"
+
+
 def test_auth_supports_role_specific_users(monkeypatch) -> None:
     monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
     monkeypatch.setenv(
         "AUTH_USERS_JSON",
-        '[{"username":"viewer","password":"view","role":"viewer"},{"username":"ops","password":"operate","role":"operator"}]',
+        '[{"username":"viewer","password":"view","role":"viewer"},{"username":"ops","email":"ops@example.com","password":"operate","role":"operator"}]',
     )
     app = _build_app()
 
@@ -109,6 +136,24 @@ def test_auth_supports_role_specific_users(monkeypatch) -> None:
 
     assert login.status_code == 200
     assert session.status_code == 200
+    assert session.json()["role"] == "operator"
+
+
+def test_auth_supports_role_specific_user_email_login(monkeypatch) -> None:
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    monkeypatch.setenv(
+        "AUTH_USERS_JSON",
+        '[{"username":"ops","email":"ops@example.com","password":"operate","role":"operator"}]',
+    )
+    app = _build_app()
+
+    with TestClient(app) as client:
+        login = client.post("/auth/login", json={"username": "ops@example.com", "password": "operate"})
+        session = client.get("/auth/session")
+
+    assert login.status_code == 200
+    assert session.status_code == 200
+    assert session.json()["username"] == "ops"
     assert session.json()["role"] == "operator"
 
 

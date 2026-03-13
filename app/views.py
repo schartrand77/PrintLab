@@ -1257,6 +1257,9 @@ def render_makerworks_routing_html() -> str:
     .node-title { font-size:15px; font-weight:800; line-height:1.15; }
     .node-meta { color:var(--muted); font-size:12px; line-height:1.3; }
     .node-actions { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+    .node-actions.queued-routing-row,
+    .node-actions.queued-meta-row { padding-top:6px; border-top:1px solid var(--line); }
+    .node-meta.path { overflow-wrap:anywhere; }
     .node-actions.single { grid-template-columns:1fr; }
     .node-admin { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px; }
     .node-row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
@@ -1290,6 +1293,12 @@ def render_makerworks_routing_html() -> str:
       100% { box-shadow: inset 0 -12px 22px rgba(50,150,255,.10), 0 10px 22px rgba(50,150,255,.12); }
     }
     @media (max-width: 980px) { .toolbar { grid-template-columns:1fr; } .board-grid { grid-template-columns:1fr; height:auto; } .column { grid-template-rows:auto auto; height:auto; } .dot { display:none; } .board { min-height:unset; height:auto; } .lane-frame { height:auto; overflow:visible; } }
+    @media (max-width: 540px) {
+      .node-actions,
+      .node-admin,
+      .node-actions.queued-routing-row,
+      .node-actions.queued-meta-row { grid-template-columns:1fr; }
+    }
   </style>
 </head>
 <body>
@@ -1827,8 +1836,8 @@ def render_makerworks_routing_html() -> str:
                 ${assignedPrinter ? `<button class="btn secondary" type="button" onclick="event.stopPropagation(); disconnectPrinter('${escapeHtml(entry.id)}')">Disconnect Printer</button>` : (isChosen ? `<button class="btn secondary" type="button" disabled>No Printer Connected</button>` : `<a class="link-btn" href="/printer/${encodeURIComponent(item.printer_id || '')}" onclick="event.stopPropagation();">Open</a>`)}
                 ${isChosen ? `<button class="btn" type="button" onclick="event.stopPropagation(); submitChosenModel('${escapeHtml(entry.id)}')" ${assignedPrinter ? '' : 'disabled'}>Queue Now</button>` : `<button class="btn secondary" type="button" onclick="event.stopPropagation(); deleteQueuedJob('${escapeHtml(entry.id)}', '${escapeHtml(String(item.queue_item_id || ''))}', '${escapeHtml(String(item.model_name || item.file_name || item.id || 'Queued job'))}')">Delete Queue</button>`}
               </div>
-              ${isChosen ? '' : `<div class="node-actions"><button class="btn secondary" type="button" onclick="event.stopPropagation(); sendQueuedJobToSlicer('${escapeHtml(encodedItem)}')">Send to slicer</button><button class="btn secondary" type="button" onclick="event.stopPropagation(); importQueuedRevision('${escapeHtml(encodedItem)}')">Import revision</button></div>`}
-              ${isChosen ? '' : `<div class="node-actions"><button class="btn secondary" type="button" onclick="event.stopPropagation(); syncSubmittedJob('${escapeHtml(String(item.id || ''))}')">Resend Callback</button><span class="node-meta">${escapeHtml(String(item.file_path || ''))}</span></div>`}
+              ${isChosen ? '' : `<div class="node-actions queued-routing-row"><button class="btn secondary" type="button" onclick="event.stopPropagation(); sendQueuedJobToSlicer('${escapeHtml(encodedItem)}')">Send to slicer</button><button class="btn secondary" type="button" onclick="event.stopPropagation(); importQueuedRevision('${escapeHtml(encodedItem)}')">Import revision</button></div>`}
+              ${isChosen ? '' : `<div class="node-actions queued-meta-row"><button class="btn secondary" type="button" onclick="event.stopPropagation(); syncSubmittedJob('${escapeHtml(String(item.id || ''))}')">Resend Callback</button><span class="node-meta path">${escapeHtml(String(item.file_path || ''))}</span></div>`}
             </article>
           `;
         }).join('');
