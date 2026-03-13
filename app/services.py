@@ -1204,6 +1204,25 @@ class PrinterService:
             return True
         return not normalized.startswith("/")
 
+    def _plate_index_from_path(self, path: str | None) -> int | None:
+        file_name = Path(str(path or "").strip()).name
+        match = re.search(r"(?:^|[-_])plate[-_]?(\d+)(?:\.[^.]+)+$", file_name, re.IGNORECASE)
+        if not match:
+            match = re.search(r"(?:^|[-_])plate[-_]?(\d+)$", self._strip_model_suffix(file_name), re.IGNORECASE)
+        return int(match.group(1)) if match else None
+
+    def _preferred_thumbnail_plate_index(self, raw_path: str, resolved_path: str) -> int | None:
+        context = self._active_job_context or {}
+        for candidate in (
+            context.get("plate_index"),
+            self._plate_index_from_path(context.get("plate_gcode")),
+            self._plate_index_from_path(raw_path),
+            self._plate_index_from_path(resolved_path),
+        ):
+            if isinstance(candidate, int) and candidate > 0:
+                return candidate
+        return None
+
     def _job_context_from_request(self, request: OrderworksPrintJobRequest, actor: str) -> dict[str, Any]:
         metadata = self._extract_model_metadata(request.file_path, request.subtask_name)
         return {
@@ -2179,6 +2198,7 @@ class PrinterService:
 
         ftp = self.client.ftp_connection()
         resolved_path = self._resolve_sd_path_sync(ftp, raw_path)
+        preferred_plate = self._preferred_thumbnail_plate_index(raw_path, resolved_path)
         resolved_key = hashlib.sha1(resolved_path.encode("utf-8")).hexdigest() if resolved_path else raw_key
         if resolved_key:
             for ext, mime in ((".png", "image/png"), (".jpg", "image/jpeg"), (".jpeg", "image/jpeg"), (".webp", "image/webp")):
@@ -2220,7 +2240,11 @@ class PrinterService:
                 blob = try_retr(resolved_path)
                 if blob:
                     with ZipFile(io.BytesIO(blob)) as zf:
-                        candidates = [n for n in zf.namelist() if re.match(r"^Metadata/plate_\\d+\\.png$", n)]
+                        candidates = [n for n in zf.namelist() if re.match(r"^Metadata/plate_\d+\.png$", n)]
+                        if preferred_plate:
+                            preferred_name = f"Metadata/plate_{preferred_plate}.png"
+                            if preferred_name in candidates:
+                                candidates = [preferred_name]
                         if not candidates and "Metadata/plate_1.png" in zf.namelist():
                             candidates = ["Metadata/plate_1.png"]
                         if candidates:
