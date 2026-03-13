@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.auth import actor_from_request, require_role
+from app.conversion import BatchModelConversionRequest, ModelConversionRequest, convert_model_batch, convert_model_upload, supported_conversion_formats
 from app.errors import api_error, from_exception
 from app.runtime import job_manager, printer_manager, service_or_404, works_service
 from app.services import (
@@ -57,6 +58,33 @@ async def health() -> dict[str, Any]:
         "connected": state["connected"],
         "last_error": state["last_error"],
     }
+
+
+@router.get("/api/conversion/formats")
+async def conversion_formats() -> dict[str, Any]:
+    try:
+        return supported_conversion_formats()
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.post("/api/conversion")
+async def convert_model(request: Request, payload: ModelConversionRequest) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        result = convert_model_upload(payload)
+        return {"ok": True, **result}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.post("/api/conversion/batch")
+async def convert_model_batch_route(request: Request, payload: BatchModelConversionRequest) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        return convert_model_batch(payload)
+    except Exception as exc:
+        _raise_api_error(exc)
 
 
 @router.get("/api/printers")

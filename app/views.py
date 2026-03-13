@@ -255,6 +255,7 @@ def render_gallery_html() -> str:
     <p>Use the sidebar for navigation.</p>
     <div class="sidebar-tabs">
       <a class="sidebar-tab" href="/">Dashboard</a>
+      <a class="sidebar-tab" href="/conversion">3D Conversion</a>
       <a class="sidebar-tab" href="/makerworks">MakerWorks</a>
       <a class="sidebar-tab" href="/makerworks-routing">Routing Board</a>
       <a class="sidebar-tab" href="/add-printer">Add Printer</a>
@@ -625,6 +626,7 @@ def render_add_printer_html() -> str:
     <p>Use the sidebar for navigation.</p>
     <div class="sidebar-tabs">
       <a class="sidebar-tab" href="/">Dashboard</a>
+      <a class="sidebar-tab" href="/conversion">3D Conversion</a>
       <a class="sidebar-tab" href="/makerworks">MakerWorks</a>
       <a class="sidebar-tab" href="/makerworks-routing">Routing Board</a>
       <a class="sidebar-tab active" href="/add-printer">Add Printer</a>
@@ -986,6 +988,7 @@ def render_makerworks_search_html() -> str:
     <p>Search the model library here. Use the routing board for queueing and printer assignment.</p>
     <div class="sidebar-tabs">
       <a class="sidebar-tab" href="/">Dashboard</a>
+      <a class="sidebar-tab" href="/conversion">3D Conversion</a>
       <a class="sidebar-tab active" href="/makerworks">MakerWorks Search</a>
       <a class="sidebar-tab" href="/makerworks-routing">Routing Board</a>
       <a class="sidebar-tab" href="/add-printer">Add Printer</a>
@@ -1295,6 +1298,7 @@ def render_makerworks_routing_html() -> str:
     <h2 style="margin:0;">Menu</h2>
     <div class="sidebar-tabs">
       <a class="sidebar-tab" href="/">Dashboard</a>
+      <a class="sidebar-tab" href="/conversion">3D Conversion</a>
       <a class="sidebar-tab" href="/makerworks">MakerWorks Search</a>
       <a class="sidebar-tab active" href="/makerworks-routing">Routing Board</a>
       <a class="sidebar-tab" href="/add-printer">Add Printer</a>
@@ -1888,6 +1892,711 @@ def render_makerworks_routing_html() -> str:
         html.replace("__SLICER_TARGET__", json.dumps(slicer_target))
         .replace("__SLICER_PROTOCOL_TEMPLATE__", json.dumps(slicer_protocol_template))
     )
+
+
+def render_conversion_html() -> str:
+    try:
+        from app.conversion import supported_conversion_formats
+
+        initial_formats = supported_conversion_formats()
+    except Exception:
+        initial_formats = {
+            "source_formats": ["3mf", "dae", "dxf", "glb", "gltf", "obj", "off", "ply", "stl", "xaml", "xyz"],
+            "target_formats": [
+                {"id": "obj", "label": "OBJ", "recommended": True, "description": "Recommended OBJ mesh export."},
+                {"id": "stl", "label": "STL", "recommended": False, "description": "Mesh export format."},
+                {"id": "ply", "label": "PLY", "recommended": False, "description": "Mesh export format."},
+                {"id": "off", "label": "OFF", "recommended": False, "description": "Mesh export format."},
+                {"id": "glb", "label": "GLB", "recommended": False, "description": "Mesh export format."},
+                {"id": "3mf", "label": "3MF", "recommended": False, "description": "Mesh export format."},
+                {"id": "dae", "label": "DAE", "recommended": False, "description": "Mesh export format."},
+            ],
+            "recommended_target": "obj",
+        }
+
+    target_options_html = "".join(
+        f'<option value="{item["id"]}"{" selected" if item["id"] == initial_formats.get("recommended_target") else ""}>'
+        f'{item["label"]}{" - Recommended" if item.get("recommended") else ""}</option>'
+        for item in initial_formats["target_formats"]
+    )
+    source_options_html = "".join(
+        f'<option value="{item}">{item.upper()}</option>' for item in initial_formats["source_formats"]
+    )
+
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta id="themeColorMeta" name="theme-color" content="#cfe2f7">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PrintLab">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <title>PrintLab - 3D Conversion</title>
+  <script>
+    (function() {
+      const theme = localStorage.getItem("printlab-theme") === "dark" ? "dark" : "light";
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <style>
+    :root {
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
+      --bg: #e7f0fa;
+      --bg-2: #d6e5f7;
+      --text: #203043;
+      --muted: #5e758c;
+      --card: rgba(255, 255, 255, 0.72);
+      --line: rgba(89, 126, 164, 0.2);
+      --button: #1f84ea;
+      --button-text: #ffffff;
+      --soft: rgba(255, 255, 255, 0.68);
+      --shadow: 0 18px 38px rgba(31, 72, 116, 0.16);
+    }
+    :root[data-theme="dark"] {
+      --bg: #101925;
+      --bg-2: #172537;
+      --text: #ecf4ff;
+      --muted: #9fb6cf;
+      --card: rgba(16, 28, 42, 0.82);
+      --line: rgba(136, 164, 194, 0.2);
+      --button: #54aaf5;
+      --button-text: #09131d;
+      --soft: rgba(255, 255, 255, 0.08);
+      --shadow: 0 24px 44px rgba(1, 8, 17, 0.4);
+    }
+    * { box-sizing: border-box; }
+    html { color-scheme: light; min-height: 100%; background: var(--bg); }
+    :root[data-theme="dark"] { color-scheme: dark; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      min-height: 100dvh;
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(1000px 560px at 0% 0%, rgba(255,255,255,0.66), transparent 52%),
+        linear-gradient(155deg, var(--bg), var(--bg-2));
+    }
+    .sidebar-backdrop { position: fixed; inset: 0; background: rgba(10, 19, 29, 0.38); display: none; z-index: 40; }
+    .sidebar-backdrop.open { display: block; }
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 41;
+      width: 320px;
+      max-width: 86vw;
+      height: 100vh;
+      height: 100dvh;
+      padding: calc(var(--safe-top) + 18px) 14px calc(var(--safe-bottom) + 16px);
+      background: rgba(248, 252, 255, 0.96);
+      border-right: 1px solid rgba(202, 220, 239, 0.96);
+      box-shadow: 18px 0 32px rgba(17, 42, 68, 0.16);
+      transform: translateX(-101%);
+      transition: transform .18s ease;
+      overflow: auto;
+    }
+    :root[data-theme="dark"] .sidebar {
+      background: rgba(15, 24, 36, 0.96);
+      border-right-color: rgba(69, 94, 120, 0.8);
+      box-shadow: 18px 0 34px rgba(0, 0, 0, 0.38);
+    }
+    .sidebar.open { transform: translateX(0); }
+    .sidebar-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .sidebar-head-actions { display: flex; gap: 8px; align-items: center; }
+    .theme-toggle, .sidebar-close, .menu, .btn, .download-link, .select, .field {
+      border-radius: 12px;
+      border: 1px solid transparent;
+      font: inherit;
+    }
+    .theme-toggle, .sidebar-close, .menu {
+      background: var(--soft);
+      color: var(--text);
+      cursor: pointer;
+      padding: 8px 10px;
+    }
+    .sidebar-close { font-size: 18px; line-height: 1; padding: 6px 10px; }
+    .sidebar-tabs { display: grid; gap: 8px; margin-top: 12px; }
+    .sidebar-tab {
+      display: block;
+      text-decoration: none;
+      border: 1px solid var(--line);
+      background: var(--soft);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 7px 11px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .sidebar-tab.active { background: var(--button); color: var(--button-text); border-color: var(--button); }
+    .wrap {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: calc(var(--safe-top) + 20px) calc(var(--safe-right) + 16px) calc(var(--safe-bottom) + 36px) calc(var(--safe-left) + 16px);
+      display: grid;
+      gap: 16px;
+    }
+    .hero, .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+    .hero {
+      padding: 18px;
+      display: grid;
+      gap: 16px;
+    }
+    .hero-top { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+    .hero-copy { max-width: 720px; }
+    .hero h1 { margin: 10px 0 8px; font-size: clamp(28px, 4vw, 44px); line-height: 1; }
+    .hero p, .sidebar p, .meta, .status-line { color: var(--muted); line-height: 1.5; }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr);
+      gap: 14px;
+    }
+    .panel { padding: 16px; display: grid; gap: 14px; }
+    .panel h2, .panel h3 { margin: 0; }
+    .field, .select {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.72);
+      border-color: var(--line);
+      color: var(--text);
+      padding: 10px 12px;
+      font-weight: 700;
+    }
+    :root[data-theme="dark"] .field,
+    :root[data-theme="dark"] .select {
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .select {
+      appearance: none;
+      -webkit-appearance: none;
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--text) 50%),
+        linear-gradient(135deg, var(--text) 50%, transparent 50%);
+      background-position:
+        calc(100% - 18px) calc(50% - 3px),
+        calc(100% - 12px) calc(50% - 3px);
+      background-size: 6px 6px, 6px 6px;
+      background-repeat: no-repeat;
+      padding-right: 32px;
+    }
+    .select option {
+      color: #122235;
+      background: #f3f8fe;
+    }
+    :root[data-theme="dark"] .select option {
+      color: #edf5ff;
+      background: #162638;
+    }
+    .dropzone {
+      border: 1.5px dashed rgba(31, 132, 234, 0.42);
+      border-radius: 18px;
+      background: rgba(31, 132, 234, 0.06);
+      padding: 18px;
+      display: grid;
+      gap: 8px;
+    }
+    .form-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 220px); gap: 12px; }
+    .label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; }
+    .btn {
+      background: var(--button);
+      border-color: var(--button);
+      color: var(--button-text);
+      cursor: pointer;
+      padding: 10px 14px;
+      font-weight: 800;
+    }
+    .btn[disabled] { opacity: .55; cursor: wait; }
+    .btn.secondary {
+      background: var(--soft);
+      border-color: var(--line);
+      color: var(--text);
+    }
+    .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .stat-list, .format-list { display: grid; gap: 10px; }
+    .stat, .format-chip {
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.44);
+      padding: 12px;
+    }
+    :root[data-theme="dark"] .stat,
+    :root[data-theme="dark"] .format-chip {
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .format-list { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+    .format-chip strong { display: block; margin-bottom: 5px; }
+    .target-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+      gap: 10px;
+    }
+    .target-chip {
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.44);
+      color: var(--text);
+      padding: 10px 12px;
+      text-align: left;
+      cursor: pointer;
+      display: grid;
+      gap: 4px;
+    }
+    .target-chip.active {
+      border-color: var(--button);
+      box-shadow: inset 0 0 0 1px rgba(84, 170, 245, 0.28);
+      background: rgba(31, 132, 234, 0.12);
+    }
+    .target-chip-label {
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .target-chip-note {
+      font-size: 12px;
+      line-height: 1.35;
+      color: var(--muted);
+    }
+    .status {
+      min-height: 48px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.4);
+      padding: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .download-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      background: var(--button);
+      color: var(--button-text);
+      border-color: var(--button);
+      padding: 10px 14px;
+      font-weight: 800;
+    }
+    .result-card { display: none; }
+    .result-card.open { display: grid; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(31, 132, 234, 0.1);
+      border: 1px solid rgba(31, 132, 234, 0.16);
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--button);
+    }
+    @media (max-width: 860px) {
+      .hero-grid, .form-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div id="sidebarBackdrop" class="sidebar-backdrop" onclick="closeSidebar()"></div>
+  <aside id="sidebar" class="sidebar" aria-hidden="true">
+    <div class="sidebar-head">
+      <h2 style="margin:0;">Menu</h2>
+      <div class="sidebar-head-actions">
+        <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color theme">Dark</button>
+        <button class="sidebar-close" type="button" aria-label="Close menu" onclick="closeSidebar()">&times;</button>
+      </div>
+    </div>
+    <p>Convert common 3D mesh files for downstream tools. OBJ remains the recommended default target, with UV generation when the source mesh does not have them.</p>
+    <div class="sidebar-tabs">
+      <a class="sidebar-tab" href="/">Dashboard</a>
+      <a class="sidebar-tab active" href="/conversion">3D Conversion</a>
+      <a class="sidebar-tab" href="/makerworks">MakerWorks Search</a>
+      <a class="sidebar-tab" href="/makerworks-routing">Routing Board</a>
+      <a class="sidebar-tab" href="/add-printer">Add Printer</a>
+    </div>
+  </aside>
+  <div class="wrap">
+    <section class="hero">
+      <div class="hero-top">
+        <div class="hero-copy">
+          <button class="menu" type="button" onclick="openSidebar()">Menu</button>
+          <h1>3D File Conversion</h1>
+          <p>Upload a 3D file, convert it to another mesh format, and download the result. OBJ is preselected as the default target, and UVs are generated automatically when needed.</p>
+        </div>
+        <span class="pill">OBJ recommended</span>
+      </div>
+      <div class="hero-grid">
+        <section class="panel">
+          <h2>Convert A Model</h2>
+          <div class="dropzone">
+            <strong>Select one or more source files</strong>
+            <span class="meta">Supported source and target formats are loaded from the backend at runtime.</span>
+            <input id="fileInput" class="field" type="file" multiple accept=".3mf,.gcode.3mf,.dae,.dxf,.glb,.gltf,.obj,.off,.ply,.stl,.xaml,.xyz">
+          </div>
+          <div class="form-grid">
+            <label class="label">Target format
+              <select id="targetFormat" class="select">__TARGET_OPTIONS__</select>
+            </label>
+            <label class="label">Source format override
+              <select id="sourceFormat" class="select">
+                <option value="">Auto detect</option>
+                __SOURCE_OPTIONS__
+              </select>
+            </label>
+          </div>
+          <div id="targetQuickPicks" class="target-grid"></div>
+          <div id="formatCapabilities" class="stat"></div>
+          <div id="formatWarnings" class="status">No format warnings yet.</div>
+          <div class="btn-row">
+            <button id="convertBtn" class="btn" type="button" onclick="convertFile()">Convert File</button>
+            <button class="btn secondary" type="button" onclick="resetConverter()">Reset</button>
+          </div>
+          <div id="status" class="status">Loading supported formats...</div>
+        </section>
+        <section class="panel">
+          <h3>Current File</h3>
+          <div class="stat-list">
+            <div class="stat"><strong>Name</strong><div id="fileName" class="status-line">No file selected</div></div>
+            <div class="stat"><strong>Detected source</strong><div id="detectedSource" class="status-line">-</div></div>
+            <div class="stat"><strong>Size</strong><div id="fileSize" class="status-line">-</div></div>
+          </div>
+          <div id="resultCard" class="panel result-card">
+            <h3>Converted Output</h3>
+            <div class="stat-list">
+              <div class="stat"><strong>Output file</strong><div id="resultName" class="status-line">-</div></div>
+              <div class="stat"><strong>Target format</strong><div id="resultFormat" class="status-line">-</div></div>
+              <div class="stat"><strong>Output size</strong><div id="resultSize" class="status-line">-</div></div>
+              <div class="stat"><strong>UV map</strong><div id="resultUv" class="status-line">-</div></div>
+            </div>
+            <a id="downloadLink" class="download-link" href="#" download>Download Converted File</a>
+          </div>
+          <div id="batchResultCard" class="panel result-card">
+            <h3>Batch Results</h3>
+            <div id="batchResultList" class="stat-list"></div>
+          </div>
+        </section>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Available Formats</h2>
+      <div id="formatList" class="format-list"></div>
+      <h3 style="margin:8px 0 0;">Popular conversions</h3>
+      <div id="commonConversionList" class="stat-list"></div>
+      <div class="meta">This page only shows formats the current server can actually convert right now.</div>
+    </section>
+  </div>
+  <script>
+    const nativeFetch = window.fetch.bind(window);
+    const defaultSupportedFormats = __DEFAULT_SUPPORTED_FORMATS__;
+    let supportedFormats = defaultSupportedFormats;
+
+    function readCookie(name) {
+      const prefix = `${name}=`;
+      return document.cookie.split(";").map((item) => item.trim()).find((item) => item.startsWith(prefix))?.slice(prefix.length) || "";
+    }
+
+    window.fetch = function(input, init = {}) {
+      const next = { ...init, credentials: "same-origin" };
+      const method = String(next.method || "GET").toUpperCase();
+      if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+        const headers = new Headers(next.headers || {});
+        const csrf = readCookie("printlab_csrf");
+        if (csrf && !headers.has("X-CSRF-Token")) headers.set("X-CSRF-Token", csrf);
+        next.headers = headers;
+      }
+      return nativeFetch(input, next);
+    };
+
+    function applyTheme(theme) {
+      const nextTheme = theme === "dark" ? "dark" : "light";
+      document.documentElement.dataset.theme = nextTheme;
+      localStorage.setItem("printlab-theme", nextTheme);
+      const toggle = document.getElementById("themeToggle");
+      if (toggle) toggle.textContent = nextTheme === "dark" ? "Light" : "Dark";
+      const meta = document.getElementById("themeColorMeta");
+      if (meta) meta.setAttribute("content", nextTheme === "dark" ? "#101925" : "#cfe2f7");
+    }
+
+    function toggleTheme() {
+      applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+    }
+
+    function openSidebar() {
+      document.getElementById("sidebar").classList.add("open");
+      document.getElementById("sidebarBackdrop").classList.add("open");
+      document.getElementById("sidebar").setAttribute("aria-hidden", "false");
+    }
+
+    function closeSidebar() {
+      document.getElementById("sidebar").classList.remove("open");
+      document.getElementById("sidebarBackdrop").classList.remove("open");
+      document.getElementById("sidebar").setAttribute("aria-hidden", "true");
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>\"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+
+    function formatBytes(size) {
+      const value = Number(size);
+      if (!Number.isFinite(value) || value < 0) return "-";
+      if (value < 1024) return `${value} B`;
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+      return `${(value / (1024 * 1024)).toFixed(2)} MB`;
+    }
+
+    function fileExtension(name) {
+      const lowered = String(name || "").toLowerCase();
+      if (lowered.endsWith(".gcode.3mf")) return "3mf";
+      const parts = String(name || "").toLowerCase().split(".");
+      return parts.length > 1 ? parts.pop() : "";
+    }
+
+    function updateFileSummary() {
+      const files = Array.from(document.getElementById("fileInput").files || []);
+      const first = files[0] || null;
+      const totalBytes = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
+      document.getElementById("fileName").textContent = !files.length
+        ? "No file selected"
+        : (files.length === 1 ? first.name : `${files.length} files selected`);
+      document.getElementById("detectedSource").textContent = !first
+        ? "-"
+        : (files.length === 1 ? (fileExtension(first.name) || "Unknown") : "Mixed / batch");
+      document.getElementById("fileSize").textContent = files.length ? formatBytes(totalBytes) : "-";
+      document.getElementById("convertBtn").textContent = files.length > 1 ? "Convert Files" : "Convert File";
+      renderFormatCapabilities();
+    }
+
+    function setStatus(message) {
+      document.getElementById("status").textContent = message;
+    }
+
+    function renderFormatOptions() {
+      const target = document.getElementById("targetFormat");
+      const source = document.getElementById("sourceFormat");
+      const list = document.getElementById("formatList");
+      const commonList = document.getElementById("commonConversionList");
+      const targetQuickPicks = document.getElementById("targetQuickPicks");
+      target.innerHTML = supportedFormats.target_formats.map((item) => (
+        `<option value="${escapeHtml(item.id)}"${item.id === supportedFormats.recommended_target ? " selected" : ""}>${escapeHtml(item.label)}${item.recommended ? " - Recommended" : ""}</option>`
+      )).join("");
+      source.innerHTML = `<option value="">Auto detect</option>${supportedFormats.source_formats.map((item) => (
+        `<option value="${escapeHtml(item)}">${escapeHtml(item.toUpperCase())}</option>`
+      )).join("")}`;
+      list.innerHTML = [
+        ...supportedFormats.target_formats.map((item) => `
+          <article class="format-chip">
+            <strong>${escapeHtml(item.label)}</strong>
+            <div class="status-line">${escapeHtml(item.description || "Mesh conversion target.")}</div>
+          </article>
+        `),
+      ].join("");
+      commonList.innerHTML = (supportedFormats.common_conversions || []).map((item) => `
+        <article class="stat">
+          <strong>${escapeHtml(item.label || `${item.source || ""} to ${item.target || ""}`)}</strong>
+          <div class="status-line">${escapeHtml(item.note || "Mesh conversion workflow.")}</div>
+        </article>
+      `).join("");
+      targetQuickPicks.innerHTML = (supportedFormats.target_formats || []).map((item) => `
+        <button class="target-chip ${item.id === target.value ? "active" : ""}" type="button" data-target-id="${escapeHtml(item.id)}">
+          <span class="target-chip-label">${escapeHtml(item.label)}</span>
+          <span class="target-chip-note">${escapeHtml(item.recommended ? "Recommended default target" : (item.preserves_scene ? "Keeps scene/material structure" : "Geometry-first export"))}</span>
+        </button>
+      `).join("");
+      targetQuickPicks.querySelectorAll(".target-chip").forEach((button) => {
+        button.addEventListener("click", () => {
+          target.value = button.dataset.targetId || supportedFormats.recommended_target || "obj";
+          renderFormatOptions();
+        });
+      });
+      renderFormatCapabilities();
+    }
+
+    function renderFormatCapabilities() {
+      const selectedTarget = document.getElementById("targetFormat")?.value || supportedFormats.recommended_target || "obj";
+      const forcedSource = document.getElementById("sourceFormat")?.value || "";
+      const files = Array.from(document.getElementById("fileInput").files || []);
+      const detected = forcedSource || (files[0] ? fileExtension(files[0].name) : "");
+      const targetMeta = (supportedFormats.target_details || supportedFormats.target_formats || []).find((item) => item.id === selectedTarget) || null;
+      const sourceMeta = (supportedFormats.source_details || []).find((item) => item.id === detected) || null;
+      const capability = document.getElementById("formatCapabilities");
+      const warningsBox = document.getElementById("formatWarnings");
+      if (!capability || !warningsBox) return;
+
+      capability.innerHTML = `
+        <strong>${escapeHtml((targetMeta?.label || selectedTarget || "Target").toUpperCase())} capabilities</strong>
+        <div class="status-line">${escapeHtml(targetMeta?.description || "Mesh export target.")}</div>
+        <div class="status-line">Scene preservation: ${targetMeta?.preserves_scene ? "Yes" : "No"}</div>
+        <div class="status-line">Materials/textures: ${targetMeta?.preserves_materials ? "Preserved when scene export succeeds" : "Flattened or discarded"}</div>
+        <div class="status-line">UV generation: ${targetMeta?.generates_uvs ? "Generated for OBJ when needed" : "Not added automatically"}</div>
+        <div class="status-line">Source profile: ${escapeHtml(sourceMeta ? `${sourceMeta.label} (${sourceMeta.kind}) - ${sourceMeta.notes}` : "Choose a file to see source-specific notes.")}</div>
+      `;
+
+      const warnings = [
+        ...(targetMeta?.warnings || []),
+        ...(sourceMeta && sourceMeta.kind === "scene" && !targetMeta?.preserves_scene ? ["Scene hierarchy will be flattened for this export."] : []),
+      ];
+      warningsBox.textContent = warnings.length ? warnings.join(" ") : "No special warnings for this source/target combination.";
+    }
+
+    async function loadFormats() {
+      try {
+        const response = await fetch("/api/conversion/formats");
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.detail?.message || data?.error?.message || `HTTP ${response.status}`);
+        supportedFormats = data;
+        renderFormatOptions();
+        setStatus("Ready. Choose a source file and convert it. OBJ exports generate UVs automatically when needed.");
+      } catch (error) {
+        renderFormatOptions();
+        setStatus(`Using built-in format list. Live refresh failed: ${String(error?.message || error)}`);
+      }
+    }
+
+    function resetConverter() {
+      document.getElementById("fileInput").value = "";
+      document.getElementById("sourceFormat").value = "";
+      document.getElementById("targetFormat").value = supportedFormats.recommended_target || "obj";
+      document.getElementById("resultCard").classList.remove("open");
+      document.getElementById("batchResultCard").classList.remove("open");
+      document.getElementById("downloadLink").removeAttribute("href");
+      document.getElementById("resultUv").textContent = "-";
+      updateFileSummary();
+      setStatus("Ready for another conversion.");
+    }
+
+    async function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result || "");
+          const marker = "base64,";
+          const index = result.indexOf(marker);
+          resolve(index >= 0 ? result.slice(index + marker.length) : result);
+        };
+        reader.onerror = () => reject(reader.error || new Error("Failed to read file."));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function convertFile() {
+      const files = Array.from(document.getElementById("fileInput").files || []);
+      if (!files.length) {
+        setStatus("Choose a file first.");
+        return;
+      }
+      if (files.some((file) => file.size > 40 * 1024 * 1024)) {
+        setStatus("The current limit is 40 MB per file.");
+        return;
+      }
+
+      const button = document.getElementById("convertBtn");
+      button.disabled = true;
+      setStatus(`Reading ${files.length === 1 ? files[0].name : `${files.length} files`}...`);
+      try {
+        if (files.length > 1) {
+          const items = await Promise.all(files.map(async (file) => ({
+            filename: file.name,
+            content_base64: await fileToBase64(file),
+            target_format: document.getElementById("targetFormat").value,
+            source_format: document.getElementById("sourceFormat").value || null
+          })));
+          setStatus(`Converting ${files.length} files to ${document.getElementById("targetFormat").value.toUpperCase()}...`);
+          const response = await fetch("/api/conversion/batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ items })
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data?.detail?.message || data?.error?.message || `HTTP ${response.status}`);
+          document.getElementById("resultCard").classList.remove("open");
+          document.getElementById("batchResultCard").classList.add("open");
+          document.getElementById("batchResultList").innerHTML = (data.items || []).map((item) => `
+            <article class="stat">
+              <strong>${escapeHtml(item.filename || "File")}</strong>
+              <div class="status-line">${escapeHtml(item.ok ? `${String(item.target_format || "").toUpperCase()} ready` : `Failed: ${item.error || "Unknown error"}`)}</div>
+              ${item.ok ? `<div class="status-line">${escapeHtml(item.uv_generated ? (item.simplified_for_uv ? "UVs generated after simplification." : "UVs generated for OBJ export.") : (item.scene_preserved ? "Scene/material structure preserved." : "Geometry export completed."))}</div>` : ""}
+              ${item.ok ? `<a class="download-link" href="${escapeHtml(item.download_url || "#")}" download="${escapeHtml(item.output_filename || "converted-model")}">Download</a>` : ""}
+            </article>
+          `).join("");
+          const okCount = (data.items || []).filter((item) => item.ok).length;
+          setStatus(`Converted ${okCount} of ${files.length} files.`);
+          return;
+        }
+
+        const file = files[0];
+        const contentBase64 = await fileToBase64(file);
+        setStatus(`Converting ${file.name} to ${document.getElementById("targetFormat").value.toUpperCase()}...`);
+        const response = await fetch("/api/conversion", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: file.name,
+            content_base64: contentBase64,
+            target_format: document.getElementById("targetFormat").value,
+            source_format: document.getElementById("sourceFormat").value || null
+          })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.detail?.message || data?.error?.message || `HTTP ${response.status}`);
+        document.getElementById("batchResultCard").classList.remove("open");
+        document.getElementById("resultCard").classList.add("open");
+        document.getElementById("resultName").textContent = data.output_filename || "-";
+        document.getElementById("resultFormat").textContent = (data.target_format || "-").toUpperCase();
+        document.getElementById("resultSize").textContent = formatBytes(data.output_size);
+        document.getElementById("resultUv").textContent = data.target_format === "obj"
+          ? (
+              data.uv_generated
+                ? (data.simplified_for_uv ? "Generated after simplifying dense mesh" : "Generated for OBJ export")
+                : "Already present on source mesh"
+            )
+          : (data.scene_preserved ? "Scene/material structure preserved" : "Not required for this export");
+        const link = document.getElementById("downloadLink");
+        link.href = data.download_url || "#";
+        link.download = data.output_filename || "converted-model";
+        setStatus(
+          data.target_format === "obj" && data.uv_generated
+            ? `Converted ${file.name} to OBJ and generated UVs automatically${data.simplified_for_uv ? " after simplifying the mesh for unwrap speed" : ""}.`
+            : `Converted ${file.name} from ${(data.source_format || "unknown").toUpperCase()} to ${(data.target_format || "unknown").toUpperCase()}.`
+        );
+      } catch (error) {
+        setStatus(`Conversion failed: ${String(error?.message || error)}`);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    document.getElementById("fileInput").addEventListener("change", updateFileSummary);
+    document.getElementById("targetFormat").addEventListener("change", renderFormatCapabilities);
+    document.getElementById("sourceFormat").addEventListener("change", renderFormatCapabilities);
+    document.getElementById("themeToggle").addEventListener("click", toggleTheme);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeSidebar();
+    });
+    applyTheme(document.documentElement.dataset.theme);
+    renderFormatOptions();
+    updateFileSummary();
+    loadFormats();
+  </script>
+</body>
+</html>""".replace("__DEFAULT_SUPPORTED_FORMATS__", json.dumps(initial_formats)).replace("__TARGET_OPTIONS__", target_options_html).replace("__SOURCE_OPTIONS__", source_options_html)
 
 
 def render_printer_dashboard(printer_id: str) -> str:

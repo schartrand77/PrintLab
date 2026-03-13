@@ -139,3 +139,24 @@ def test_session_auth_requires_csrf_for_mutations(monkeypatch) -> None:
 
     assert rejected.status_code == 403
     assert accepted.status_code == 200
+
+
+def test_manifest_and_service_worker_are_public_when_auth_is_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    app = _build_app()
+
+    @app.get("/manifest.webmanifest")
+    async def manifest() -> dict[str, str]:
+        return {"name": "PrintLab"}
+
+    @app.get("/sw.js")
+    async def service_worker() -> dict[str, bool]:
+        return {"ok": True}
+
+    with TestClient(app) as client:
+        manifest_response = client.get("/manifest.webmanifest")
+        sw_response = client.get("/sw.js")
+
+    assert manifest_response.status_code == 200
+    assert sw_response.status_code == 200

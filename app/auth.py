@@ -476,7 +476,7 @@ def register_admin_auth(app: FastAPI) -> None:
             return await call_next(request)
 
         path = request.url.path
-        if path in {"/login", "/auth/login", "/auth/session"}:
+        if path in {"/login", "/auth/login", "/auth/session", "/manifest.webmanifest", "/sw.js", "/favicon.ico"}:
             return await call_next(request)
 
         if _is_makerworks_boundary_request(path):

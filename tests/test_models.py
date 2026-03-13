@@ -8,7 +8,14 @@ from pydantic import ValidationError
 import app.views as views
 from app.main import create_app
 from app.models import MakerworksSubmitJobRequest, QueuePrintJobRequest, WorksRequest
-from app.views import render_add_printer_html, render_gallery_html, render_makerworks_routing_html, render_makerworks_search_html, render_printer_dashboard
+from app.views import (
+    render_add_printer_html,
+    render_conversion_html,
+    render_gallery_html,
+    render_makerworks_routing_html,
+    render_makerworks_search_html,
+    render_printer_dashboard,
+)
 
 
 def test_works_request_rejects_invalid_method() -> None:
@@ -35,6 +42,9 @@ def test_makerworks_submit_job_request_accepts_metadata() -> None:
 def test_openapi_contains_queue_schema() -> None:
     schema = create_app().openapi()
     assert "/api/queue" in schema["paths"]
+    assert "/api/conversion" in schema["paths"]
+    assert "/api/conversion/batch" in schema["paths"]
+    assert "/api/conversion/formats" in schema["paths"]
     assert "/api/works/makerworks/jobs" in schema["paths"]
     assert "/api/works/makerworks/jobs/{job_id}" in schema["paths"]
     assert "/api/jobs" in schema["paths"]
@@ -43,9 +53,12 @@ def test_openapi_contains_queue_schema() -> None:
 
 
 def test_sidebar_pages_include_makerworks_navigation() -> None:
+    assert 'href="/conversion"' in render_gallery_html()
     assert 'href="/makerworks"' in render_gallery_html()
     assert 'href="/makerworks-routing"' in render_gallery_html()
+    assert 'href="/conversion"' in render_add_printer_html()
     assert 'href="/makerworks"' in render_add_printer_html()
+    assert 'href="/conversion"' in render_makerworks_search_html()
     assert 'href="/makerworks-routing"' in render_makerworks_search_html()
 
 
@@ -55,8 +68,36 @@ def test_printer_dashboard_contains_sidebar_navigation(monkeypatch: pytest.Monke
     assert 'id="sidebar"' in html
     assert 'id="sidebarBackdrop"' in html
     assert 'aria-label="Open menu"' in html
+    assert 'href="/conversion"' in html
     assert 'href="/makerworks"' in html
     assert 'href="/makerworks-routing"' in html
+
+
+def test_render_conversion_page_contains_converter_controls() -> None:
+    html = render_conversion_html()
+    assert 'href="/conversion"' in html
+    assert 'id="fileInput"' in html
+    assert 'id="targetFormat"' in html
+    assert 'id="sourceFormat"' in html
+    assert 'id="resultUv"' in html
+    assert 'id="batchResultCard"' in html
+    assert 'id="batchResultList"' in html
+    assert 'id="targetQuickPicks"' in html
+    assert 'id="formatCapabilities"' in html
+    assert 'id="formatWarnings"' in html
+    assert 'id="commonConversionList"' in html
+    assert 'multiple' in html
+    assert '>OBJ - Recommended<' in html
+    assert '>STL<' in html
+    assert '>Auto detect<' in html
+    assert ".gcode.3mf" in html
+    assert "/api/conversion/formats" in html
+    assert "/api/conversion/batch" in html
+    assert "/api/conversion" in html
+    assert "OBJ recommended" in html
+    assert "UVs are generated automatically when needed" in html
+    assert "3MF to STL" in html
+    assert "Scene preservation" in html
 
 
 def test_render_makerworks_search_page_contains_search_only_controls() -> None:
