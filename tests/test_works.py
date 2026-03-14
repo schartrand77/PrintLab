@@ -414,6 +414,140 @@ def test_submitted_job_sync_posts_status_to_makerworks(monkeypatch) -> None:
     assert job["callback"]["status_code"] == 202
 
 
+def test_successful_gcode_can_upload_timelapse_to_youtube(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = Path("tests/.tmp/youtube-upload")
+    cache_dir = tmp_path / "cache" / "timelapse"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    video_path = cache_dir / "video_2026-03-13_12-12-18.mp4"
+    video_path.write_bytes(b"fake-video")
+
+    monkeypatch.setenv("YOUTUBE_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("YOUTUBE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("YOUTUBE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("YOUTUBE_REFRESH_TOKEN", "refresh-token")
+    monkeypatch.setenv("YOUTUBE_TITLE_TEMPLATE", "{model_name} on {printer_name}")
+    monkeypatch.setenv("YOUTUBE_DESCRIPTION_TEMPLATE", "Completed {completed_at}")
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE", "file_cache_path": str(tmp_path / "cache")},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    record = {
+        "id": "record-1",
+        "file_name": "widget.3mf",
+        "model_name": "Widget",
+        "completed_at": "2026-03-13T12:00:00+00:00",
+        "youtube": {
+            "uploaded": False,
+            "uploaded_at": None,
+            "last_attempt_at": None,
+            "last_error": None,
+            "status_code": None,
+            "video_id": None,
+            "video_url": None,
+            "path": None,
+            "title": None,
+        },
+    }
+
+    class TokenResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"access_token": "access-token"}
+
+    class InitResponse:
+        status_code = 200
+        headers = {"Location": "https://upload.youtube.test/session"}
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class UploadResponse:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"id": "video-123"}
+
+    captured: dict[str, object] = {}
+
+    class FakeSession:
+        headers: dict[str, str]
+
+        def __init__(self) -> None:
+            self.headers = {}
+
+        def post(self, url: str, *, params=None, json=None, headers=None, timeout=None):
+            captured["init_url"] = url
+            captured["init_params"] = params
+            captured["init_json"] = json
+            captured["init_headers"] = headers
+            captured["auth_header"] = self.headers.get("Authorization")
+            return InitResponse()
+
+        def put(self, url: str, *, data=None, headers=None, timeout=None):
+            captured["upload_url"] = url
+            captured["upload_headers"] = headers
+            captured["upload_bytes"] = data.read()
+            return UploadResponse()
+
+    monkeypatch.setattr("app.services.requests.post", lambda *args, **kwargs: TokenResponse())
+    monkeypatch.setattr("app.services.requests.Session", FakeSession)
+
+    result = asyncio.run(service._sync_successful_gcode_to_youtube(record, force=True, video_path=video_path))
+
+    assert result["youtube"]["uploaded"] is True
+    assert result["youtube"]["video_id"] == "video-123"
+    assert result["youtube"]["video_url"] == "https://www.youtube.com/watch?v=video-123"
+    assert result["youtube"]["title"] == "Widget on Printer 1"
+    assert captured["auth_header"] == "Bearer access-token"
+    assert captured["upload_url"] == "https://upload.youtube.test/session"
+    assert captured["upload_bytes"] == b"fake-video"
+
+
+def test_youtube_video_snapshot_is_paginated() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    service._successful_gcodes = [
+        {
+            "id": f"record-{index}",
+            "model_name": f"Model {index}",
+            "file_name": f"model-{index}.3mf",
+            "file_path": f"/cache/model-{index}.3mf",
+            "subtask_name": None,
+            "completed_at": f"2026-03-14T0{index}:00:00+00:00",
+            "youtube": {
+                "uploaded": True,
+                "uploaded_at": f"2026-03-14T0{index}:10:00+00:00",
+                "video_id": f"video-{index}",
+                "video_url": f"https://www.youtube.com/watch?v=video-{index}",
+                "title": f"Video {index}",
+                "path": f"C:/videos/video-{index}.mp4",
+            },
+        }
+        for index in range(1, 8)
+    ]
+
+    page_one = service.youtube_videos_snapshot(page=1, page_size=5)
+    page_two = service.youtube_videos_snapshot(page=2, page_size=5)
+
+    assert page_one["page"] == 1
+    assert page_one["pages"] == 2
+    assert page_one["count"] == 5
+    assert page_one["items"][0]["video_id"] == "video-7"
+    assert page_two["page"] == 2
+    assert page_two["count"] == 2
+    assert page_two["items"][0]["video_id"] == "video-2"
+
+
 def _makerworks_api_app() -> FastAPI:
     app = FastAPI()
     register_admin_auth(app)

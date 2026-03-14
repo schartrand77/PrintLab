@@ -1038,6 +1038,79 @@ class PrinterService:
     def successful_gcodes_snapshot(self) -> list[dict[str, Any]]:
         return list(self._successful_gcodes[:200])
 
+    def youtube_connection_status(self) -> dict[str, Any]:
+        cfg = self._youtube_upload_config()
+        latest_uploaded = next(
+            (item for item in self._successful_gcodes if (item.get("youtube") or {}).get("uploaded")),
+            None,
+        )
+        latest_attempt = next(
+            (
+                item
+                for item in self._successful_gcodes
+                if (item.get("youtube") or {}).get("last_attempt_at") or (item.get("youtube") or {}).get("uploaded_at")
+            ),
+            None,
+        )
+        latest_error = next(
+            (item for item in self._successful_gcodes if (item.get("youtube") or {}).get("last_error")),
+            None,
+        )
+        configured = bool(cfg["client_id"] and cfg["client_secret"] and cfg["refresh_token"])
+        return {
+            "enabled": cfg["enabled"],
+            "configured": configured,
+            "ready": bool(cfg["enabled"] and configured),
+            "privacy_status": cfg["privacy_status"],
+            "category_id": cfg["category_id"],
+            "uploaded_count": sum(1 for item in self._successful_gcodes if (item.get("youtube") or {}).get("uploaded")),
+            "last_uploaded_at": (latest_uploaded or {}).get("youtube", {}).get("uploaded_at"),
+            "last_video_url": (latest_uploaded or {}).get("youtube", {}).get("video_url"),
+            "last_attempt_at": (latest_attempt or {}).get("youtube", {}).get("last_attempt_at"),
+            "last_error": (latest_error or {}).get("youtube", {}).get("last_error"),
+        }
+
+    def youtube_videos_snapshot(self, *, page: int = 1, page_size: int = 5) -> dict[str, Any]:
+        page_value = max(1, int(page))
+        size_value = max(1, min(50, int(page_size)))
+        uploaded = [item for item in self._successful_gcodes if (item.get("youtube") or {}).get("uploaded")]
+        uploaded.sort(
+            key=lambda item: str((item.get("youtube") or {}).get("uploaded_at") or item.get("completed_at") or ""),
+            reverse=True,
+        )
+        total = len(uploaded)
+        start = (page_value - 1) * size_value
+        end = start + size_value
+        items = []
+        for record in uploaded[start:end]:
+            youtube = record.get("youtube") or {}
+            items.append(
+                {
+                    "record_id": record.get("id"),
+                    "printer_id": self.printer_id,
+                    "printer_name": self.display_name,
+                    "model_id": record.get("model_id"),
+                    "model_name": record.get("model_name"),
+                    "file_name": record.get("file_name"),
+                    "completed_at": record.get("completed_at"),
+                    "uploaded_at": youtube.get("uploaded_at"),
+                    "video_id": youtube.get("video_id"),
+                    "video_url": youtube.get("video_url"),
+                    "title": youtube.get("title"),
+                    "path": youtube.get("path"),
+                    "thumbnail_url": self._job_thumbnail_url(record.get("file_path"), record.get("subtask_name")),
+                }
+            )
+        return {
+            "items": items,
+            "count": len(items),
+            "total": total,
+            "page": page_value,
+            "page_size": size_value,
+            "pages": max(1, (total + size_value - 1) // size_value) if total else 1,
+            "connection": self.youtube_connection_status(),
+        }
+
     def submitted_jobs_snapshot(self, *, status: str | None = None) -> list[dict[str, Any]]:
         if not status:
             return list(self._submitted_jobs[:200])
@@ -1285,6 +1358,17 @@ class PrinterService:
                 "status_code": None,
                 "path": None,
             },
+            "youtube": {
+                "uploaded": False,
+                "uploaded_at": None,
+                "last_attempt_at": None,
+                "last_error": None,
+                "status_code": None,
+                "video_id": None,
+                "video_url": None,
+                "path": None,
+                "title": None,
+            },
         }
         return record
 
@@ -1309,6 +1393,186 @@ class PrinterService:
             "path_template": path_template,
             "method": (get_env("MAKERWORKS_JOB_CALLBACK_METHOD", "POST") or "POST").upper(),
             "webhook_secret": get_env("MAKERWORKS_WEBHOOK_SECRET", ""),
+        }
+
+    def _youtube_upload_config(self) -> dict[str, Any]:
+        tags_raw = get_env("YOUTUBE_TAGS", "")
+        return {
+            "enabled": parse_bool("YOUTUBE_UPLOAD_ENABLED", False),
+            "client_id": get_env("YOUTUBE_CLIENT_ID", ""),
+            "client_secret": get_env("YOUTUBE_CLIENT_SECRET", ""),
+            "refresh_token": get_env("YOUTUBE_REFRESH_TOKEN", ""),
+            "privacy_status": (get_env("YOUTUBE_PRIVACY_STATUS", "private") or "private").strip().lower(),
+            "category_id": (get_env("YOUTUBE_CATEGORY_ID", "28") or "28").strip(),
+            "title_template": get_env("YOUTUBE_TITLE_TEMPLATE", "{model_name} - {printer_name}"),
+            "description_template": get_env(
+                "YOUTUBE_DESCRIPTION_TEMPLATE",
+                "Printed on {printer_name}\nModel: {model_name}\nFile: {file_name}\nCompleted: {completed_at}",
+            ),
+            "tags": [item.strip() for item in tags_raw.split(",") if item.strip()],
+            "notify_subscribers": parse_bool("YOUTUBE_NOTIFY_SUBSCRIBERS", False),
+            "made_for_kids": parse_bool("YOUTUBE_MADE_FOR_KIDS", False),
+            "embeddable": parse_bool("YOUTUBE_EMBEDDABLE", True),
+            "license": (get_env("YOUTUBE_LICENSE", "youtube") or "youtube").strip(),
+            "public_stats_viewable": parse_bool("YOUTUBE_PUBLIC_STATS_VIEWABLE", True),
+            "wait_seconds": max(0, int(get_env("YOUTUBE_TIMELAPSE_WAIT_SECONDS", "180") or "180")),
+            "poll_interval_seconds": max(1, int(get_env("YOUTUBE_TIMELAPSE_POLL_INTERVAL_SECONDS", "5") or "5")),
+            "timeout_seconds": max(30, int(get_env("YOUTUBE_UPLOAD_TIMEOUT_SECONDS", "900") or "900")),
+        }
+
+    def _youtube_template_context(self, record: dict[str, Any]) -> dict[str, str]:
+        return {
+            "printer_id": str(self.printer_id or ""),
+            "printer_name": str(self.display_name or ""),
+            "record_id": str(record.get("id") or ""),
+            "model_id": str(record.get("model_id") or ""),
+            "model_key": str(record.get("model_key") or ""),
+            "model_name": str(record.get("model_name") or record.get("file_name") or "Print"),
+            "file_path": str(record.get("file_path") or ""),
+            "file_name": str(record.get("file_name") or ""),
+            "plate_index": str(record.get("plate_index") or ""),
+            "subtask_name": str(record.get("subtask_name") or ""),
+            "completed_at": str(record.get("completed_at") or ""),
+        }
+
+    def _render_template(self, template: str, context: dict[str, str]) -> str:
+        class SafeDict(dict[str, str]):
+            def __missing__(self, key: str) -> str:
+                return ""
+
+        return template.format_map(SafeDict(context)).strip()
+
+    def _timelapse_cache_dir(self) -> Path:
+        configured = str(self._configured_settings.get("file_cache_path") or "").strip()
+        base = Path(configured) if configured else data_root() / "cache"
+        return base / "timelapse"
+
+    def _find_latest_timelapse_file(self, record: dict[str, Any]) -> Path | None:
+        cache_dir = self._timelapse_cache_dir()
+        if not cache_dir.exists():
+            return None
+
+        used_paths = {
+            str(item.get("youtube", {}).get("path") or "")
+            for item in self._successful_gcodes
+            if isinstance(item, dict)
+        }
+        completed_at = str(record.get("completed_at") or "").strip()
+        completed_ts = None
+        if completed_at:
+            try:
+                dt = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                completed_ts = dt.timestamp()
+            except ValueError:
+                completed_ts = None
+
+        candidates: list[tuple[float, Path]] = []
+        for ext in ("*.mp4", "*.avi", "*.mov"):
+            for path in cache_dir.glob(ext):
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                path_str = str(path.resolve())
+                if path_str in used_paths:
+                    continue
+                if completed_ts is not None and stat.st_mtime < (completed_ts - 3600):
+                    continue
+                candidates.append((stat.st_mtime, path))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return candidates[0][1]
+
+    def _youtube_access_token(self, cfg: dict[str, Any]) -> str:
+        response = requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": cfg["client_id"],
+                "client_secret": cfg["client_secret"],
+                "refresh_token": cfg["refresh_token"],
+                "grant_type": "refresh_token",
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        body = response.json()
+        token = str(body.get("access_token") or "").strip()
+        if not token:
+            raise RuntimeError("YouTube OAuth token exchange returned no access_token.")
+        return token
+
+    def _youtube_upload_video(self, record: dict[str, Any], video_path: Path, cfg: dict[str, Any]) -> dict[str, Any]:
+        if not video_path.exists():
+            raise RuntimeError(f"Timelapse file does not exist: {video_path}")
+
+        context = self._youtube_template_context(record)
+        title = self._render_template(str(cfg["title_template"]), context) or (record.get("file_name") or "Print")
+        description = self._render_template(str(cfg["description_template"]), context)
+        mime_type = "video/mp4"
+        suffix = video_path.suffix.lower()
+        if suffix == ".avi":
+            mime_type = "video/x-msvideo"
+        elif suffix == ".mov":
+            mime_type = "video/quicktime"
+
+        access_token = self._youtube_access_token(cfg)
+        metadata = {
+            "snippet": {
+                "title": title[:100],
+                "description": description[:5000],
+                "categoryId": str(cfg["category_id"]),
+                "tags": list(cfg["tags"]),
+            },
+            "status": {
+                "privacyStatus": cfg["privacy_status"],
+                "selfDeclaredMadeForKids": bool(cfg["made_for_kids"]),
+                "embeddable": bool(cfg["embeddable"]),
+                "license": str(cfg["license"]),
+                "publicStatsViewable": bool(cfg["public_stats_viewable"]),
+            },
+        }
+        session = requests.Session()
+        session.headers.update({"Authorization": f"Bearer {access_token}"})
+        init_response = session.post(
+            "https://www.googleapis.com/upload/youtube/v3/videos",
+            params={
+                "part": "snippet,status",
+                "uploadType": "resumable",
+                "notifySubscribers": "true" if cfg["notify_subscribers"] else "false",
+            },
+            json=metadata,
+            headers={
+                "X-Upload-Content-Length": str(video_path.stat().st_size),
+                "X-Upload-Content-Type": mime_type,
+            },
+            timeout=30,
+        )
+        init_response.raise_for_status()
+        upload_url = str(init_response.headers.get("Location") or "").strip()
+        if not upload_url:
+            raise RuntimeError("YouTube resumable upload returned no session URL.")
+
+        with video_path.open("rb") as handle:
+            upload_response = session.put(
+                upload_url,
+                data=handle,
+                headers={"Content-Type": mime_type},
+                timeout=cfg["timeout_seconds"],
+            )
+        upload_response.raise_for_status()
+        body = upload_response.json()
+        video_id = str(body.get("id") or "").strip()
+        if not video_id:
+            raise RuntimeError("YouTube upload completed without a video id.")
+        return {
+            "video_id": video_id,
+            "video_url": f"https://www.youtube.com/watch?v={video_id}",
+            "status_code": upload_response.status_code,
+            "title": title,
+            "path": str(video_path.resolve()),
         }
 
     def _submitted_job_callback_payload(self, job: dict[str, Any]) -> dict[str, Any]:
@@ -1532,6 +1796,109 @@ class PrinterService:
                 return await self._sync_successful_gcode_to_makerworks(record, force=force)
         raise ValueError(f"Unknown successful G-code record: {record_id}")
 
+    async def _sync_successful_gcode_to_youtube(
+        self,
+        record: dict[str, Any],
+        *,
+        force: bool = False,
+        video_path: Path | None = None,
+    ) -> dict[str, Any]:
+        cfg = self._youtube_upload_config()
+        if not cfg["enabled"]:
+            raise RuntimeError("YouTube uploads are disabled.")
+        if not cfg["client_id"] or not cfg["client_secret"] or not cfg["refresh_token"]:
+            raise RuntimeError("YouTube upload is not configured with OAuth credentials.")
+        if record.get("youtube", {}).get("uploaded") and not force:
+            return record
+
+        youtube = record.setdefault("youtube", {})
+        youtube["last_attempt_at"] = datetime.now(timezone.utc).isoformat()
+
+        selected_path = video_path
+        if selected_path is None:
+            deadline = time.monotonic() + int(cfg["wait_seconds"])
+            while True:
+                selected_path = self._find_latest_timelapse_file(record)
+                if selected_path is not None:
+                    break
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("No timelapse video became available before the YouTube upload timeout.")
+                await asyncio.sleep(int(cfg["poll_interval_seconds"]))
+        youtube["path"] = str(selected_path.resolve())
+        try:
+            result = await asyncio.get_running_loop().run_in_executor(
+                None,
+                self._youtube_upload_video,
+                record,
+                selected_path,
+                cfg,
+            )
+            youtube.update(
+                {
+                    "uploaded": True,
+                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                    "last_error": None,
+                    "status_code": result["status_code"],
+                    "video_id": result["video_id"],
+                    "video_url": result["video_url"],
+                    "title": result["title"],
+                    "path": result["path"],
+                }
+            )
+            self._save_successful_gcodes()
+            self._record_timeline(
+                "youtube_upload_success",
+                f"Uploaded timelapse for {record.get('file_name') or 'model'} to YouTube.",
+                actor="system",
+                details={
+                    "record_id": record.get("id"),
+                    "video_id": result["video_id"],
+                    "video_url": result["video_url"],
+                    "path": result["path"],
+                },
+            )
+            return record
+        except Exception as exc:
+            youtube.update(
+                {
+                    "uploaded": False,
+                    "last_error": str(exc),
+                }
+            )
+            self._save_successful_gcodes()
+            self._record_timeline(
+                "youtube_upload_failed",
+                f"Failed to upload timelapse for {record.get('file_name') or 'model'} to YouTube.",
+                actor="system",
+                severity="warning",
+                details={"record_id": record.get("id"), "error": str(exc), "path": youtube.get("path")},
+            )
+            raise
+
+    def _schedule_youtube_upload(self, record_id: str, *, force: bool = False) -> None:
+        cfg = self._youtube_upload_config()
+        if not cfg["enabled"]:
+            return
+        record = next((item for item in self._successful_gcodes if item.get("id") == record_id), None)
+        if record is None:
+            return
+
+        async def _runner() -> None:
+            try:
+                await self._sync_successful_gcode_to_youtube(record, force=force)
+            except Exception:
+                return
+
+        if self._main_loop and self._main_loop.is_running():
+            try:
+                running_loop = asyncio.get_running_loop()
+                if running_loop is self._main_loop:
+                    asyncio.create_task(_runner())
+                    return
+            except RuntimeError:
+                pass
+            self._main_loop.call_soon_threadsafe(lambda: asyncio.create_task(_runner()))
+
     async def _record_successful_completion(self, snapshot: dict[str, Any]) -> None:
         completed_at = datetime.now(timezone.utc).isoformat()
         record = self._build_completion_record(snapshot, completed_at)
@@ -1552,6 +1919,7 @@ class PrinterService:
                 await self._sync_successful_gcode_to_makerworks(record)
             except Exception:
                 pass
+        self._schedule_youtube_upload(str(record.get("id") or ""))
         job_id = str((self._active_job_context or {}).get("job_id") or "").strip()
         if job_id:
             self.update_submitted_job(
@@ -2829,6 +3197,7 @@ class PrinterService:
                 "submitted_jobs": len(self._submitted_jobs),
                 "successful_gcodes": len(self._successful_gcodes),
             },
+            "youtube": self.youtube_connection_status(),
             "sse": {
                 "subscriber_count": len(self._event_subscribers),
             },

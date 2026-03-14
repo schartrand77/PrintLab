@@ -7,6 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/opt
 ENV ADMIN_EMAIL=
+ENV PRINTLAB_CONFIG_PATH=/config/config.json
 
 WORKDIR /app
 
@@ -23,7 +24,10 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY app /app/app
 COPY docker/start-printlab.sh /usr/local/bin/start-printlab.sh
-RUN chmod +x /usr/local/bin/start-printlab.sh
+RUN chmod +x /usr/local/bin/start-printlab.sh \
+    && mkdir -p /data /config
+
+VOLUME ["/data", "/config"]
 
 EXPOSE 8080
 

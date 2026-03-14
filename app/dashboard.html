@@ -645,6 +645,99 @@
       letter-spacing: .25px;
       color: #5a748f;
     }
+    .youtube-shell {
+      display: grid;
+      gap: 14px;
+    }
+    .youtube-topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .youtube-connection {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 7px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.62);
+      background: rgba(255, 255, 255, 0.42);
+      font-size: 13px;
+      font-weight: 700;
+      color: #375a79;
+    }
+    .youtube-connection.ok {
+      color: #2f8b56;
+      border-color: rgba(47, 139, 86, 0.34);
+      background: rgba(47, 139, 86, 0.12);
+    }
+    .youtube-connection.warn {
+      color: #9a6b1d;
+      border-color: rgba(154, 107, 29, 0.34);
+      background: rgba(154, 107, 29, 0.12);
+    }
+    .youtube-list {
+      display: grid;
+      gap: 10px;
+    }
+    .youtube-item {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr);
+      gap: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.62);
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 14px;
+      padding: 10px;
+    }
+    .youtube-thumb {
+      width: 92px;
+      height: 68px;
+      border-radius: 10px;
+      object-fit: cover;
+      background: rgba(166, 197, 230, 0.22);
+    }
+    .youtube-meta {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    .youtube-title {
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+    .youtube-subline {
+      font-size: 12px;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+    .youtube-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .youtube-actions a {
+      color: #278fce;
+      text-decoration: none;
+      font-weight: 700;
+    }
+    .youtube-pager {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .youtube-page-buttons {
+      display: flex;
+      gap: 8px;
+    }
+    .youtube-empty {
+      color: var(--muted);
+      font-size: 13px;
+    }
     .access-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1377,6 +1470,27 @@
               <div class="status-list-row"><strong>Last Sync Error</strong><span>-</span></div>
             </div>
           </section>
+          <section class="status-card" aria-labelledby="youtubeTitle">
+            <div class="youtube-shell">
+              <div class="youtube-topline">
+                <div>
+                  <h3 id="youtubeTitle">YouTube Uploads</h3>
+                  <div id="youtubeSummary" class="status-line">Most recent uploaded videos for this printer.</div>
+                </div>
+                <div id="youtubeConnection" class="youtube-connection">Checking status</div>
+              </div>
+              <div id="youtubeList" class="youtube-list">
+                <div class="youtube-empty">No uploaded videos yet.</div>
+              </div>
+              <div class="youtube-pager">
+                <div id="youtubePageInfo" class="status-line">Page 1 of 1</div>
+                <div class="youtube-page-buttons">
+                  <button id="youtubePrevBtn" class="btn" type="button" onclick="changeYoutubePage(-1)">Previous</button>
+                  <button id="youtubeNextBtn" class="btn" type="button" onclick="changeYoutubePage(1)">Next</button>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
         <div id="settingsPanel" class="dashboard-panel" role="tabpanel" aria-labelledby="settingsTab">
           <section class="status-card settings-hero" aria-labelledby="printerSettingsTitle">
@@ -1693,6 +1807,9 @@
       "data:image/svg+xml;utf8," +
       encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='640' height='480'><rect width='100%' height='100%' fill='#2f343b'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#c2c8d0' font-family='Segoe UI' font-size='24'>Live feed unavailable</text></svg>");
     let chamberLightOn = false;
+    let youtubePage = 1;
+    let youtubePageCount = 1;
+    const youtubePageSize = 5;
     let currentPhotoSrc = placeholderThumb;
 
     function buildCurrentJobThumbnailUrl(state) {
@@ -2744,12 +2861,87 @@
       const callback = systemStatus?.callback || {};
       const webhooks = systemStatus?.webhooks || {};
       const sync = systemStatus?.sync || {};
+      const youtube = systemStatus?.youtube || {};
       list.innerHTML = `
         <div class="status-list-row"><strong>MQTT</strong><span>${escapeHtml(mqtt.connected ? "Connected" : (mqtt.configured ? "Disconnected" : "Not configured"))}</span></div>
         <div class="status-list-row"><strong>Callbacks</strong><span>${escapeHtml(callback.last_error ? `Error (${callback.status_code || "-"})` : (callback.last_delivered_at ? `Healthy at ${formatDateTime(callback.last_delivered_at)}` : (callback.enabled ? "Waiting for first delivery" : "Disabled")))}</span></div>
         <div class="status-list-row"><strong>Webhooks</strong><span>${escapeHtml(webhooks.enabled_count ? `${webhooks.enabled_count} enabled` : "None configured")}</span></div>
         <div class="status-list-row"><strong>Last Sync Error</strong><span>${escapeHtml(sync.last_error || "-")}</span></div>
+        <div class="status-list-row"><strong>YouTube</strong><span>${escapeHtml(youtube.enabled ? (youtube.ready ? `Ready - ${youtube.uploaded_count || 0} uploaded` : "Enabled - config incomplete") : "Disabled")}</span></div>
       `;
+    }
+
+    function renderYoutubeConnection(connection) {
+      const node = document.getElementById("youtubeConnection");
+      const summary = document.getElementById("youtubeSummary");
+      if (!node || !summary) return;
+      const enabled = !!connection?.enabled;
+      const ready = !!connection?.ready;
+      node.className = `youtube-connection ${ready ? "ok" : (enabled ? "warn" : "")}`.trim();
+      if (!enabled) {
+        node.textContent = "Disabled";
+        summary.textContent = "Enable YouTube uploads and add OAuth credentials to publish timelapses.";
+        return;
+      }
+      if (!ready) {
+        node.textContent = "Config Incomplete";
+        summary.textContent = connection?.last_error || "YouTube upload is enabled, but the OAuth settings are incomplete.";
+        return;
+      }
+      node.textContent = "Ready";
+      summary.textContent = connection?.last_error
+        ? `Last error: ${connection.last_error}`
+        : `Uploaded ${connection?.uploaded_count || 0} video${(connection?.uploaded_count || 0) === 1 ? "" : "s"}${connection?.last_uploaded_at ? ` - Last upload ${formatDateTime(connection.last_uploaded_at)}` : ""}`;
+    }
+
+    function renderYoutubeVideos(payload) {
+      const list = document.getElementById("youtubeList");
+      const info = document.getElementById("youtubePageInfo");
+      const prev = document.getElementById("youtubePrevBtn");
+      const next = document.getElementById("youtubeNextBtn");
+      if (!list || !info || !prev || !next) return;
+      const items = Array.isArray(payload?.items) ? payload.items : [];
+      youtubePage = Number(payload?.page || 1);
+      youtubePageCount = Number(payload?.pages || 1);
+      renderYoutubeConnection(payload?.connection || {});
+      info.textContent = `Page ${youtubePage} of ${youtubePageCount}`;
+      prev.disabled = youtubePage <= 1;
+      next.disabled = youtubePage >= youtubePageCount;
+      if (!items.length) {
+        list.innerHTML = "<div class='youtube-empty'>No uploaded videos yet for this printer.</div>";
+        return;
+      }
+      list.innerHTML = items.map((item) => `
+        <article class="youtube-item">
+          <img class="youtube-thumb" src="${escapeHtml(item.thumbnail_url || '/static/printers/x1c.jpg')}" alt="${escapeHtml(item.title || item.file_name || 'YouTube upload')}" onerror="this.onerror=null;this.src='/static/printers/x1c.jpg'">
+          <div class="youtube-meta">
+            <div class="youtube-title">${escapeHtml(item.title || item.model_name || item.file_name || "Untitled video")}</div>
+            <div class="youtube-subline">${escapeHtml(item.model_name || item.file_name || "-")}</div>
+            <div class="youtube-subline">Uploaded ${escapeHtml(formatDateTime(item.uploaded_at))}${item.completed_at ? ` - Print completed ${escapeHtml(formatDateTime(item.completed_at))}` : ""}</div>
+            <div class="youtube-actions">
+              ${item.video_url ? `<a href="${escapeHtml(item.video_url)}" target="_blank" rel="noopener noreferrer">Watch on YouTube</a>` : ""}
+              ${item.video_id ? `<span class="youtube-subline">Video ID: ${escapeHtml(item.video_id)}</span>` : ""}
+            </div>
+          </div>
+        </article>
+      `).join("");
+    }
+
+    async function loadYoutubeVideos() {
+      const r = await fetch(apiPath(`/api/youtube/videos?page=${youtubePage}&page_size=${youtubePageSize}`));
+      const payload = await r.json();
+      if (!r.ok) throw new Error(payload?.detail || `HTTP ${r.status}`);
+      renderYoutubeVideos(payload);
+    }
+
+    function changeYoutubePage(delta) {
+      const nextPage = Math.max(1, Math.min(youtubePageCount, youtubePage + Number(delta || 0)));
+      if (nextPage === youtubePage) return;
+      youtubePage = nextPage;
+      loadYoutubeVideos().catch((error) => {
+        const list = document.getElementById("youtubeList");
+        if (list) list.innerHTML = `<div class="youtube-empty">Failed to load videos. ${escapeHtml(String(error?.message || error))}</div>`;
+      });
     }
 
     function renderPresets(items) {
@@ -2928,6 +3120,7 @@
       renderWebhooks(s.webhooks);
       renderSystemStatus(s.system_status);
       renderAms(s.ams);
+      await loadYoutubeVideos();
 
       const jobStateRaw = (s.job?.state || "").toString();
       const jobState = jobStateRaw.toUpperCase();

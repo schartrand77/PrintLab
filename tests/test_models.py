@@ -49,6 +49,8 @@ def test_openapi_contains_queue_schema() -> None:
     assert "/api/works/makerworks/jobs/{job_id}" in schema["paths"]
     assert "/api/jobs" in schema["paths"]
     assert "/api/jobs/{job_id}/sync-makerworks" in schema["paths"]
+    assert "/api/youtube/videos" in schema["paths"]
+    assert "/api/printers/{printer_id}/youtube/videos" in schema["paths"]
     assert "QueuePrintJobRequest" in schema["components"]["schemas"]
 
 
@@ -71,6 +73,8 @@ def test_printer_dashboard_contains_sidebar_navigation(monkeypatch: pytest.Monke
     assert 'href="/conversion"' in html
     assert 'href="/makerworks"' in html
     assert 'href="/makerworks-routing"' in html
+    assert 'id="youtubeList"' in html
+    assert 'id="youtubeConnection"' in html
 
 
 def test_render_conversion_page_contains_converter_controls() -> None:

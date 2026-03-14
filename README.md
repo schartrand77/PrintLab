@@ -102,6 +102,8 @@ Configure each external system in `.env`:
 - `MAKERWORKS_BASE_URL`, `MAKERWORKS_API_KEY`, `MAKERWORKS_BEARER_TOKEN`, `MAKERWORKS_AUTH_HEADER`, `MAKERWORKS_VERIFY_SSL`, `MAKERWORKS_ALLOWED_PATHS`, `MAKERWORKS_ALLOWED_METHODS`
 - Optional MakerWorks job callbacks:
   `MAKERWORKS_JOB_CALLBACK_ENABLED`, `MAKERWORKS_JOB_CALLBACK_METHOD`, `MAKERWORKS_JOB_CALLBACK_PATH_TEMPLATE`
+- Optional YouTube timelapse uploads:
+  `YOUTUBE_UPLOAD_ENABLED`, `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`, `YOUTUBE_PRIVACY_STATUS`, `YOUTUBE_CATEGORY_ID`, `YOUTUBE_TITLE_TEMPLATE`, `YOUTUBE_DESCRIPTION_TEMPLATE`, `YOUTUBE_TAGS`, `YOUTUBE_NOTIFY_SUBSCRIBERS`, `YOUTUBE_MADE_FOR_KIDS`, `YOUTUBE_EMBEDDABLE`, `YOUTUBE_LICENSE`, `YOUTUBE_PUBLIC_STATS_VIEWABLE`, `YOUTUBE_TIMELAPSE_WAIT_SECONDS`, `YOUTUBE_TIMELAPSE_POLL_INTERVAL_SECONDS`, `YOUTUBE_UPLOAD_TIMEOUT_SECONDS`
 - MakerWorks library normalization:
   `MAKERWORKS_LIBRARY_LIST_PATH`, `MAKERWORKS_LIBRARY_DETAIL_PATH_TEMPLATE`, `MAKERWORKS_LIBRARY_SEARCH_PARAM`, `MAKERWORKS_LIBRARY_PAGE_PARAM`, `MAKERWORKS_LIBRARY_PAGE_SIZE_PARAM`, `MAKERWORKS_LIBRARY_PAGE_SIZE`, `MAKERWORKS_LIBRARY_ITEMS_PATH`, `MAKERWORKS_LIBRARY_TOTAL_PATH`, `MAKERWORKS_LIBRARY_ID_PATH`, `MAKERWORKS_LIBRARY_NAME_PATH`, `MAKERWORKS_LIBRARY_SUMMARY_PATH`, `MAKERWORKS_LIBRARY_DESCRIPTION_PATH`, `MAKERWORKS_LIBRARY_THUMBNAIL_PATH`, `MAKERWORKS_LIBRARY_MODEL_URL_PATH`, `MAKERWORKS_LIBRARY_DOWNLOAD_URL_PATH`, `MAKERWORKS_LIBRARY_AUTHOR_PATH`, `MAKERWORKS_LIBRARY_TAGS_PATH`, `MAKERWORKS_LIBRARY_FILES_PATH`, `MAKERWORKS_LIBRARY_CREATED_AT_PATH`, `MAKERWORKS_LIBRARY_UPDATED_AT_PATH`
 - `ORDERWORKS_BASE_URL`, `ORDERWORKS_API_KEY`, `ORDERWORKS_BEARER_TOKEN`, `ORDERWORKS_AUTH_HEADER`, `ORDERWORKS_VERIFY_SSL`, `ORDERWORKS_ALLOWED_PATHS`, `ORDERWORKS_ALLOWED_METHODS`
@@ -115,6 +117,7 @@ Auth behavior:
 - `*_ALLOWED_PATHS` is a comma-separated prefix allowlist. Requests outside the list are rejected.
 - `*_ALLOWED_METHODS` is optional. If set, only those methods are proxied.
 - All env vars also support Docker-style file-based secrets via `*_FILE`.
+- If `/data/config.json` or `/config/config.json` exists, env values can also be supplied there using either env-style keys like `YOUTUBE_UPLOAD_ENABLED` or section objects like `"youtube": {"upload_enabled": true}`. Direct env vars still win.
 
 MakerWorks library notes:
 - The dashboard now has a `MakerWorks` tab inside the model library modal.
@@ -144,6 +147,13 @@ Successful G-code tracking:
   - `MAKERWORKS_ATTACH_GCODE_METHOD=POST`
   - `MAKERWORKS_ATTACH_GCODE_PATH_TEMPLATE=/models/{model_id}/gcodes`
 - The attachment payload includes printer, model, file, plate, AMS, and completion metadata. `model_id` is inferred from a leading numeric filename prefix such as `20906356-widget_plate_1.3mf`.
+- Optional automatic YouTube upload can be enabled with:
+  - `TIMELAPSE_CACHE_COUNT=1` or higher so the printer timelapse is downloaded into cache
+  - `YOUTUBE_UPLOAD_ENABLED=true`
+  - `YOUTUBE_CLIENT_ID=...`
+  - `YOUTUBE_CLIENT_SECRET=...`
+  - `YOUTUBE_REFRESH_TOKEN=...`
+- The YouTube uploader waits for the newest cached timelapse in `{FILE_CACHE_PATH}/timelapse`, uploads it with the configured title/description templates, and stores status back into each successful G-code record under the `youtube` key.
 
 Stockworks enrichment:
 - Responses from `GET /api/works/stockworks/health` and `POST /api/works/stockworks/request`

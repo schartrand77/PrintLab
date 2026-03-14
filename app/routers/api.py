@@ -535,6 +535,16 @@ async def successful_gcodes_by_printer(printer_id: str) -> dict[str, Any]:
     return {"items": items, "count": len(items)}
 
 
+@router.get("/api/youtube/videos")
+async def youtube_videos(page: int = 1, page_size: int = 5) -> dict[str, Any]:
+    return service_or_404().youtube_videos_snapshot(page=page, page_size=page_size)
+
+
+@router.get("/api/printers/{printer_id}/youtube/videos")
+async def youtube_videos_by_printer(printer_id: str, page: int = 1, page_size: int = 5) -> dict[str, Any]:
+    return service_or_404(printer_id).youtube_videos_snapshot(page=page, page_size=page_size)
+
+
 @router.post("/api/successful-gcodes/{record_id}/sync-makerworks")
 async def sync_successful_gcode(record_id: str, request: Request, payload: SuccessfulGcodeSyncRequest | None = None) -> dict[str, Any]:
     _require_operator(request)
