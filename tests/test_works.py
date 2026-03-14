@@ -184,6 +184,63 @@ def test_makerworks_library_surfaces_upstream_http_errors(monkeypatch) -> None:
         service.makerworks_library_sync()
 
 
+def test_makerworks_library_retries_without_pagination_after_400(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+
+    calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        def __init__(self, ok: bool, status_code: int, body: dict[str, object] | str) -> None:
+            self.ok = ok
+            self.status_code = status_code
+            self._body = body
+            self.headers = {"content-type": "application/json"}
+
+        def json(self) -> dict[str, object] | str:
+            return self._body
+
+        @property
+        def text(self) -> str:
+            return self._body if isinstance(self._body, str) else ""
+
+    def fake_request(**kwargs):
+        calls.append({"url": kwargs.get("url"), "params": dict(kwargs.get("params") or {})})
+        params = dict(kwargs.get("params") or {})
+        if "page" in params or "page_size" in params:
+            return FakeResponse(False, 400, {"message": "unexpected query params"})
+        return FakeResponse(
+            True,
+            200,
+            {
+                "models": [
+                    {
+                        "id": 7,
+                        "title": "Fallback Model",
+                    }
+                ],
+                "total": 1,
+            },
+        )
+
+    monkeypatch.setattr("app.services.requests.request", fake_request)
+    service = WorksService()
+
+    result = service.makerworks_library_sync(query="desk")
+
+    assert result["count"] == 1
+    assert result["items"][0]["id"] == "7"
+    assert calls == [
+        {
+            "url": "https://makerworks.local/api/models",
+            "params": {"q": "desk", "page": 1, "page_size": 24},
+        },
+        {
+            "url": "https://makerworks.local/api/models",
+            "params": {"q": "desk"},
+        },
+    ]
+
+
 def test_resolve_sd_path_from_filename_only() -> None:
     service = PrinterService(
         config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},

@@ -1118,7 +1118,7 @@ def render_makerworks_search_html() -> str:
       try {
         const response = await fetch(`/api/works/makerworks/library?query=${encodeURIComponent(query)}&page=${encodeURIComponent(makerworksPage)}&page_size=${encodeURIComponent(makerworksPageSize)}`);
         const data = await response.json();
-        if (!response.ok) throw new Error(data?.detail || `HTTP ${response.status}`);
+        if (!response.ok) throw new Error(data?.error?.message || data?.detail || `HTTP ${response.status}`);
         const items = Array.isArray(data.items) ? data.items : [];
         makerworksTotal = Number(data.total ?? items.length ?? 0);
         document.getElementById('makerworksCount').textContent = `${makerworksTotal} models`;
@@ -1751,7 +1751,7 @@ def render_makerworks_routing_html() -> str:
       try {
         const response = await fetch(`/api/queue/${encodeURIComponent(queueItemId)}`, { method: 'DELETE' });
         const data = await response.json();
-        if (!response.ok) throw new Error(data?.detail || `HTTP ${response.status}`);
+        if (!response.ok) throw new Error(data?.error?.message || data?.detail || `HTTP ${response.status}`);
         delete draftAssignments[nodeId];
         saveDraftAssignments();
         if (activeLeft === nodeId) activeLeft = null;

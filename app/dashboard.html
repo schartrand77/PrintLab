@@ -2604,7 +2604,7 @@
         const res = await fetch(`${apiPath("/api/works/makerworks/library")}?query=${encodeURIComponent(q)}`);
         const data = await res.json();
         if (!res.ok) {
-          throw new Error(data?.detail || `HTTP ${res.status}`);
+          throw new Error(data?.error?.message || data?.detail || `HTTP ${res.status}`);
         }
         const items = data.items || [];
         count.textContent = String(data.total ?? items.length);

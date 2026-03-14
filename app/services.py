@@ -587,6 +587,14 @@ class WorksService:
             params[str(cfg["page_size_param"])] = page_size
         return params
 
+    def _makerworks_library_request(self, list_path: str, query_params: dict[str, Any]) -> dict[str, Any]:
+        payload = WorksRequest(
+            method="GET",
+            path=list_path,
+            query=query_params,
+        )
+        return self.request_sync("makerworks", payload)
+
     def makerworks_library_sync(
         self,
         *,
@@ -604,12 +612,24 @@ class WorksService:
         if not library_cfg["list_path"]:
             raise RuntimeError("MakerWorks library is not configured (missing MAKERWORKS_LIBRARY_LIST_PATH).")
 
-        payload = WorksRequest(
-            method="GET",
-            path=str(library_cfg["list_path"]),
-            query=self._makerworks_library_query_params(library_cfg, query, page_value, size_value),
-        )
-        response = self.request_sync("makerworks", payload)
+        query_params = self._makerworks_library_query_params(library_cfg, query, page_value, size_value)
+        response = self._makerworks_library_request(str(library_cfg["list_path"]), query_params)
+        has_pagination_params = bool(library_cfg["page_param"] or library_cfg["page_size_param"])
+        if (
+            not response.get("ok")
+            and int(response.get("status_code") or 0) == 400
+            and has_pagination_params
+            and (
+                (library_cfg["page_param"] and str(library_cfg["page_param"]) in query_params)
+                or (library_cfg["page_size_param"] and str(library_cfg["page_size_param"]) in query_params)
+            )
+        ):
+            fallback_query_params = {
+                key: value
+                for key, value in query_params.items()
+                if key not in {str(library_cfg["page_param"] or ""), str(library_cfg["page_size_param"] or "")}
+            }
+            response = self._makerworks_library_request(str(library_cfg["list_path"]), fallback_query_params)
         if not response.get("ok"):
             raise RuntimeError(self._request_error_message(response, "MakerWorks library request failed"))
         body = response.get("body")
