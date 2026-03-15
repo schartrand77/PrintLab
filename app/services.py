@@ -2703,14 +2703,36 @@ class PrinterService:
         urls_to_try = [rtsp_url]
         try:
             parsed = urlsplit(rtsp_url)
-            if parsed.hostname and not parsed.username:
-                access_code = getattr(self.client, "_access_code", "")
-                if access_code:
-                    netloc = f"bblp:{access_code}@{parsed.hostname}"
+            if parsed.hostname:
+                access_code = str(getattr(self.client, "_access_code", "") or self._configured_settings.get("access_code", "")).strip()
+                configured_host = str(self._configured_settings.get("host", "")).strip()
+
+                def build_rtsp_url(host: str, *, inject_auth: bool) -> str:
+                    username = parsed.username
+                    password = parsed.password
+                    if inject_auth and access_code and not password:
+                        username = username or "bblp"
+                        password = access_code
+
+                    auth = ""
+                    if username:
+                        auth = quote(username, safe="")
+                        if password is not None:
+                            auth += f":{quote(password, safe='')}"
+                        auth += "@"
+
+                    netloc = f"{auth}{host}"
                     if parsed.port:
                         netloc += f":{parsed.port}"
-                    with_creds = urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
-                    urls_to_try.append(with_creds)
+                    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+                if access_code and not parsed.username:
+                    urls_to_try.append(build_rtsp_url(parsed.hostname, inject_auth=True))
+
+                if configured_host and configured_host != parsed.hostname:
+                    urls_to_try.append(build_rtsp_url(configured_host, inject_auth=False))
+                    if access_code:
+                        urls_to_try.append(build_rtsp_url(configured_host, inject_auth=True))
         except Exception:
             pass
 
@@ -2727,7 +2749,7 @@ class PrinterService:
             return None, None
 
         now = time.time()
-        if self._live_cache_bytes and (now - self._live_cache_time) < 1.5:
+        if self._live_cache_bytes and (now - self._live_cache_time) < 0.5:
             return self._live_cache_bytes, self._live_cache_mime
 
         for url in self._rtsp_urls_to_try():

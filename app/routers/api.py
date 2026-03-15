@@ -918,18 +918,21 @@ async def chamber_stream_by_printer(printer_id: str) -> StreamingResponse:
                     proc = await asyncio.create_subprocess_exec(
                         *cmd,
                         stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.DEVNULL,
                     )
                     if proc.stdout is None:
                         raise RuntimeError("ffmpeg did not expose stdout")
                     buffer = bytearray()
                     started = False
+                    last_frame_at = asyncio.get_running_loop().time()
                     while True:
-                        chunk = await proc.stdout.read(65536)
+                        chunk = await asyncio.wait_for(proc.stdout.read(65536), timeout=3.0)
                         if not chunk:
                             if proc.returncode is not None:
                                 break
                             await asyncio.sleep(0.01)
+                            if started and (asyncio.get_running_loop().time() - last_frame_at) > 3.0:
+                                raise RuntimeError("ffmpeg stream stalled")
                             continue
                         started = True
                         buffer.extend(chunk)
@@ -951,6 +954,7 @@ async def chamber_stream_by_printer(printer_id: str) -> StreamingResponse:
                                 f"Content-Type: image/jpeg\r\n"
                                 f"Content-Length: {len(frame)}\r\n\r\n"
                             ).encode("ascii")
+                            last_frame_at = asyncio.get_running_loop().time()
                             yield header
                             yield frame
                             yield b"\r\n"

@@ -1880,6 +1880,9 @@
     let youtubePageCount = 1;
     const youtubePageSize = 5;
     let currentPhotoSrc = placeholderThumb;
+    let liveRetryTimer = null;
+    let liveRetryAttempt = 0;
+    let liveSessionId = 0;
     let latestTemperatures = {};
     let activeTemperatureEditor = null;
 
@@ -2251,19 +2254,49 @@
     function startLiveFeed() {
       stopLiveFeed();
       const img = document.getElementById("previewImage");
-      let started = false;
-      img.onload = () => {
-        started = true;
-        setLiveBadge("LIVE", "ok");
+      const sessionId = ++liveSessionId;
+
+      const connectStream = () => {
+        if (viewMode !== "live" || sessionId !== liveSessionId) return;
+        let started = false;
+
+        img.onload = () => {
+          if (viewMode !== "live" || sessionId !== liveSessionId) return;
+          started = true;
+          liveRetryAttempt = 0;
+          setLiveBadge("LIVE", "ok");
+          if (liveRetryTimer) clearTimeout(liveRetryTimer);
+          liveRetryTimer = setTimeout(() => {
+            if (viewMode !== "live" || sessionId !== liveSessionId) return;
+            setLiveBadge("RECONNECTING", "err");
+            connectStream();
+          }, 5000);
+        };
+
+        img.onerror = () => {
+          if (viewMode !== "live" || sessionId !== liveSessionId) return;
+          liveRetryAttempt += 1;
+          const retryDelayMs = Math.min(5000, 750 * Math.max(1, liveRetryAttempt));
+          setLiveBadge("RETRYING", "err");
+          if (!started) img.src = liveUnavailableThumb;
+          if (liveRetryTimer) clearTimeout(liveRetryTimer);
+          liveRetryTimer = setTimeout(() => {
+            if (viewMode === "live" && sessionId === liveSessionId) connectStream();
+          }, retryDelayMs);
+        };
+
+        img.src = `${apiPath("/api/live/stream.mjpg")}?t=${Date.now()}&sid=${sessionId}&r=${liveRetryAttempt}`;
       };
-      img.onerror = () => {
-        setLiveBadge("NO SIGNAL", "err");
-        if (!started) img.src = liveUnavailableThumb;
-      };
-      img.src = `${apiPath("/api/live/stream.mjpg")}?t=${Date.now()}`;
+
+      connectStream();
     }
 
     function stopLiveFeed() {
+      liveSessionId += 1;
+      if (liveRetryTimer) {
+        clearTimeout(liveRetryTimer);
+        liveRetryTimer = null;
+      }
       const img = document.getElementById("previewImage");
       img.onload = null;
       img.onerror = null;
