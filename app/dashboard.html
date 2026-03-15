@@ -360,6 +360,54 @@
     .rv.small {
       font-size: 22px;
     }
+    .temp-display {
+      margin-top: 3px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      width: 100%;
+      cursor: pointer;
+    }
+    .temp-display:disabled {
+      cursor: default;
+      opacity: 1;
+    }
+    .temp-target {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0;
+      line-height: 1.2;
+    }
+    .temp-editor {
+      margin-top: 6px;
+    }
+    .temp-input {
+      width: 88px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.78);
+      color: var(--text);
+      padding: 7px 10px;
+      font: inherit;
+      font-weight: 700;
+    }
+    .temp-input:focus {
+      outline: 2px solid color-mix(in srgb, var(--accent) 46%, transparent);
+      outline-offset: 1px;
+    }
+    .temp-editor-hint {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.2;
+    }
 
     .prog {
       margin-top: 12px;
@@ -1389,8 +1437,28 @@
           </div>
         </div>
         <aside class="right-rail">
-          <div class="rail-item"><div class="rk">Nozzle</div><div id="nozzle" class="rv">-</div></div>
-          <div class="rail-item"><div class="rk">Bed</div><div id="bed" class="rv small">-</div></div>
+          <div class="rail-item">
+            <div class="rk">Nozzle</div>
+            <button id="nozzleTempButton" class="temp-display" type="button" onclick="startTemperatureEdit('nozzle')">
+              <span id="nozzle" class="rv">-</span>
+              <span id="nozzleTarget" class="temp-target">Target -</span>
+            </button>
+            <div id="nozzleEditor" class="temp-editor" hidden>
+              <input id="nozzleInput" class="temp-input" type="number" min="0" max="320" step="1" inputmode="numeric" aria-label="Set nozzle temperature" onkeydown="handleTemperatureInputKeydown(event, 'nozzle')" onblur="handleTemperatureInputBlur('nozzle')">
+              <span class="temp-editor-hint">Enter to set</span>
+            </div>
+          </div>
+          <div class="rail-item">
+            <div class="rk">Bed</div>
+            <button id="bedTempButton" class="temp-display" type="button" onclick="startTemperatureEdit('heatbed')">
+              <span id="bed" class="rv small">-</span>
+              <span id="bedTarget" class="temp-target">Target -</span>
+            </button>
+            <div id="bedEditor" class="temp-editor" hidden>
+              <input id="bedInput" class="temp-input" type="number" min="0" max="130" step="1" inputmode="numeric" aria-label="Set bed temperature" onkeydown="handleTemperatureInputKeydown(event, 'heatbed')" onblur="handleTemperatureInputBlur('heatbed')">
+              <span class="temp-editor-hint">Enter to set</span>
+            </div>
+          </div>
           <div class="rail-item"><div class="rk">Progress</div><div id="progValue" class="rv small">-</div></div>
           <div class="rail-item"><div class="rk">Health</div><div id="healthScore" class="rv small">-</div></div>
         </aside>
@@ -1731,6 +1799,7 @@
       }
       const addPrinterNav = document.getElementById("addPrinterNav");
       if (addPrinterNav) addPrinterNav.hidden = !canAccess("admin");
+      renderTemperatureAccess();
     }
 
     async function fetchAuthSession() {
@@ -1811,6 +1880,8 @@
     let youtubePageCount = 1;
     const youtubePageSize = 5;
     let currentPhotoSrc = placeholderThumb;
+    let latestTemperatures = {};
+    let activeTemperatureEditor = null;
 
     function buildCurrentJobThumbnailUrl(state) {
       return state?.job?.thumbnail_url || placeholderThumb;
@@ -2104,13 +2175,13 @@
     }
 
     async function post(url, body) {
-      if (!ensureRole("operator")) return;
+      if (!ensureRole("operator")) return false;
       if (printErrorGate.active && String(url || "").includes("/api/actions/resume")) {
         const errors = document.getElementById("errors");
         if (errors) {
           errors.textContent = "Resume blocked: clear the print error overlay first.";
         }
-        return;
+        return false;
       }
       try {
         const res = await fetch(apiPath(url), {
@@ -2123,11 +2194,13 @@
           throw new Error(extractErrorMessage(payload, `HTTP ${res.status}`));
         }
         await load();
+        return true;
       } catch (err) {
         const errors = document.getElementById("errors");
         if (errors) {
           errors.textContent = `Action failed: ${String(err?.message || err)}`;
         }
+        return false;
       }
     }
 
@@ -2650,6 +2723,99 @@
       return `${v} C`;
     }
 
+    function temperatureConfig(key) {
+      return key === "heatbed"
+        ? { buttonId: "bedTempButton", editorId: "bedEditor", inputId: "bedInput", valueId: "bed", targetId: "bedTarget", max: 130, label: "Bed" }
+        : { buttonId: "nozzleTempButton", editorId: "nozzleEditor", inputId: "nozzleInput", valueId: "nozzle", targetId: "nozzleTarget", max: 320, label: "Nozzle" };
+    }
+
+    function temperatureTargetText(value) {
+      return Number.isFinite(Number(value)) ? `Target ${Math.round(Number(value))} C` : "Target -";
+    }
+
+    function renderTemperatureAccess() {
+      ["nozzle", "heatbed"].forEach((key) => {
+        const cfg = temperatureConfig(key);
+        const button = document.getElementById(cfg.buttonId);
+        if (!button) return;
+        const canEdit = canAccess("operator");
+        button.disabled = !canEdit;
+        button.title = canEdit ? `Set ${cfg.label.toLowerCase()} temperature` : "";
+      });
+    }
+
+    function renderTemperatureValue(key, currentValue, targetValue) {
+      const cfg = temperatureConfig(key);
+      const valueEl = document.getElementById(cfg.valueId);
+      const targetEl = document.getElementById(cfg.targetId);
+      if (valueEl) valueEl.textContent = temp(currentValue);
+      if (targetEl) targetEl.textContent = temperatureTargetText(targetValue);
+    }
+
+    function startTemperatureEdit(key) {
+      if (!ensureRole("operator")) return;
+      const cfg = temperatureConfig(key);
+      const button = document.getElementById(cfg.buttonId);
+      const editor = document.getElementById(cfg.editorId);
+      const input = document.getElementById(cfg.inputId);
+      if (!button || !editor || !input) return;
+      if (activeTemperatureEditor && activeTemperatureEditor !== key) cancelTemperatureEdit(activeTemperatureEditor);
+      const targetKey = key === "heatbed" ? "bed_target" : "nozzle_target";
+      const currentKey = key === "heatbed" ? "bed_current" : "nozzle_current";
+      const nextValue = Number(latestTemperatures?.[targetKey]);
+      const fallbackValue = Number(latestTemperatures?.[currentKey]);
+      input.value = Number.isFinite(nextValue) ? `${Math.round(nextValue)}` : (Number.isFinite(fallbackValue) ? `${Math.round(fallbackValue)}` : "");
+      button.hidden = true;
+      editor.hidden = false;
+      activeTemperatureEditor = key;
+      input.focus();
+      input.select();
+    }
+
+    function cancelTemperatureEdit(key) {
+      const cfg = temperatureConfig(key);
+      const button = document.getElementById(cfg.buttonId);
+      const editor = document.getElementById(cfg.editorId);
+      if (button) button.hidden = false;
+      if (editor) editor.hidden = true;
+      if (activeTemperatureEditor === key) activeTemperatureEditor = null;
+    }
+
+    async function submitTemperatureEdit(key) {
+      const cfg = temperatureConfig(key);
+      const input = document.getElementById(cfg.inputId);
+      const errors = document.getElementById("errors");
+      const raw = (input?.value || "").trim();
+      const value = Number(raw);
+      if (!raw || !Number.isFinite(value) || value < 0 || value > cfg.max) {
+        if (errors) errors.textContent = `${cfg.label} target must be a whole number between 0 and ${cfg.max}.`;
+        return;
+      }
+      const ok = await post("/api/actions/temperature", { target: key, value: Math.round(value) });
+      if (ok) cancelTemperatureEdit(key);
+    }
+
+    function handleTemperatureInputKeydown(event, key) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submitTemperatureEdit(key);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelTemperatureEdit(key);
+      }
+    }
+
+    function handleTemperatureInputBlur(key) {
+      window.setTimeout(() => {
+        const cfg = temperatureConfig(key);
+        const input = document.getElementById(cfg.inputId);
+        if (document.activeElement === input) return;
+        if (activeTemperatureEditor === key) cancelTemperatureEdit(key);
+      }, 0);
+    }
+
     function escapeHtml(value) {
       return String(value ?? "")
         .replaceAll("&", "&amp;")
@@ -3078,14 +3244,15 @@
       const layer = s.job?.current_layer ?? 0;
       const total = s.job?.total_layers ?? 0;
       const remainingText = formatRemainingMinutes(s.job?.remaining_minutes);
+      latestTemperatures = s.temperatures || {};
 
       document.getElementById("progressFill").style.width = `${Math.max(0, Math.min(100, progress))}%`;
       document.getElementById("layerInfo").textContent = `${layer}/${total || "?"}`;
       document.getElementById("progressSummary").textContent = `${progress}% • L${layer}/${total || "?"}`;
       document.getElementById("timeInfo").textContent = remainingText === "-" ? (s.job?.state ?? "idle") : `${remainingText} left`;
 
-      document.getElementById("nozzle").textContent = temp(s.temperatures?.nozzle_current);
-      document.getElementById("bed").textContent = temp(s.temperatures?.bed_current);
+      renderTemperatureValue("nozzle", s.temperatures?.nozzle_current, s.temperatures?.nozzle_target);
+      renderTemperatureValue("heatbed", s.temperatures?.bed_current, s.temperatures?.bed_target);
       document.getElementById("healthScore").textContent = `${s.health?.score ?? "-"}`;
       document.getElementById("progValue").textContent = `${progress}%`;
 

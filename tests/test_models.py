@@ -75,6 +75,10 @@ def test_printer_dashboard_contains_sidebar_navigation(monkeypatch: pytest.Monke
     assert 'href="/makerworks-routing"' in html
     assert 'id="youtubeList"' in html
     assert 'id="youtubeConnection"' in html
+    assert 'id="nozzleTempButton"' in html
+    assert 'id="bedTempButton"' in html
+    assert 'id="nozzleInput"' in html
+    assert "handleTemperatureInputKeydown(event, 'nozzle')" in html
 
 
 def test_render_conversion_page_contains_converter_controls() -> None:
