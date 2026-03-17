@@ -539,6 +539,47 @@ class WorksService:
             headers.update(extra_headers)
         return headers
 
+    def _extract_csrf_token(self, html: str) -> str | None:
+        for pattern in (
+            r'<meta[^>]+name=["\']csrf-token["\'][^>]+content=["\']([^"\']+)["\']',
+            r'<input[^>]+name=["\']csrf_token["\'][^>]+value=["\']([^"\']+)["\']',
+        ):
+            match = re.search(pattern, html, flags=re.IGNORECASE)
+            if match:
+                token = match.group(1).strip()
+                if token:
+                    return token
+        return None
+
+    def _service_session(self, cfg: dict[str, Any]) -> requests.Session | None:
+        username = str(cfg.get("admin_username") or "").strip()
+        password = str(cfg.get("admin_password") or "").strip()
+        if not username or not password:
+            return None
+
+        session = requests.Session()
+        login_url = self._build_url(cfg["base_url"], "/login")
+        login_page = session.get(
+            login_url,
+            headers=self._service_request_headers(cfg, {"Accept": "text/html,application/json"}),
+            timeout=8.0,
+            verify=cfg["verify_ssl"],
+        )
+        login_page.raise_for_status()
+        csrf_token = self._extract_csrf_token(login_page.text)
+        if not csrf_token:
+            raise RuntimeError(f"Unable to find CSRF token on {cfg['service']} login page.")
+
+        login_response = session.post(
+            login_url,
+            data={"username": username, "password": password, "csrf_token": csrf_token},
+            headers=self._service_request_headers(cfg, {"Accept": "application/json"}),
+            timeout=8.0,
+            verify=cfg["verify_ssl"],
+        )
+        login_response.raise_for_status()
+        return session
+
     def download_asset_sync(self, service: str, asset_url: str, timeout_seconds: float = 120.0) -> dict[str, Any]:
         cfg = self._get_config(service)
         url = asset_url.strip()
@@ -735,6 +776,8 @@ class WorksService:
             "base_url": base_url,
             "api_key": api_key,
             "bearer_token": bearer_token,
+            "admin_username": get_env(f"{key}_ADMIN_USERNAME", ""),
+            "admin_password": get_env(f"{key}_ADMIN_PASSWORD", ""),
             "auth_header": auth_header,
             "verify_ssl": verify_ssl,
             "allowed_paths": allowed_paths,
@@ -803,7 +846,10 @@ class WorksService:
         body_text = payload.body_text
         body_json = None if body_text is not None else payload.body
 
-        response = requests.request(
+        session = self._service_session(cfg)
+        requester = session.request if session is not None else requests.request
+
+        response = requester(
             method=payload.method,
             url=url,
             params=payload.query or None,
@@ -885,6 +931,8 @@ class PrinterService:
         self._last_job_state: str | None = None
         self._active_job_context: dict[str, Any] | None = None
         self._last_completed_job_key: str | None = None
+        self._stockworks_color_cache: dict[str, str] | None = None
+        self._stockworks_color_cache_at: float = 0.0
 
     def _load_json_list(self, path: Path) -> list[dict[str, Any]]:
         try:
@@ -2811,6 +2859,131 @@ class PrinterService:
             return f"#{rgb}"
         return "#3a414b"
 
+    @staticmethod
+    def _ams_color_name(color_hex: Any) -> str:
+        if not isinstance(color_hex, str):
+            return ""
+        normalized = PrinterService._normalize_ams_color(color_hex)
+        if not normalized.startswith("#") or len(normalized) != 7:
+            return ""
+        try:
+            red = int(normalized[1:3], 16)
+            green = int(normalized[3:5], 16)
+            blue = int(normalized[5:7], 16)
+        except ValueError:
+            return ""
+
+        palette = [
+            ("Black", (47, 52, 60)),
+            ("White", (255, 255, 255)),
+            ("Gray", (128, 128, 128)),
+            ("Silver", (192, 192, 192)),
+            ("Red", (220, 53, 69)),
+            ("Orange", (255, 140, 0)),
+            ("Yellow", (255, 205, 0)),
+            ("Green", (40, 167, 69)),
+            ("Teal", (32, 178, 170)),
+            ("Blue", (13, 110, 253)),
+            ("Purple", (111, 66, 193)),
+            ("Pink", (214, 51, 132)),
+            ("Brown", (139, 90, 43)),
+            ("Beige", (230, 211, 181)),
+        ]
+        return min(
+            palette,
+            key=lambda item: (
+                (red - item[1][0]) ** 2
+                + (green - item[1][1]) ** 2
+                + (blue - item[1][2]) ** 2
+            ),
+        )[0]
+
+    def _stockworks_color_lookup_config(self) -> dict[str, Any]:
+        list_path = str(get_env("STOCKWORKS_FILAMENT_LIST_PATH", "") or "").strip()
+        ttl_raw = str(get_env("STOCKWORKS_FILAMENT_CACHE_TTL_SECONDS", "300") or "300").strip()
+        try:
+            ttl_seconds = max(0, int(ttl_raw))
+        except ValueError:
+            ttl_seconds = 300
+        return {
+            "list_path": list_path,
+            "items_path": str(
+                get_env("STOCKWORKS_FILAMENT_ITEMS_PATH", "items|data.items|results|filaments|materials|colors|data") or ""
+            ).strip(),
+            "color_hex_path": str(
+                get_env(
+                    "STOCKWORKS_FILAMENT_COLOR_HEX_PATH",
+                    "color_hex|colorHex|hex|colour_hex|colourHex|color.hex|colour.hex|value",
+                )
+                or ""
+            ).strip(),
+            "color_name_path": str(
+                get_env(
+                    "STOCKWORKS_FILAMENT_COLOR_NAME_PATH",
+                    "color_name|colorName|colour_name|colourName|color.label|colour.label|name|label",
+                )
+                or ""
+            ).strip(),
+            "ttl_seconds": ttl_seconds,
+        }
+
+    def _load_stockworks_color_cache(self) -> dict[str, str]:
+        cfg = self._stockworks_color_lookup_config()
+        if not cfg["list_path"]:
+            self._stockworks_color_cache = {}
+            self._stockworks_color_cache_at = time.time()
+            return {}
+
+        now = time.time()
+        if self._stockworks_color_cache is not None and (cfg["ttl_seconds"] <= 0 or now - self._stockworks_color_cache_at < cfg["ttl_seconds"]):
+            return self._stockworks_color_cache
+
+        works = WorksService()
+        service_cfg = works._get_config("stockworks")
+        if not service_cfg.get("configured"):
+            self._stockworks_color_cache = {}
+            self._stockworks_color_cache_at = now
+            return {}
+
+        try:
+            normalized_path = works._ensure_request_allowed(service_cfg, "GET", cfg["list_path"])
+            session = works._service_session(service_cfg)
+            requester = session.get if session is not None else requests.get
+            response = requester(
+                works._build_url(service_cfg["base_url"], normalized_path),
+                headers=works._service_request_headers(service_cfg, {"Accept": "application/json"}),
+                timeout=8.0,
+                verify=service_cfg["verify_ssl"],
+            )
+            response.raise_for_status()
+            payload = response.json()
+            items = works._extract_path_value(payload, cfg["items_path"])
+            if not isinstance(items, list):
+                items = payload if isinstance(payload, list) else []
+
+            mapping: dict[str, str] = {}
+            for item in items:
+                color_hex = self._normalize_ams_color(works._extract_path_value(item, cfg["color_hex_path"]))
+                color_name = works._stringify_library_value(works._extract_path_value(item, cfg["color_name_path"]))
+                if color_hex and color_name:
+                    mapping[color_hex] = color_name
+            self._stockworks_color_cache = mapping
+        except Exception as exc:
+            LOGGER.debug("Failed loading StockWorks filament color catalog: %s", exc)
+            self._stockworks_color_cache = {}
+
+        self._stockworks_color_cache_at = now
+        return self._stockworks_color_cache
+
+    def _resolve_ams_color_name(self, color_hex: Any, is_empty: bool = False) -> str:
+        if is_empty:
+            return ""
+        normalized = self._normalize_ams_color(color_hex)
+        stockworks_name = self._load_stockworks_color_cache().get(normalized, "").strip()
+        if stockworks_name:
+            return stockworks_name
+        return self._ams_color_name(normalized)
+
     def filament_snapshot(self) -> dict[str, Any]:
         if self.client is None:
             return {"loaded_filament": None, "remaining_filament": []}
@@ -2824,16 +2997,20 @@ class PrinterService:
                 loaded_filament = {
                     "ams_index": loaded.get("ams_index"),
                     "slot_index": loaded.get("index"),
+                    "name": loaded.get("name"),
                     "type": loaded.get("type"),
                     "color_hex": loaded.get("color_hex"),
+                    "color_name": loaded.get("color_name"),
                     "remaining_percent": loaded.get("remain_percent"),
                 }
             remaining = [
                 {
                     "ams_index": slot.get("ams_index"),
                     "slot_index": slot.get("index"),
+                    "name": slot.get("name"),
                     "type": slot.get("type"),
                     "color_hex": slot.get("color_hex"),
+                    "color_name": slot.get("color_name"),
                     "remaining_percent": slot.get("remain_percent"),
                     "active": bool(slot.get("active")),
                     "empty": bool(slot.get("empty")),
@@ -3171,6 +3348,7 @@ class PrinterService:
                     "type": tray_type if tray_type else ("Empty" if is_empty else "-"),
                     "name": (getattr(tray, "name", "") or "").strip() if tray is not None else "",
                     "color_hex": self._normalize_ams_color(getattr(tray, "color", None)) if tray is not None else "#2f343c",
+                    "color_name": self._resolve_ams_color_name(getattr(tray, "color", None), is_empty=is_empty) if tray is not None else "",
                     "remain_percent": getattr(tray, "remain", None) if tray is not None else None,
                 }
                 unit_slots.append(slot)

@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import io
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZipFile
 
 import pytest
@@ -13,7 +14,7 @@ from fastapi.testclient import TestClient
 from app.auth import register_admin_auth
 from app.main import create_app
 from app.routers.api import router as api_router
-from app.services import MakerworksSubmitError, PrinterService, WorksService
+from app.services import MakerworksSubmitError, PrinterService, WorksRequest, WorksService
 
 
 def test_build_url_rejects_absolute_urls() -> None:
@@ -603,6 +604,186 @@ def test_youtube_video_snapshot_is_paginated() -> None:
     assert page_two["page"] == 2
     assert page_two["count"] == 2
     assert page_two["items"][0]["video_id"] == "video-2"
+
+
+def test_filament_snapshot_includes_loaded_filament_name() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    loaded_tray = SimpleNamespace(
+        empty=False,
+        type="PLA",
+        name="Bambu PLA Basic Jade White",
+        color="FFFFFFFF",
+        remain=73,
+        active=True,
+    )
+    unit = SimpleNamespace(tray=[loaded_tray], humidity=18, temperature=24)
+    device = SimpleNamespace(
+        ams=SimpleNamespace(
+            data={0: unit},
+            active_ams_index=0,
+            active_tray_index=0,
+        )
+    )
+    service.client = SimpleNamespace(get_device=lambda: device)
+
+    snapshot = service.filament_snapshot()
+
+    assert snapshot["loaded_filament"]["name"] == "Bambu PLA Basic Jade White"
+    assert snapshot["remaining_filament"][0]["name"] == "Bambu PLA Basic Jade White"
+    assert snapshot["loaded_filament"]["type"] == "PLA"
+
+
+def test_filament_snapshot_derives_color_name_from_hex() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    loaded_tray = SimpleNamespace(
+        empty=False,
+        type="PLA",
+        name="",
+        color="FF0000FF",
+        remain=40,
+        active=True,
+    )
+    unit = SimpleNamespace(tray=[loaded_tray], humidity=18, temperature=24)
+    device = SimpleNamespace(
+        ams=SimpleNamespace(
+            data={0: unit},
+            active_ams_index=0,
+            active_tray_index=0,
+        )
+    )
+    service.client = SimpleNamespace(get_device=lambda: device)
+
+    snapshot = service.filament_snapshot()
+
+    assert snapshot["loaded_filament"]["color_name"] == "Red"
+    assert snapshot["remaining_filament"][0]["color_name"] == "Red"
+
+
+def test_filament_snapshot_prefers_stockworks_color_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STOCKWORKS_BASE_URL", "https://stockworks.local")
+    monkeypatch.setenv("STOCKWORKS_ALLOWED_PATHS", "/api/filaments")
+    monkeypatch.setenv("STOCKWORKS_FILAMENT_LIST_PATH", "/api/filaments")
+
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> list[dict[str, str]]:
+            return [{"hex": "#FF0000", "name": "Bambu Scarlet"}]
+
+    def fake_get(url: str, *, headers: dict[str, str], timeout: float, verify: bool) -> FakeResponse:
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        captured["verify"] = verify
+        return FakeResponse()
+
+    monkeypatch.setattr("app.services.requests.get", fake_get)
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    loaded_tray = SimpleNamespace(
+        empty=False,
+        type="PLA",
+        name="",
+        color="FF0000FF",
+        remain=40,
+        active=True,
+    )
+    unit = SimpleNamespace(tray=[loaded_tray], humidity=18, temperature=24)
+    device = SimpleNamespace(
+        ams=SimpleNamespace(
+            data={0: unit},
+            active_ams_index=0,
+            active_tray_index=0,
+        )
+    )
+    service.client = SimpleNamespace(get_device=lambda: device)
+
+    snapshot = service.filament_snapshot()
+
+    assert captured["url"] == "https://stockworks.local/api/filaments"
+    assert snapshot["loaded_filament"]["color_name"] == "Bambu Scarlet"
+    assert snapshot["remaining_filament"][0]["color_name"] == "Bambu Scarlet"
+
+
+def test_works_request_supports_admin_session_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STOCKWORKS_BASE_URL", "https://stockworks.local")
+    monkeypatch.setenv("STOCKWORKS_ALLOWED_PATHS", "/printlab/filaments")
+    monkeypatch.setenv("STOCKWORKS_ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("STOCKWORKS_ADMIN_PASSWORD", "secret")
+
+    events: list[tuple[str, str, object]] = []
+
+    class FakeResponse:
+        def __init__(self, *, text: str = "", json_body: object = None, status_code: int = 200, headers: dict[str, str] | None = None) -> None:
+            self.text = text
+            self._json_body = json_body
+            self.status_code = status_code
+            self.headers = headers or {"content-type": "application/json"}
+            self.ok = status_code < 400
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                raise RuntimeError(f"http {self.status_code}")
+
+        def json(self) -> object:
+            return self._json_body
+
+    class FakeSession:
+        def get(self, url: str, *, headers: dict[str, str], timeout: float, verify: bool) -> FakeResponse:
+            events.append(("GET", url, headers))
+            if url.endswith("/login"):
+                return FakeResponse(
+                    text='<meta name="csrf-token" content="csrf-123" />',
+                    headers={"content-type": "text/html"},
+                )
+            return FakeResponse(json_body=[{"hex": "#FF0000", "name": "Bambu Scarlet"}])
+
+        def post(self, url: str, *, data: dict[str, str], headers: dict[str, str], timeout: float, verify: bool) -> FakeResponse:
+            events.append(("POST", url, data))
+            return FakeResponse(json_body={"ok": True})
+
+        def request(
+            self,
+            *,
+            method: str,
+            url: str,
+            params: dict[str, object] | None,
+            json: object,
+            data: object,
+            headers: dict[str, str],
+            timeout: float,
+            verify: bool,
+        ) -> FakeResponse:
+            events.append((method, url, headers))
+            return FakeResponse(json_body=[{"hex": "#FF0000", "name": "Bambu Scarlet"}])
+
+    monkeypatch.setattr("app.services.requests.Session", lambda: FakeSession())
+
+    service = WorksService()
+    result = service.request_sync("stockworks", WorksRequest(method="GET", path="/printlab/filaments"))
+
+    assert result["ok"] is True
+    assert events[0][0:2] == ("GET", "https://stockworks.local/login")
+    assert events[1] == ("POST", "https://stockworks.local/login", {"username": "admin", "password": "secret", "csrf_token": "csrf-123"})
+    assert events[2][0:2] == ("GET", "https://stockworks.local/printlab/filaments")
 
 
 def _makerworks_api_app() -> FastAPI:

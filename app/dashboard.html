@@ -2884,10 +2884,14 @@
         const slotsHtml = unitSlots.map((slot) => {
           const isActive = !!slot?.active;
           const isEmpty = slot?.empty !== false;
-          const label = (slot?.type || "").trim() || (isEmpty ? "Empty" : "-");
+          const label = (slot?.name || "").trim() || (slot?.type || "").trim() || (isEmpty ? "Empty" : "-");
           const color = slot?.color_hex || "#2f343c";
+          const colorName = (slot?.color_name || "").trim();
           const remain = Number(slot?.remain_percent);
-          const remainText = Number.isFinite(remain) && remain >= 0 ? `${Math.round(remain)}% left` : "-";
+          const remainBits = [];
+          if (colorName && !isEmpty) remainBits.push(colorName);
+          if (Number.isFinite(remain) && remain >= 0) remainBits.push(`${Math.round(remain)}% left`);
+          const remainText = remainBits.length ? remainBits.join(" • ") : "-";
           return `<div class="slot ${isActive ? "active" : ""}">
             <div class="dot" style="background:${escapeHtml(color)};border-color:${isEmpty ? "#525a66" : escapeHtml(color)}"></div>
             <div class="fil" style="opacity:${isEmpty ? "0.7" : "1"}">${escapeHtml(label)}</div>
