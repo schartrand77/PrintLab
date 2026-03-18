@@ -20,7 +20,7 @@
   <DateInstalled/>
   <DonateText/>
   <DonateLink/>
-  <Requires>Mapped /data path and printer credentials (or PRINTERS_JSON).</Requires>
+  <Requires>Mapped /data path, printer credentials (or PRINTERS_JSON), and auth settings including ADMIN_PASSWORD_HASH plus SESSION_SECRET.</Requires>
 
   <Config Name="WebUI Port" Target="8080" Default="8080" Mode="tcp" Description="Print Lab web UI port" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
   <Config Name="Data Path" Target="/data" Default="/mnt/user/appdata/print-lab/data" Mode="rw" Description="Persistent cache/data path (includes printer_names.json)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/print-lab/data</Config>
@@ -40,7 +40,7 @@
   <Config Name="User Language" Target="USER_LANGUAGE" Default="en" Mode="" Description="Language for errors/labels" Type="Variable" Display="advanced" Required="false" Mask="false">en</Config>
   <Config Name="File Cache Path" Target="FILE_CACHE_PATH" Default="/data/cache" Mode="" Description="Internal cache path" Type="Variable" Display="advanced" Required="false" Mask="false">/data/cache</Config>
   <Config Name="Print Cache Count" Target="PRINT_CACHE_COUNT" Default="1" Mode="" Description="Cached print records count" Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
-  <Config Name="Timelapse Cache Count" Target="TIMELAPSE_CACHE_COUNT" Default="0" Mode="" Description="Cached timelapse records count" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+  <Config Name="Timelapse Cache Count" Target="TIMELAPSE_CACHE_COUNT" Default="1" Mode="" Description="Cached timelapse records count. Set to 1 or higher for automatic YouTube uploads." Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
   <Config Name="Usage Hours" Target="USAGE_HOURS" Default="0" Mode="" Description="Usage hours override" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
   <Config Name="Force IP" Target="FORCE_IP" Default="false" Mode="" Description="Force configured IP over discovered IP" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
 
@@ -49,11 +49,31 @@
   <Config Name="Bambu Username" Target="BAMBU_USERNAME" Default="" Mode="" Description="Bambu cloud username (optional)" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="Bambu Auth Token" Target="BAMBU_AUTH_TOKEN" Default="" Mode="" Description="Bambu cloud auth token (optional)" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
 
+  <Config Name="Require Auth" Target="REQUIRE_AUTH" Default="true" Mode="" Description="Require login for UI and API access" Type="Variable" Display="always" Required="true" Mask="false">true</Config>
+  <Config Name="Admin Username" Target="ADMIN_USERNAME" Default="admin" Mode="" Description="Admin login username" Type="Variable" Display="always" Required="true" Mask="false">admin</Config>
+  <Config Name="Admin Email" Target="ADMIN_EMAIL" Default="" Mode="" Description="Optional admin login email" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Admin Password Hash" Target="ADMIN_PASSWORD_HASH" Default="" Mode="" Description="Required hashed admin password. Generate with: python scripts/hash_password.py" Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Session Secret" Target="SESSION_SECRET" Default="" Mode="" Description="Required random secret used to sign session cookies" Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Session TTL Seconds" Target="SESSION_TTL_SECONDS" Default="1800" Mode="" Description="Session lifetime in seconds" Type="Variable" Display="advanced" Required="false" Mask="false">1800</Config>
+  <Config Name="Session Cookie Secure" Target="SESSION_COOKIE_SECURE" Default="false" Mode="" Description="Set true when serving behind HTTPS" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+
   <Config Name="Makerworks Base URL" Target="MAKERWORKS_BASE_URL" Default="" Mode="" Description="Makerworks API base URL" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="Makerworks API Key" Target="MAKERWORKS_API_KEY" Default="" Mode="" Description="Makerworks API key" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="Makerworks Bearer Token" Target="MAKERWORKS_BEARER_TOKEN" Default="" Mode="" Description="Makerworks bearer token" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="Makerworks Auth Header" Target="MAKERWORKS_AUTH_HEADER" Default="X-API-Key" Mode="" Description="Header used for Makerworks API key" Type="Variable" Display="advanced" Required="false" Mask="false">X-API-Key</Config>
   <Config Name="Makerworks Verify SSL" Target="MAKERWORKS_VERIFY_SSL" Default="true" Mode="" Description="Verify SSL for Makerworks requests" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Makerworks Webhook Secret" Target="MAKERWORKS_WEBHOOK_SECRET" Default="" Mode="" Description="Shared secret for Makerworks job callbacks" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Makerworks Submit API Key" Target="MAKERWORKS_SUBMIT_API_KEY" Default="" Mode="" Description="API key accepted for Makerworks submit boundary routes" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Makerworks Submit Bearer Token" Target="MAKERWORKS_SUBMIT_BEARER_TOKEN" Default="" Mode="" Description="Bearer token accepted for Makerworks submit boundary routes" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Makerworks Submit Auth Header" Target="MAKERWORKS_SUBMIT_AUTH_HEADER" Default="X-API-Key" Mode="" Description="Header name for Makerworks submit API key auth" Type="Variable" Display="advanced" Required="false" Mask="false">X-API-Key</Config>
+  <Config Name="Makerworks Allowed Paths" Target="MAKERWORKS_ALLOWED_PATHS" Default="/health,/api/models" Mode="" Description="Comma-separated allowlist for proxy paths" Type="Variable" Display="advanced" Required="false" Mask="false">/health,/api/models</Config>
+  <Config Name="Makerworks Allowed Methods" Target="MAKERWORKS_ALLOWED_METHODS" Default="" Mode="" Description="Optional comma-separated allowlist for proxy methods" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Makerworks Job Callback Enabled" Target="MAKERWORKS_JOB_CALLBACK_ENABLED" Default="false" Mode="" Description="Send job status callbacks to Makerworks" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Makerworks Job Callback Method" Target="MAKERWORKS_JOB_CALLBACK_METHOD" Default="POST" Mode="" Description="HTTP method for Makerworks job callbacks" Type="Variable" Display="advanced" Required="false" Mask="false">POST</Config>
+  <Config Name="Makerworks Job Callback Path Template" Target="MAKERWORKS_JOB_CALLBACK_PATH_TEMPLATE" Default="" Mode="" Description="Path template for Makerworks callbacks, e.g. /api/printlab/jobs/{job_id}" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Makerworks Attach G-code Enabled" Target="MAKERWORKS_ATTACH_GCODE_ENABLED" Default="false" Mode="" Description="Attach successful G-code records back to Makerworks" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Makerworks Attach G-code Method" Target="MAKERWORKS_ATTACH_GCODE_METHOD" Default="POST" Mode="" Description="HTTP method for successful G-code attachment" Type="Variable" Display="advanced" Required="false" Mask="false">POST</Config>
+  <Config Name="Makerworks Attach G-code Path Template" Target="MAKERWORKS_ATTACH_GCODE_PATH_TEMPLATE" Default="" Mode="" Description="Path template for attaching successful G-code records" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
 
   <Config Name="Orderworks Base URL" Target="ORDERWORKS_BASE_URL" Default="" Mode="" Description="Orderworks API base URL" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="Orderworks API Key" Target="ORDERWORKS_API_KEY" Default="" Mode="" Description="Orderworks API key" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
@@ -64,8 +84,35 @@
   <Config Name="Stockworks Base URL" Target="STOCKWORKS_BASE_URL" Default="" Mode="" Description="Stockworks API base URL" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="Stockworks API Key" Target="STOCKWORKS_API_KEY" Default="" Mode="" Description="Stockworks API key" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="Stockworks Bearer Token" Target="STOCKWORKS_BEARER_TOKEN" Default="" Mode="" Description="Stockworks bearer token" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Stockworks Admin Username" Target="STOCKWORKS_ADMIN_USERNAME" Default="" Mode="" Description="Optional Stockworks admin username for form login flows" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Stockworks Admin Password" Target="STOCKWORKS_ADMIN_PASSWORD" Default="" Mode="" Description="Optional Stockworks admin password for form login flows" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="Stockworks Auth Header" Target="STOCKWORKS_AUTH_HEADER" Default="X-API-Key" Mode="" Description="Header used for Stockworks API key" Type="Variable" Display="advanced" Required="false" Mask="false">X-API-Key</Config>
   <Config Name="Stockworks Verify SSL" Target="STOCKWORKS_VERIFY_SSL" Default="true" Mode="" Description="Verify SSL for Stockworks requests" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Stockworks Allowed Paths" Target="STOCKWORKS_ALLOWED_PATHS" Default="/health" Mode="" Description="Comma-separated allowlist for Stockworks proxy paths" Type="Variable" Display="advanced" Required="false" Mask="false">/health</Config>
+  <Config Name="Stockworks Allowed Methods" Target="STOCKWORKS_ALLOWED_METHODS" Default="" Mode="" Description="Optional comma-separated allowlist for Stockworks proxy methods" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Stockworks Filament List Path" Target="STOCKWORKS_FILAMENT_LIST_PATH" Default="/printlab/filaments" Mode="" Description="Path used to fetch Stockworks filament inventory" Type="Variable" Display="advanced" Required="false" Mask="false">/printlab/filaments</Config>
+  <Config Name="Stockworks Filament Items Path" Target="STOCKWORKS_FILAMENT_ITEMS_PATH" Default="items|data.items|results|filaments|materials|colors|data" Mode="" Description="Selector path for filament items in Stockworks responses" Type="Variable" Display="advanced" Required="false" Mask="false">items|data.items|results|filaments|materials|colors|data</Config>
+  <Config Name="Stockworks Filament Color Hex Path" Target="STOCKWORKS_FILAMENT_COLOR_HEX_PATH" Default="color_hex|colorHex|hex|colour_hex|colourHex|color.hex|colour.hex|value" Mode="" Description="Selector path for filament color hex values" Type="Variable" Display="advanced" Required="false" Mask="false">color_hex|colorHex|hex|colour_hex|colourHex|color.hex|colour.hex|value</Config>
+  <Config Name="Stockworks Filament Color Name Path" Target="STOCKWORKS_FILAMENT_COLOR_NAME_PATH" Default="color_name|colorName|colour_name|colourName|color.label|colour.label|name|label" Mode="" Description="Selector path for filament color names" Type="Variable" Display="advanced" Required="false" Mask="false">color_name|colorName|colour_name|colourName|color.label|colour.label|name|label</Config>
+  <Config Name="Stockworks Filament Cache TTL Seconds" Target="STOCKWORKS_FILAMENT_CACHE_TTL_SECONDS" Default="300" Mode="" Description="Stockworks filament cache TTL in seconds" Type="Variable" Display="advanced" Required="false" Mask="false">300</Config>
+
+  <Config Name="YouTube Upload Enabled" Target="YOUTUBE_UPLOAD_ENABLED" Default="false" Mode="" Description="Enable automatic timelapse uploads to YouTube" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="YouTube Client ID" Target="YOUTUBE_CLIENT_ID" Default="" Mode="" Description="OAuth client ID for YouTube uploads" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="YouTube Client Secret" Target="YOUTUBE_CLIENT_SECRET" Default="" Mode="" Description="OAuth client secret for YouTube uploads" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="YouTube Refresh Token" Target="YOUTUBE_REFRESH_TOKEN" Default="" Mode="" Description="OAuth refresh token for YouTube uploads" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="YouTube Privacy Status" Target="YOUTUBE_PRIVACY_STATUS" Default="public" Mode="" Description="Privacy status for uploaded videos" Type="Variable" Display="advanced" Required="false" Mask="false">public</Config>
+  <Config Name="YouTube Category ID" Target="YOUTUBE_CATEGORY_ID" Default="28" Mode="" Description="YouTube category ID" Type="Variable" Display="advanced" Required="false" Mask="false">28</Config>
+  <Config Name="YouTube Title Template" Target="YOUTUBE_TITLE_TEMPLATE" Default="{model_name} - {printer_name}" Mode="" Description="Template used for uploaded video titles" Type="Variable" Display="advanced" Required="false" Mask="false">{model_name} - {printer_name}</Config>
+  <Config Name="YouTube Description Template" Target="YOUTUBE_DESCRIPTION_TEMPLATE" Default="Printed on {printer_name}\nModel: {model_name}\nFile: {file_name}\nCompleted: {completed_at}" Mode="" Description="Template used for uploaded video descriptions" Type="Variable" Display="advanced" Required="false" Mask="false">Printed on {printer_name}\nModel: {model_name}\nFile: {file_name}\nCompleted: {completed_at}</Config>
+  <Config Name="YouTube Tags" Target="YOUTUBE_TAGS" Default="" Mode="" Description="Optional comma-separated tags for uploaded videos" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="YouTube Notify Subscribers" Target="YOUTUBE_NOTIFY_SUBSCRIBERS" Default="false" Mode="" Description="Notify subscribers about uploaded videos" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="YouTube Made For Kids" Target="YOUTUBE_MADE_FOR_KIDS" Default="false" Mode="" Description="Mark uploaded videos as made for kids" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="YouTube Embeddable" Target="YOUTUBE_EMBEDDABLE" Default="true" Mode="" Description="Allow uploaded videos to be embedded" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="YouTube License" Target="YOUTUBE_LICENSE" Default="youtube" Mode="" Description="License for uploaded videos" Type="Variable" Display="advanced" Required="false" Mask="false">youtube</Config>
+  <Config Name="YouTube Public Stats Viewable" Target="YOUTUBE_PUBLIC_STATS_VIEWABLE" Default="true" Mode="" Description="Expose public stats on uploaded videos" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="YouTube Timelapse Wait Seconds" Target="YOUTUBE_TIMELAPSE_WAIT_SECONDS" Default="180" Mode="" Description="How long to wait for a timelapse file before upload" Type="Variable" Display="advanced" Required="false" Mask="false">180</Config>
+  <Config Name="YouTube Timelapse Poll Interval Seconds" Target="YOUTUBE_TIMELAPSE_POLL_INTERVAL_SECONDS" Default="5" Mode="" Description="Polling interval while waiting for timelapse output" Type="Variable" Display="advanced" Required="false" Mask="false">5</Config>
+  <Config Name="YouTube Upload Timeout Seconds" Target="YOUTUBE_UPLOAD_TIMEOUT_SECONDS" Default="900" Mode="" Description="Timeout for YouTube upload requests" Type="Variable" Display="advanced" Required="false" Mask="false">900</Config>
 
   <Config Name="BambuLab Git Ref" Target="HA_BAMBULAB_REF" Default="main" Mode="" Description="Build arg: branch/tag for pybambu source" Type="Variable" Display="advanced" Required="false" Mask="false">main</Config>
   <Config Name="BambuLab Repo URL" Target="HA_BAMBULAB_REPO" Default="https://github.com/greghesp/ha-bambulab.git" Mode="" Description="Build arg: repository for pybambu source" Type="Variable" Display="advanced" Required="false" Mask="false">https://github.com/greghesp/ha-bambulab.git</Config>

@@ -784,24 +784,34 @@ def render_add_printer_html() -> str:
       setPageStatus('');
     }
 
-    function startEditPrinter(printerId) {
+    async function startEditPrinter(printerId) {
       const item = printersById[printerId];
       if (!item || !item.can_edit) {
         setPageStatus('This printer cannot be edited here.', true);
         return;
       }
-      const settings = item.settings || {};
-      setFormMode(printerId);
-      document.getElementById('printerName').value = settings.name || item.name || '';
-      document.getElementById('printerHost').value = settings.host || '';
-      document.getElementById('printerSerial').value = settings.serial || '';
-      document.getElementById('printerAccessCode').value = settings.access_code || '';
-      document.getElementById('printerId').value = item.id || '';
-      document.getElementById('printerLocalMqtt').checked = !!settings.local_mqtt;
-      document.getElementById('printerEnableCamera').checked = !!settings.enable_camera;
-      document.getElementById('printerDisableSslVerify').checked = !!settings.disable_ssl_verify;
-      setPageStatus(`Editing ${item.name}.`);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setPageStatus(`Loading settings for ${item.name}...`);
+      try {
+        const response = await fetch(`/api/printers/${encodeURIComponent(printerId)}/settings`);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.detail || `HTTP ${response.status}`);
+        }
+        const settings = data.settings || {};
+        setFormMode(printerId);
+        document.getElementById('printerName').value = settings.name || item.name || '';
+        document.getElementById('printerHost').value = settings.host || '';
+        document.getElementById('printerSerial').value = settings.serial || '';
+        document.getElementById('printerAccessCode').value = settings.access_code || '';
+        document.getElementById('printerId').value = item.id || '';
+        document.getElementById('printerLocalMqtt').checked = !!settings.local_mqtt;
+        document.getElementById('printerEnableCamera').checked = !!settings.enable_camera;
+        document.getElementById('printerDisableSslVerify').checked = !!settings.disable_ssl_verify;
+        setPageStatus(`Editing ${item.name}.`);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (error) {
+        setPageStatus(`Failed to load printer settings: ${String(error?.message || error)}`, true);
+      }
     }
 
     async function deletePrinter(printerId) {
@@ -1225,7 +1235,7 @@ def render_makerworks_routing_html() -> str:
     .field input { width:100%; border:1px solid var(--line); border-radius:12px; padding:10px 12px; background:var(--panel); color:var(--text); font:inherit; }
     .board { position:relative; background:var(--panel); border:1px solid var(--line); border-radius:20px; min-height:640px; height:calc(100vh - 220px); height:calc(100dvh - 220px); overflow:hidden; flex:1 1 auto; }
     .board-svg { position:absolute; inset:0; z-index:1; pointer-events:none; }
-    .board-grid { position:relative; z-index:2; display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.95fr); gap:10px; padding:12px; align-items:stretch; height:100%; min-height:0; }
+    .board-grid { position:relative; z-index:2; display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.95fr); gap:56px; padding:12px; align-items:stretch; height:100%; min-height:0; }
     .column { display:grid; grid-template-rows:auto minmax(0,1fr); gap:10px; min-height:0; height:100%; }
     .lane-title { font-size:12px; letter-spacing:.4px; text-transform:uppercase; color:var(--muted); font-weight:800; }
     .lane-frame { border:1px solid var(--line); border-radius:16px; background:rgba(255,255,255,.45); padding:10px; display:grid; gap:10px; min-height:0; height:100%; overflow:auto; overscroll-behavior:contain; }

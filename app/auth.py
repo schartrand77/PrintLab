@@ -42,7 +42,7 @@ ROLE_PERMISSIONS = {
 class AuthUser:
     username: str
     email: str | None
-    password: str
+    password_hash: str
     role: str
 
 
@@ -67,7 +67,34 @@ def permissions_for_role(role: str | None) -> list[str]:
     return list(ROLE_PERMISSIONS.get(normalized, ROLE_PERMISSIONS["viewer"]))
 
 
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    derived = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=16384, r=8, p=1, dklen=32)
+    salt_b64 = base64.urlsafe_b64encode(salt).decode("ascii")
+    derived_b64 = base64.urlsafe_b64encode(derived).decode("ascii")
+    return f"scrypt$16384$8$1${salt_b64}${derived_b64}"
+
+
+def _parse_password_hash(password_hash: str) -> tuple[int, int, int, bytes, bytes]:
+    try:
+        algorithm, n_raw, r_raw, p_raw, salt_b64, derived_b64 = password_hash.split("$", 5)
+        if algorithm != "scrypt":
+            raise ValueError("Unsupported password hash algorithm.")
+        salt = base64.urlsafe_b64decode(salt_b64.encode("ascii"))
+        derived = base64.urlsafe_b64decode(derived_b64.encode("ascii"))
+        return int(n_raw), int(r_raw), int(p_raw), salt, derived
+    except (ValueError, binascii.Error) as exc:
+        raise RuntimeError("Invalid password hash format.") from exc
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    n_value, r_value, p_value, salt, expected = _parse_password_hash(password_hash)
+    actual = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=n_value, r=r_value, p=p_value, dklen=len(expected))
+    return hmac.compare_digest(actual, expected)
+
+
 def _load_auth_users() -> tuple[AuthUser, ...]:
+    allow_legacy_plaintext = get_bool("ALLOW_LEGACY_PLAINTEXT_PASSWORDS", False)
     raw = get_env("AUTH_USERS_JSON", "")
     users: list[AuthUser] = []
     if raw:
@@ -80,14 +107,21 @@ def _load_auth_users() -> tuple[AuthUser, ...]:
                     continue
                 username = str(entry.get("username") or "").strip()
                 email = str(entry.get("email") or "").strip().lower() or None
+                password_hash = str(entry.get("password_hash") or "").strip()
                 password = str(entry.get("password") or "")
-                if not username or not password:
+                if password_hash:
+                    _parse_password_hash(password_hash)
+                elif password:
+                    if not allow_legacy_plaintext:
+                        raise RuntimeError("AUTH_USERS_JSON entries must use password_hash instead of password.")
+                    password_hash = hash_password(password)
+                if not username or not password_hash:
                     continue
                 users.append(
                     AuthUser(
                         username=username,
                         email=email,
-                        password=password,
+                        password_hash=password_hash,
                         role=normalize_role(entry.get("role"), "viewer"),
                     )
                 )
@@ -99,12 +133,19 @@ def _load_auth_users() -> tuple[AuthUser, ...]:
         ("operator", "operator", "OPERATOR_PASSWORD"),
         ("viewer", "viewer", "VIEWER_PASSWORD"),
     ):
+        password_hash = str(get_env(f"{role_name.upper()}_PASSWORD_HASH", "") or "").strip()
         password = get_env(password_env, "")
-        if not password:
+        if password_hash:
+            _parse_password_hash(password_hash)
+        elif password:
+            if not allow_legacy_plaintext:
+                raise RuntimeError(f"{role_name.upper()}_PASSWORD is no longer supported; configure {role_name.upper()}_PASSWORD_HASH.")
+            password_hash = hash_password(password)
+        if not password_hash:
             continue
         username = get_env(f"{role_name.upper()}_USERNAME", default_username) or default_username
         email = get_env(f"{role_name.upper()}_EMAIL", "") or None
-        users.append(AuthUser(username=username.strip(), email=(email.strip().lower() if email else None), password=password, role=role_name))
+        users.append(AuthUser(username=username.strip(), email=(email.strip().lower() if email else None), password_hash=password_hash, role=role_name))
 
     deduped: dict[str, AuthUser] = {}
     for user in users:
@@ -116,8 +157,7 @@ def _auth_config() -> AuthConfig:
     require_auth = get_bool("REQUIRE_AUTH", False)
     users = _load_auth_users()
     enabled = bool(users)
-    secret_basis = "|".join(f"{user.username}:{user.email or ''}:{user.role}:{user.password}" for user in users) or "printlab"
-    session_secret = get_env("SESSION_SECRET", "") or hashlib.sha256(secret_basis.encode("utf-8")).hexdigest()
+    session_secret = str(get_env("SESSION_SECRET", "") or "").strip()
     ttl_raw = get_env("SESSION_TTL_SECONDS", "1800") or "1800"
     try:
         ttl_seconds = max(300, min(86400, int(ttl_raw)))
@@ -139,6 +179,8 @@ def validate_auth_configuration() -> None:
     config = _auth_config()
     if config.require_auth and not config.users:
         raise RuntimeError("REQUIRE_AUTH is enabled but no auth users are configured.")
+    if config.enabled and not config.session_secret:
+        raise RuntimeError("SESSION_SECRET must be set when authentication is enabled.")
 
 
 def parse_basic_auth(authorization: str | None) -> tuple[str, str] | None:
@@ -218,7 +260,7 @@ def _find_user(config: AuthConfig, username: str) -> AuthUser | None:
 
 def _find_user_by_credentials(request_username: str, request_password: str, config: AuthConfig) -> AuthUser | None:
     for user in config.users:
-        if _user_matches_identifier(user, request_username) and hmac.compare_digest(request_password, user.password):
+        if _user_matches_identifier(user, request_username) and verify_password(request_password, user.password_hash):
             return user
     return None
 

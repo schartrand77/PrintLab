@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.auth import register_admin_auth
+from app.auth import hash_password, register_admin_auth
 from app.main import create_app
 from app.routers.api import router as api_router
 from app.services import MakerworksSubmitError, PrinterService, WorksRequest, WorksService
@@ -568,6 +568,109 @@ def test_successful_gcode_can_upload_timelapse_to_youtube(monkeypatch: pytest.Mo
     assert captured["upload_bytes"] == b"fake-video"
 
 
+def test_successful_gcode_can_download_sd_timelapse_before_youtube_upload(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = Path("tests/.tmp/youtube-upload-from-ftp")
+    cache_dir = tmp_path / "cache" / "timelapse"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("YOUTUBE_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("YOUTUBE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("YOUTUBE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("YOUTUBE_REFRESH_TOKEN", "refresh-token")
+
+    service = PrinterService(
+        config={
+            "host": "127.0.0.1",
+            "serial": "SERIAL",
+            "access_code": "CODE",
+            "file_cache_path": str(tmp_path / "cache"),
+            "timelapse_cache_count": 1,
+        },
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    record = {
+        "id": "record-ftp-1",
+        "file_name": "widget.3mf",
+        "model_name": "Widget",
+        "completed_at": "2026-03-13T12:00:00+00:00",
+        "youtube": {
+            "uploaded": False,
+            "uploaded_at": None,
+            "last_attempt_at": None,
+            "last_error": None,
+            "status_code": None,
+            "video_id": None,
+            "video_url": None,
+            "path": None,
+            "title": None,
+        },
+    }
+
+    class FakeFtp:
+        def retrlines(self, command: str, callback) -> None:
+            assert command == "LIST /timelapse"
+            callback("-rw-r--r-- 1 user group 10 Mar 13 12:12 video_2026-03-13_12-12-18.mp4")
+
+        def retrbinary(self, command: str, callback) -> None:
+            assert command == "RETR /timelapse/video_2026-03-13_12-12-18.mp4"
+            callback(b"fake-video-from-ftp")
+
+        def quit(self) -> None:
+            return None
+
+    service.client = SimpleNamespace(ftp_connection=lambda: FakeFtp(), connected=True)
+
+    class TokenResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"access_token": "access-token"}
+
+    class InitResponse:
+        status_code = 200
+        headers = {"Location": "https://upload.youtube.test/session"}
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class UploadResponse:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"id": "video-ftp-123"}
+
+    captured: dict[str, object] = {}
+
+    class FakeSession:
+        headers: dict[str, str]
+
+        def __init__(self) -> None:
+            self.headers = {}
+
+        def post(self, url: str, *, params=None, json=None, headers=None, timeout=None):
+            captured["init_url"] = url
+            return InitResponse()
+
+        def put(self, url: str, *, data=None, headers=None, timeout=None):
+            captured["upload_bytes"] = data.read()
+            return UploadResponse()
+
+    monkeypatch.setattr("app.services.requests.post", lambda *args, **kwargs: TokenResponse())
+    monkeypatch.setattr("app.services.requests.Session", FakeSession)
+
+    result = asyncio.run(service._sync_successful_gcode_to_youtube(record, force=True))
+
+    assert result["youtube"]["uploaded"] is True
+    assert result["youtube"]["video_id"] == "video-ftp-123"
+    assert captured["upload_bytes"] == b"fake-video-from-ftp"
+    assert Path(str(result["youtube"]["path"])).exists()
+
+
 def test_youtube_video_snapshot_is_paginated() -> None:
     service = PrinterService(
         config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
@@ -793,9 +896,14 @@ def _makerworks_api_app() -> FastAPI:
     return app
 
 
-def test_makerworks_submit_route_accepts_configured_api_key_auth(monkeypatch) -> None:
+def _set_admin_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
-    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    monkeypatch.setenv("ADMIN_PASSWORD_HASH", hash_password("secret"))
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
+
+
+def test_makerworks_submit_route_accepts_configured_api_key_auth(monkeypatch) -> None:
+    _set_admin_auth(monkeypatch)
     monkeypatch.setenv("MAKERWORKS_SUBMIT_API_KEY", "submit-secret")
 
     captured: dict[str, object] = {}
@@ -844,8 +952,7 @@ def test_makerworks_submit_route_accepts_configured_api_key_auth(monkeypatch) ->
 
 
 def test_makerworks_get_job_route_accepts_bearer_auth(monkeypatch) -> None:
-    monkeypatch.setenv("ADMIN_USERNAME", "admin")
-    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    _set_admin_auth(monkeypatch)
     monkeypatch.setenv("MAKERWORKS_SUBMIT_BEARER_TOKEN", "submit-bearer")
 
     class FakeJobManager:
@@ -866,8 +973,7 @@ def test_makerworks_get_job_route_accepts_bearer_auth(monkeypatch) -> None:
 
 
 def test_makerworks_submit_route_returns_clear_submit_failure_payload(monkeypatch) -> None:
-    monkeypatch.setenv("ADMIN_USERNAME", "admin")
-    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    _set_admin_auth(monkeypatch)
     monkeypatch.setenv("MAKERWORKS_SUBMIT_API_KEY", "submit-secret")
 
     class FakeJobManager:

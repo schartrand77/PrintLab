@@ -22,8 +22,8 @@ This is **not** Home Assistant. It runs as a direct web/API service.
 2. Set admin credentials:
    - `REQUIRE_AUTH=true` is the image default and startup fails if credentials are missing
    - `ADMIN_USERNAME` (default: `admin`)
-   - `ADMIN_PASSWORD`
-   - optional `SESSION_SECRET` to override the cookie signing secret
+   - `ADMIN_PASSWORD_HASH` generated with `python scripts/hash_password.py`
+   - `SESSION_SECRET` set to a random long secret
 3. If using single-printer mode, fill in:
    - `PRINTER_HOST`
    - `PRINTER_SERIAL`

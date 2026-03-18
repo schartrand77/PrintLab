@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from app.auth import CSRF_COOKIE_NAME, SESSION_COOKIE_NAME, auth_router, register_admin_auth, require_role, validate_auth_configuration
+from app.auth import CSRF_COOKIE_NAME, SESSION_COOKIE_NAME, auth_router, hash_password, register_admin_auth, require_role, validate_auth_configuration
 
 
 def _basic(username: str, password: str) -> dict[str, str]:
@@ -35,6 +35,12 @@ def _build_app() -> FastAPI:
     return app
 
 
+def _set_admin_auth(monkeypatch: pytest.MonkeyPatch, password: str = "secret") -> None:
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD_HASH", hash_password(password))
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
+
+
 def test_auth_middleware_allows_requests_when_auth_is_disabled(monkeypatch) -> None:
     monkeypatch.delenv("REQUIRE_AUTH", raising=False)
     monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
@@ -48,15 +54,15 @@ def test_auth_middleware_allows_requests_when_auth_is_disabled(monkeypatch) -> N
 
 def test_validate_auth_configuration_rejects_required_auth_without_password(monkeypatch) -> None:
     monkeypatch.setenv("REQUIRE_AUTH", "true")
-    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    monkeypatch.delenv("ADMIN_PASSWORD_HASH", raising=False)
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
 
     with pytest.raises(RuntimeError, match="REQUIRE_AUTH"):
         validate_auth_configuration()
 
 
 def test_auth_middleware_rejects_invalid_basic_credentials(monkeypatch) -> None:
-    monkeypatch.setenv("ADMIN_USERNAME", "admin")
-    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    _set_admin_auth(monkeypatch)
     app = _build_app()
 
     with TestClient(app) as client:
@@ -66,8 +72,7 @@ def test_auth_middleware_rejects_invalid_basic_credentials(monkeypatch) -> None:
 
 
 def test_auth_middleware_accepts_valid_basic_credentials(monkeypatch) -> None:
-    monkeypatch.setenv("ADMIN_USERNAME", "admin")
-    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    _set_admin_auth(monkeypatch)
     app = _build_app()
 
     with TestClient(app) as client:
@@ -79,7 +84,8 @@ def test_auth_middleware_accepts_valid_basic_credentials(monkeypatch) -> None:
 def test_auth_middleware_accepts_admin_email_basic_credentials(monkeypatch) -> None:
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
     monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
-    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    monkeypatch.setenv("ADMIN_PASSWORD_HASH", hash_password("secret"))
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
     app = _build_app()
 
     with TestClient(app) as client:
@@ -91,7 +97,8 @@ def test_auth_middleware_accepts_admin_email_basic_credentials(monkeypatch) -> N
 def test_login_sets_session_and_session_endpoint_returns_csrf(monkeypatch) -> None:
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
     monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
-    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    monkeypatch.setenv("ADMIN_PASSWORD_HASH", hash_password("secret"))
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
     app = _build_app()
 
     with TestClient(app) as client:
@@ -111,7 +118,8 @@ def test_login_sets_session_and_session_endpoint_returns_csrf(monkeypatch) -> No
 def test_login_accepts_admin_email(monkeypatch) -> None:
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
     monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
-    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    monkeypatch.setenv("ADMIN_PASSWORD_HASH", hash_password("secret"))
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
     app = _build_app()
 
     with TestClient(app) as client:
@@ -123,10 +131,11 @@ def test_login_accepts_admin_email(monkeypatch) -> None:
 
 
 def test_auth_supports_role_specific_users(monkeypatch) -> None:
-    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    monkeypatch.delenv("ADMIN_PASSWORD_HASH", raising=False)
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
     monkeypatch.setenv(
         "AUTH_USERS_JSON",
-        '[{"username":"viewer","password":"view","role":"viewer"},{"username":"ops","email":"ops@example.com","password":"operate","role":"operator"}]',
+        f'[{{"username":"viewer","password_hash":"{hash_password("view")}","role":"viewer"}},{{"username":"ops","email":"ops@example.com","password_hash":"{hash_password("operate")}","role":"operator"}}]',
     )
     app = _build_app()
 
@@ -140,10 +149,11 @@ def test_auth_supports_role_specific_users(monkeypatch) -> None:
 
 
 def test_auth_supports_role_specific_user_email_login(monkeypatch) -> None:
-    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    monkeypatch.delenv("ADMIN_PASSWORD_HASH", raising=False)
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
     monkeypatch.setenv(
         "AUTH_USERS_JSON",
-        '[{"username":"ops","email":"ops@example.com","password":"operate","role":"operator"}]',
+        f'[{{"username":"ops","email":"ops@example.com","password_hash":"{hash_password("operate")}","role":"operator"}}]',
     )
     app = _build_app()
 
@@ -158,8 +168,9 @@ def test_auth_supports_role_specific_user_email_login(monkeypatch) -> None:
 
 
 def test_viewer_cannot_access_operator_route(monkeypatch) -> None:
-    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
-    monkeypatch.setenv("AUTH_USERS_JSON", '[{"username":"viewer","password":"view","role":"viewer"}]')
+    monkeypatch.delenv("ADMIN_PASSWORD_HASH", raising=False)
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
+    monkeypatch.setenv("AUTH_USERS_JSON", f'[{{"username":"viewer","password_hash":"{hash_password("view")}","role":"viewer"}}]')
     app = _build_app()
 
     with TestClient(app) as client:
@@ -172,8 +183,7 @@ def test_viewer_cannot_access_operator_route(monkeypatch) -> None:
 
 
 def test_session_auth_requires_csrf_for_mutations(monkeypatch) -> None:
-    monkeypatch.setenv("ADMIN_USERNAME", "admin")
-    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    _set_admin_auth(monkeypatch)
     app = _build_app()
 
     with TestClient(app) as client:
@@ -187,8 +197,7 @@ def test_session_auth_requires_csrf_for_mutations(monkeypatch) -> None:
 
 
 def test_manifest_and_service_worker_are_public_when_auth_is_enabled(monkeypatch) -> None:
-    monkeypatch.setenv("ADMIN_USERNAME", "admin")
-    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    _set_admin_auth(monkeypatch)
     app = _build_app()
 
     @app.get("/manifest.webmanifest")
@@ -205,3 +214,20 @@ def test_manifest_and_service_worker_are_public_when_auth_is_enabled(monkeypatch
 
     assert manifest_response.status_code == 200
     assert sw_response.status_code == 200
+
+
+def test_validate_auth_configuration_requires_session_secret(monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_PASSWORD_HASH", hash_password("secret"))
+    monkeypatch.delenv("SESSION_SECRET", raising=False)
+
+    with pytest.raises(RuntimeError, match="SESSION_SECRET"):
+        validate_auth_configuration()
+
+
+def test_validate_auth_configuration_rejects_plaintext_passwords(monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret")
+    monkeypatch.delenv("ADMIN_PASSWORD_HASH", raising=False)
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
+
+    with pytest.raises(RuntimeError, match="PASSWORD_HASH"):
+        validate_auth_configuration()

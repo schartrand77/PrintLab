@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.auth import actor_from_request, require_role
+from app.auth import actor_from_request, require_role, role_from_request
 from app.conversion import BatchModelConversionRequest, ModelConversionRequest, convert_model_batch, convert_model_upload, supported_conversion_formats
 from app.errors import api_error, from_exception
 from app.runtime import job_manager, printer_manager, service_or_404, works_service
@@ -49,6 +49,53 @@ def _raise_api_error(exc: Exception) -> None:
     raise from_exception(exc) from exc
 
 
+def _mask_value(value: str, *, keep_start: int = 0, keep_end: int = 4) -> str:
+    raw = str(value or "")
+    if not raw:
+        return ""
+    if len(raw) <= keep_start + keep_end:
+        return "*" * len(raw)
+    hidden = "*" * max(1, len(raw) - keep_start - keep_end)
+    return f"{raw[:keep_start]}{hidden}{raw[-keep_end:]}"
+
+
+def _masked_printer_settings(entry: dict[str, Any]) -> dict[str, Any]:
+    config = entry.get("config") or {}
+    access_code = str(config.get("access_code") or "")
+    return {
+        "name": entry["name"],
+        "host_masked": _mask_value(str(config.get("host") or ""), keep_end=6),
+        "serial_masked": _mask_value(str(config.get("serial") or ""), keep_end=4),
+        "access_code_masked": _mask_value(access_code, keep_end=2) if access_code else "",
+        "has_access_code": bool(access_code),
+        "device_type": config.get("device_type", "unknown"),
+        "local_mqtt": bool(config.get("local_mqtt", True)),
+        "enable_camera": bool(config.get("enable_camera", True)),
+        "disable_ssl_verify": bool(config.get("disable_ssl_verify", False)),
+    }
+
+
+def _full_printer_settings(entry: dict[str, Any]) -> dict[str, Any]:
+    config = entry.get("config") or {}
+    return {
+        "name": entry["name"],
+        "host": str(config.get("host") or ""),
+        "serial": str(config.get("serial") or ""),
+        "access_code": str(config.get("access_code") or ""),
+        "device_type": str(config.get("device_type") or "unknown"),
+        "local_mqtt": bool(config.get("local_mqtt", True)),
+        "enable_camera": bool(config.get("enable_camera", True)),
+        "disable_ssl_verify": bool(config.get("disable_ssl_verify", False)),
+    }
+
+
+def _sanitize_state_payload(payload: dict[str, Any], *, is_admin: bool) -> dict[str, Any]:
+    state = dict(payload)
+    if not is_admin:
+        state["webhooks"] = []
+    return state
+
+
 @router.get("/health")
 async def health() -> dict[str, Any]:
     state = await service_or_404().state()
@@ -88,7 +135,8 @@ async def convert_model_batch_route(request: Request, payload: BatchModelConvers
 
 
 @router.get("/api/printers")
-async def list_printers() -> dict[str, Any]:
+async def list_printers(request: Request) -> dict[str, Any]:
+    is_admin = role_from_request(request) == "admin"
     items: list[dict[str, Any]] = []
     for entry in printer_manager.list_items():
         svc = service_or_404(entry["id"])
@@ -103,7 +151,7 @@ async def list_printers() -> dict[str, Any]:
                 "name": entry["name"],
                 "connected": state.get("connected"),
                 "configured": state.get("configured"),
-                "serial": (state.get("printer") or {}).get("serial"),
+                "serial": (state.get("printer") or {}).get("serial") if is_admin else None,
                 "device_type": (state.get("printer") or {}).get("device_type"),
                 "last_error": state.get("last_error"),
                 "job": {
@@ -126,19 +174,19 @@ async def list_printers() -> dict[str, Any]:
                 "active_alert_count": len(active_alerts) if isinstance(active_alerts, list) else 0,
                 "can_edit": bool(entry.get("is_added")),
                 "can_delete": bool(entry.get("is_added")) and entry["id"] != printer_manager.default_id,
-                "settings": {
-                    "name": entry["name"],
-                    "host": (entry.get("config") or {}).get("host", ""),
-                    "serial": (entry.get("config") or {}).get("serial", ""),
-                    "access_code": (entry.get("config") or {}).get("access_code", ""),
-                    "device_type": (entry.get("config") or {}).get("device_type", "unknown"),
-                    "local_mqtt": bool((entry.get("config") or {}).get("local_mqtt", True)),
-                    "enable_camera": bool((entry.get("config") or {}).get("enable_camera", True)),
-                    "disable_ssl_verify": bool((entry.get("config") or {}).get("disable_ssl_verify", False)),
-                },
+                "settings": (_masked_printer_settings(entry) if is_admin else None),
             }
         )
     return {"default_id": printer_manager.default_id, "items": items}
+
+
+@router.get("/api/printers/{printer_id}/settings")
+async def printer_settings(printer_id: str, request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    for entry in printer_manager.list_items():
+        if entry["id"] == printer_id:
+            return {"printer_id": printer_id, "settings": _full_printer_settings(entry)}
+    raise HTTPException(status_code=404, detail="Printer not found.")
 
 
 @router.post("/api/printers")
@@ -181,13 +229,13 @@ async def rename_printer(printer_id: str, http_request: Request, request: Printe
 
 
 @router.get("/api/state")
-async def get_state() -> dict[str, Any]:
-    return await service_or_404().state()
+async def get_state(request: Request) -> dict[str, Any]:
+    return _sanitize_state_payload(await service_or_404().state(), is_admin=role_from_request(request) == "admin")
 
 
 @router.get("/api/printers/{printer_id}/state")
-async def get_state_by_printer(printer_id: str) -> dict[str, Any]:
-    return await service_or_404(printer_id).state()
+async def get_state_by_printer(printer_id: str, request: Request) -> dict[str, Any]:
+    return _sanitize_state_payload(await service_or_404(printer_id).state(), is_admin=role_from_request(request) == "admin")
 
 
 @router.get("/api/works/services")
@@ -760,7 +808,8 @@ async def system_status() -> dict[str, Any]:
 
 
 @router.get("/api/webhooks")
-async def webhooks() -> dict[str, Any]:
+async def webhooks(request: Request) -> dict[str, Any]:
+    _require_admin(request)
     items: list[dict[str, Any]] = []
     for entry in printer_manager.list_items():
         for hook in service_or_404(entry["id"]).webhooks_snapshot():
@@ -769,7 +818,8 @@ async def webhooks() -> dict[str, Any]:
 
 
 @router.get("/api/printers/{printer_id}/webhooks")
-async def webhooks_by_printer(printer_id: str) -> dict[str, Any]:
+async def webhooks_by_printer(printer_id: str, request: Request) -> dict[str, Any]:
+    _require_admin(request)
     items = service_or_404(printer_id).webhooks_snapshot()
     return {"items": items, "count": len(items)}
 

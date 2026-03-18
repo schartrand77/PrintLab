@@ -1515,6 +1515,96 @@ class PrinterService:
         base = Path(configured) if configured else data_root() / "cache"
         return base / "timelapse"
 
+    def _timelapse_cache_count(self) -> int:
+        try:
+            return max(-1, int(self._configured_settings.get("timelapse_cache_count", 0)))
+        except (TypeError, ValueError):
+            return 0
+
+    def _parse_ftp_list_timestamp(self, raw: str) -> float | None:
+        value = str(raw or "").strip()
+        if not value:
+            return None
+        try:
+            if ":" in value:
+                dt = datetime.strptime(value, "%b %d %H:%M").replace(tzinfo=timezone.utc)
+                now_utc = datetime.now(timezone.utc)
+                dt = dt.replace(year=now_utc.year)
+                delta = dt - now_utc
+                six_months = timedelta(days=190)
+                if delta > six_months:
+                    dt = dt.replace(year=now_utc.year - 1)
+                elif delta < -six_months:
+                    dt = dt.replace(year=now_utc.year + 1)
+            else:
+                dt = datetime.strptime(value, "%b %d %Y").replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    def _download_latest_timelapse_from_printer_sync(self, record: dict[str, Any]) -> Path | None:
+        if self.client is None or self._timelapse_cache_count() == 0:
+            return None
+
+        ftp = self.client.ftp_connection()
+        pattern_time = re.compile(r"^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\S+\s+\d+\s+\d+:\d+)\s+(.+)$")
+        pattern_year = re.compile(r"^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\S+\s+\d+\s+\d+)\s+(.+)$")
+        candidates: list[tuple[float, int, str]] = []
+
+        def parse_line(line: str) -> None:
+            match = pattern_time.match(line) or pattern_year.match(line)
+            if not match:
+                return
+            size_raw, ts_raw, name = match.groups()
+            lowered = name.lower()
+            if lowered.endswith((".mp4", ".avi", ".mov")):
+                parsed_ts = self._parse_ftp_list_timestamp(ts_raw) or 0.0
+                try:
+                    size_value = int(size_raw)
+                except ValueError:
+                    size_value = 0
+                candidates.append((parsed_ts, size_value, f"/timelapse/{name}"))
+
+        try:
+            ftp.retrlines("LIST /timelapse", parse_line)
+            if not candidates:
+                return None
+
+            candidates.sort(key=lambda item: (item[0], item[2]), reverse=True)
+            _mtime, remote_size, remote_path = candidates[0]
+            local_dir = self._timelapse_cache_dir()
+            local_dir.mkdir(parents=True, exist_ok=True)
+            local_path = local_dir / Path(remote_path).name
+
+            if local_path.exists():
+                try:
+                    if remote_size <= 0 or local_path.stat().st_size == remote_size:
+                        return local_path
+                except OSError:
+                    pass
+
+            with local_path.open("wb") as handle:
+                ftp.retrbinary(f"RETR {remote_path}", handle.write)
+
+            keep = self._timelapse_cache_count()
+            if keep >= 0:
+                cached = sorted(
+                    [path for ext in ("*.mp4", "*.avi", "*.mov") for path in local_dir.glob(ext)],
+                    key=lambda path: path.stat().st_mtime,
+                    reverse=True,
+                )
+                for extra in cached[keep:]:
+                    try:
+                        extra.unlink()
+                    except OSError:
+                        continue
+            return local_path
+        finally:
+            try:
+                ftp.quit()
+            except Exception:
+                pass
+
     def _find_latest_timelapse_file(self, record: dict[str, Any]) -> Path | None:
         cache_dir = self._timelapse_cache_dir()
         if not cache_dir.exists():
@@ -1887,6 +1977,15 @@ class PrinterService:
             deadline = time.monotonic() + int(cfg["wait_seconds"])
             while True:
                 selected_path = self._find_latest_timelapse_file(record)
+                if selected_path is None:
+                    try:
+                        selected_path = await asyncio.get_running_loop().run_in_executor(
+                            None,
+                            self._download_latest_timelapse_from_printer_sync,
+                            record,
+                        )
+                    except Exception:
+                        selected_path = None
                 if selected_path is not None:
                     break
                 if time.monotonic() >= deadline:
@@ -2048,8 +2147,14 @@ class PrinterService:
     def alert_rules_snapshot(self) -> list[dict[str, Any]]:
         return list(self._alert_rules)
 
+    def _serialize_webhook(self, item: dict[str, Any]) -> dict[str, Any]:
+        serialized = dict(item)
+        secret = str(serialized.pop("secret", "") or "")
+        serialized["has_secret"] = bool(secret)
+        return serialized
+
     def webhooks_snapshot(self) -> list[dict[str, Any]]:
-        return list(self._webhooks)
+        return [self._serialize_webhook(item) for item in self._webhooks]
 
     def save_webhook(self, request: WebhookSubscriptionRequest, actor: str = "dashboard") -> dict[str, Any]:
         url = str(request.url or "").strip()
