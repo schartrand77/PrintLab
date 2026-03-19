@@ -327,6 +327,21 @@ async def makerworks_library_item(model_id: str, include_raw: bool = True) -> di
         _raise_api_error(exc)
 
 
+@router.get("/api/works/{service}/asset")
+async def works_asset(service: str, url: str, timeout_seconds: float = 20.0) -> Response:
+    try:
+        result = await works_service.download_asset(service, url, timeout_seconds=timeout_seconds)
+        content = result.get("content")
+        if not content:
+            raise HTTPException(status_code=404, detail="Asset not found.")
+        media_type = str(result.get("content_type") or "application/octet-stream")
+        return Response(content=content, media_type=media_type, headers={"Cache-Control": "public, max-age=3600"})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
 @router.get("/api/printers/{printer_id}/works/makerworks/library/{model_id}")
 async def makerworks_library_item_by_printer(printer_id: str, model_id: str, include_raw: bool = True) -> dict[str, Any]:
     service_or_404(printer_id)

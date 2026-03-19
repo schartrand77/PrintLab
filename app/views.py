@@ -1140,10 +1140,11 @@ def render_makerworks_search_html() -> str:
         grid.innerHTML = items.map((item) => {
           const encoded = encodeURIComponent(JSON.stringify(item));
           const openModelHref = item.model_url || item.download_url || '#';
+          const previewUrl = item.thumbnail_proxy_url || item.thumbnail_url || makerworksPlaceholder(item);
           const tags = (Array.isArray(item.tags) ? item.tags : []).slice(0, 3);
           return `
             <article class="card">
-              <div class="preview"><img src="${escapeHtml(item.thumbnail_url || makerworksPlaceholder(item))}" alt="${escapeHtml(item.name || 'MakerWorks model')}" onerror="this.onerror=null;this.src='${escapeHtml(makerworksPlaceholder(item))}'"></div>
+              <div class="preview"><img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(item.name || 'MakerWorks model')}" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${escapeHtml(makerworksPlaceholder(item))}'"></div>
               <div class="body">
                 <div class="name">${escapeHtml(item.name || 'Untitled model')}</div>
                 <div class="meta">${escapeHtml(item.author || 'Unknown creator')}</div>

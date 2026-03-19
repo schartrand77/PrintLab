@@ -136,6 +136,7 @@ def test_makerworks_library_normalizes_common_payload(monkeypatch) -> None:
     assert result["items"][0]["summary"] == "PLA"
     assert result["items"][0]["author"] == "PrintLab"
     assert result["items"][0]["thumbnail_url"] == "https://makerworks.local/thumbs/42.png"
+    assert result["items"][0]["thumbnail_proxy_url"] == "/api/works/makerworks/asset?url=https%3A%2F%2Fmakerworks.local%2Fthumbs%2F42.png"
     assert result["items"][0]["download_url"] == "https://makerworks.local/files/42.3mf"
     assert result["items"][0]["model_url"] == "https://makerworks.local/models/42"
     assert result["items"][0]["printer_handoff_ready"] is True
@@ -172,7 +173,31 @@ def test_makerworks_library_item_normalizes_detail_payload(monkeypatch) -> None:
     assert result["item"]["name"] == "Widget"
     assert result["item"]["printer_handoff_ready"] is True
     assert result["item"]["download_url"] == "https://makerworks.local/files/widget-1.3mf"
+    assert result["item"]["thumbnail_proxy_url"] is None
     assert result["item"]["raw"]["title"] == "Widget"
+
+
+def test_works_asset_endpoint_proxies_service_download(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = TestClient(create_app())
+
+    async def fake_download_asset(service: str, asset_url: str, timeout_seconds: float = 120.0) -> dict[str, object]:
+        assert service == "makerworks"
+        assert asset_url == "https://makerworks.local/thumbs/42.png"
+        assert timeout_seconds == 20.0
+        return {
+            "url": asset_url,
+            "filename": "42.png",
+            "content": b"png-bytes",
+            "content_type": "image/png",
+        }
+
+    monkeypatch.setattr("app.routers.api.works_service.download_asset", fake_download_asset)
+
+    response = client.get("/api/works/makerworks/asset", params={"url": "https://makerworks.local/thumbs/42.png"})
+
+    assert response.status_code == 200
+    assert response.content == b"png-bytes"
+    assert response.headers["content-type"].startswith("image/png")
 
 
 def test_makerworks_library_surfaces_upstream_http_errors(monkeypatch) -> None:

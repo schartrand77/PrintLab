@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 from zipfile import ZipFile
 
@@ -447,6 +447,12 @@ class WorksService:
             return raw
         return f"{base_url.rstrip('/')}/{raw.lstrip('/')}"
 
+    def _external_proxy_url(self, service: str, value: str | None) -> str | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        return f"/api/works/{quote(service, safe='')}/asset?{urlencode({'url': raw})}"
+
     def _request_error_message(self, response: dict[str, Any], fallback: str) -> str:
         if response.get("ok"):
             return fallback
@@ -516,6 +522,7 @@ class WorksService:
             "summary": summary,
             "description": description,
             "thumbnail_url": thumbnail_url,
+            "thumbnail_proxy_url": self._external_proxy_url("makerworks", thumbnail_url),
             "model_url": model_url,
             "download_url": download_url,
             "author": author,
