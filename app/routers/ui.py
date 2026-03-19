@@ -77,4 +77,4 @@ async def printlab_icon() -> FileResponse:
 
 @router.get("/apple-touch-icon.png")
 async def apple_touch_icon() -> FileResponse:
-    return FileResponse(static_dir / "icons" / "apple-touch-icon.png", media_type="image/png")
+    return FileResponse(public_dir / "printlab.png", media_type="image/png")
