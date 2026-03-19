@@ -225,6 +225,8 @@ def render_gallery_html() -> str:
     .sidebar-head-actions { display:flex; align-items:center; gap:8px; }
     .theme-toggle { border:0; border-radius:999px; background:var(--toggle-bg); color:var(--toggle-text); cursor:pointer; padding:6px 10px; font-size:12px; font-weight:600; }
     .theme-toggle:hover { background:var(--toggle-hover); }
+    .install-btn { border:0; border-radius:999px; background:var(--button-bg); color:var(--button-text); cursor:pointer; padding:6px 10px; font-size:12px; font-weight:600; }
+    .install-btn[hidden] { display:none !important; }
     .sidebar-close { border:0; background:transparent; color:var(--close-text); cursor:pointer; font-size:20px; line-height:1; padding:2px 4px; }
     .sidebar h2 { margin:0; font-size:20px; }
     .sidebar p { color:var(--muted); font-size:13px; line-height:1.4; }
@@ -249,6 +251,7 @@ def render_gallery_html() -> str:
     <div class="sidebar-head">
       <h2>Menu</h2>
       <div class="sidebar-head-actions">
+        <button id="installBtn" class="install-btn" type="button" hidden>Install App</button>
         <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color theme">Dark</button>
         <button class="sidebar-close" type="button" aria-label="Close menu" onclick="closeSidebar()">&times;</button>
       </div>
@@ -280,6 +283,7 @@ def render_gallery_html() -> str:
     const sidebarBackdrop = document.getElementById('sidebarBackdrop');
     const themeStorageKey = 'printlab-theme';
     const nativeFetch = window.fetch.bind(window);
+    let deferredInstallPrompt = null;
 
     function readCookie(name) {
       const prefix = `${name}=`;
@@ -323,6 +327,57 @@ def render_gallery_html() -> str:
       sidebar.classList.remove('open');
       sidebarBackdrop.classList.remove('open');
       sidebar.setAttribute('aria-hidden', 'true');
+    }
+
+    async function initPwa() {
+      if (!('serviceWorker' in navigator)) return;
+      try {
+        await navigator.serviceWorker.register('/sw.js');
+      } catch (_error) {}
+      setupInstallPrompt();
+    }
+
+    function setupInstallPrompt() {
+      const installBtn = document.getElementById('installBtn');
+      if (!installBtn) return;
+
+      window.addEventListener('beforeinstallprompt', (event) => {
+        event.preventDefault();
+        deferredInstallPrompt = event;
+        installBtn.hidden = false;
+        installBtn.textContent = 'Install App';
+      });
+
+      installBtn.addEventListener('click', async () => {
+        if (deferredInstallPrompt) {
+          deferredInstallPrompt.prompt();
+          await deferredInstallPrompt.userChoice.catch(() => null);
+          deferredInstallPrompt = null;
+          installBtn.hidden = true;
+          return;
+        }
+        if (isIosStandaloneCandidate()) {
+          installBtn.textContent = 'Use Share > Add to Home Screen';
+          installBtn.hidden = false;
+        }
+      });
+
+      if (isIosStandaloneCandidate()) {
+        installBtn.hidden = false;
+        installBtn.textContent = 'Add to Home Screen';
+      }
+
+      window.addEventListener('appinstalled', () => {
+        installBtn.hidden = true;
+        deferredInstallPrompt = null;
+      });
+    }
+
+    function isIosStandaloneCandidate() {
+      const ua = window.navigator.userAgent.toLowerCase();
+      const isIos = /iphone|ipad|ipod/.test(ua);
+      const inStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+      return isIos && !inStandalone;
     }
 
     function escapeHtml(value) {
@@ -470,6 +525,7 @@ def render_gallery_html() -> str:
       themeToggle.addEventListener('click', toggleTheme);
     }
     applyTheme(document.documentElement.dataset.theme);
+    initPwa();
     loadPrinters();
     setInterval(loadPrinters, 4000);
   </script>

@@ -53,7 +53,11 @@ async def conversion_page() -> str:
 
 @router.get("/manifest.webmanifest")
 async def manifest() -> FileResponse:
-    return FileResponse(static_dir / "manifest.webmanifest", media_type="application/manifest+json")
+    return FileResponse(
+        static_dir / "manifest.webmanifest",
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @router.get("/sw.js")
@@ -73,4 +77,4 @@ async def printlab_icon() -> FileResponse:
 
 @router.get("/apple-touch-icon.png")
 async def apple_touch_icon() -> FileResponse:
-    return FileResponse(public_dir / "printlab.png", media_type="image/png")
+    return FileResponse(static_dir / "icons" / "apple-touch-icon.png", media_type="image/png")
