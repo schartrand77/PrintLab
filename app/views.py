@@ -2265,7 +2265,7 @@ def render_conversion_html() -> str:
           <h2>Convert A Model</h2>
           <div class="dropzone">
             <strong>Select one or more source files</strong>
-            <span class="meta">Supported source and target formats are loaded from the backend at runtime.</span>
+            <span id="uploadLimitHint" class="meta">Supported source and target formats are loaded from the backend at runtime.</span>
             <input id="fileInput" class="field" type="file" multiple>
           </div>
           <div class="form-grid">
@@ -2386,6 +2386,17 @@ def render_conversion_html() -> str:
       return `${(value / (1024 * 1024)).toFixed(2)} MB`;
     }
 
+    function currentUploadLimitBytes() {
+      const value = Number(supportedFormats.max_upload_bytes);
+      return Number.isFinite(value) && value > 0 ? value : 200 * 1024 * 1024;
+    }
+
+    function currentUploadLimitLabel() {
+      const value = Number(supportedFormats.max_upload_mb);
+      if (Number.isFinite(value) && value > 0) return `${value} MB`;
+      return formatBytes(currentUploadLimitBytes());
+    }
+
     function fileExtension(name) {
       const lowered = String(name || "").toLowerCase();
       if (lowered.endsWith(".gcode.3mf")) return "3mf";
@@ -2430,6 +2441,7 @@ def render_conversion_html() -> str:
       const list = document.getElementById("formatList");
       const commonList = document.getElementById("commonConversionList");
       const targetQuickPicks = document.getElementById("targetQuickPicks");
+      const uploadLimitHint = document.getElementById("uploadLimitHint");
       target.innerHTML = supportedFormats.target_formats.map((item) => (
         `<option value="${escapeHtml(item.id)}"${item.id === supportedFormats.recommended_target ? " selected" : ""}>${escapeHtml(item.label)}${item.recommended ? " - Recommended" : ""}</option>`
       )).join("");
@@ -2456,6 +2468,9 @@ def render_conversion_html() -> str:
           <span class="target-chip-note">${escapeHtml(item.recommended ? "Recommended default target" : (item.preserves_scene ? "Keeps scene/material structure" : "Geometry-first export"))}</span>
         </button>
       `).join("");
+      if (uploadLimitHint) {
+        uploadLimitHint.textContent = `Supported source and target formats are loaded from the backend at runtime. Current upload limit: ${currentUploadLimitLabel()} per file.`;
+      }
       targetQuickPicks.querySelectorAll(".target-chip").forEach((button) => {
         button.addEventListener("click", () => {
           target.value = button.dataset.targetId || supportedFormats.recommended_target || "obj";
@@ -2543,8 +2558,9 @@ def render_conversion_html() -> str:
         setStatus(`Unsupported source format: ${unsupported.join(", ")}.`);
         return;
       }
-      if (files.some((file) => file.size > 40 * 1024 * 1024)) {
-        setStatus("The current limit is 40 MB per file.");
+      const maxUploadBytes = currentUploadLimitBytes();
+      if (files.some((file) => file.size > maxUploadBytes)) {
+        setStatus(`The current limit is ${currentUploadLimitLabel()} per file.`);
         return;
       }
 

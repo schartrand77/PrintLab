@@ -27,6 +27,17 @@ def test_supported_conversion_formats_include_obj_target() -> None:
     assert any(item["source"] == "3mf" and item["target"] == "stl" for item in formats["common_conversions"])
     assert any(item["id"] == "glb" and item["preserves_materials"] for item in formats["target_details"])
     assert any(item["id"] == "stl" and item["kind"] == "mesh" for item in formats["source_details"])
+    assert formats["max_upload_mb"] == 200
+    assert formats["max_upload_bytes"] == 200 * 1024 * 1024
+
+
+def test_supported_conversion_formats_respect_env_upload_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONVERSION_MAX_UPLOAD_MB", "512")
+
+    formats = supported_conversion_formats()
+
+    assert formats["max_upload_mb"] == 512
+    assert formats["max_upload_bytes"] == 512 * 1024 * 1024
 
 
 def test_convert_model_bytes_writes_obj_output_with_uvs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -139,3 +150,10 @@ def test_convert_model_batch_returns_mixed_results(monkeypatch: pytest.MonkeyPat
         assert result["items"][1]["ok"] is False
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_convert_model_bytes_respects_env_upload_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONVERSION_MAX_UPLOAD_MB", "1")
+
+    with pytest.raises(ValueError, match="1 MB limit"):
+        convert_model_bytes("too-large.stl", b"x" * (1024 * 1024 + 1), "obj", source_format="stl")

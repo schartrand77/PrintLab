@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from app.config import get_env
 from app.services import data_root
 
 try:
@@ -56,6 +57,7 @@ _WORKER_TIMEOUT_SECONDS = 90
 _SCENE_PRESERVING_TARGETS = {"glb", "dae"}
 _SCENE_LIKE_SOURCES = {"glb", "gltf", "dae", "3mf", "xaml"}
 _GEOMETRY_ONLY_TARGETS = {"obj", "stl", "ply", "off", "3mf"}
+_DEFAULT_MAX_UPLOAD_MB = 200
 
 
 class ModelConversionRequest(BaseModel):
@@ -81,6 +83,16 @@ def _normalize_format(value: str | None) -> str:
     return cleaned
 
 
+def max_conversion_upload_bytes() -> int:
+    raw = str(get_env("CONVERSION_MAX_UPLOAD_MB", str(_DEFAULT_MAX_UPLOAD_MB)) or "").strip()
+    try:
+        value_mb = int(raw)
+    except (TypeError, ValueError):
+        value_mb = _DEFAULT_MAX_UPLOAD_MB
+    value_mb = max(1, value_mb)
+    return value_mb * 1024 * 1024
+
+
 def _available_source_formats() -> list[str]:
     _require_engine()
     available = {str(item).lower() for item in trimesh.available_formats()}
@@ -101,6 +113,7 @@ def _available_target_formats() -> list[str]:
 def supported_conversion_formats() -> dict[str, object]:
     source_formats = _available_source_formats()
     target_formats = _available_target_formats()
+    max_upload_bytes = max_conversion_upload_bytes()
     source_details = [
         {
             "id": item,
@@ -138,6 +151,8 @@ def supported_conversion_formats() -> dict[str, object]:
         "target_formats": target_details,
         "target_details": target_details,
         "recommended_target": "obj" if "obj" in target_formats else (target_formats[0] if target_formats else None),
+        "max_upload_bytes": max_upload_bytes,
+        "max_upload_mb": max_upload_bytes // (1024 * 1024),
         "common_conversions": [
             {"source": "stl", "target": "obj", "label": "STL to OBJ", "note": "Generates UVs automatically for OBJ export when needed."},
             {"source": "3mf", "target": "stl", "label": "3MF to STL", "note": "Useful for slicer and print workflows."},
@@ -261,8 +276,9 @@ def convert_model_bytes(filename: str, content: bytes, target_format: str, sourc
     _require_engine()
     if not content:
         raise ValueError("Uploaded file is empty.")
-    if len(content) > 40 * 1024 * 1024:
-        raise ValueError("Uploaded file exceeds the 40 MB limit.")
+    max_upload_bytes = max_conversion_upload_bytes()
+    if len(content) > max_upload_bytes:
+        raise ValueError(f"Uploaded file exceeds the {max_upload_bytes // (1024 * 1024)} MB limit.")
 
     resolved_source = infer_source_format(filename, source_format)
     resolved_target = _normalize_format(target_format)
