@@ -320,6 +320,14 @@ class WorksService:
             value = f"/{value}"
         return value
 
+    def _merge_path_exprs(self, raw: str, fallback: str) -> str:
+        merged: list[str] = []
+        for item in [*str(raw or "").split("|"), *str(fallback or "").split("|")]:
+            value = item.strip()
+            if value and value not in merged:
+                merged.append(value)
+        return "|".join(merged)
+
     def _env_int(self, name: str, default: int) -> int:
         raw = get_env(name, str(default))
         try:
@@ -340,6 +348,12 @@ class WorksService:
         return value.rstrip("/")
 
     def _makerworks_library_config(self) -> dict[str, Any]:
+        default_thumbnail_paths = (
+            "coverImagePath|thumbnail_url|thumbnail|thumbnail.url|cover.url|image.url|preview_url|"
+            "image|imageUrl|image_path|imagePath|coverImage|cover_image|coverImage.url|cover_image.url|"
+            "images.0.url|images.0.thumbnail_url|thumbnails.0.url|files.0.thumbnail_url|files.0.preview_url|"
+            "assets.0.thumbnail_url|assets.0.preview_url|assets.0.image_url"
+        )
         return {
             "list_path": self._clean_optional_path(get_env("MAKERWORKS_LIBRARY_LIST_PATH", "/api/models"), "/api/models"),
             "detail_path_template": self._clean_optional_path(
@@ -356,9 +370,9 @@ class WorksService:
             "name_path": get_env("MAKERWORKS_LIBRARY_NAME_PATH", "title|name"),
             "summary_path": get_env("MAKERWORKS_LIBRARY_SUMMARY_PATH", "summary|subtitle|excerpt|tagline|material"),
             "description_path": get_env("MAKERWORKS_LIBRARY_DESCRIPTION_PATH", "description|details|content"),
-            "thumbnail_path": get_env(
-                "MAKERWORKS_LIBRARY_THUMBNAIL_PATH",
-                "coverImagePath|thumbnail_url|thumbnail|thumbnail.url|cover.url|image.url|preview_url",
+            "thumbnail_path": self._merge_path_exprs(
+                get_env("MAKERWORKS_LIBRARY_THUMBNAIL_PATH", default_thumbnail_paths),
+                default_thumbnail_paths,
             ),
             "model_url_path": get_env("MAKERWORKS_LIBRARY_MODEL_URL_PATH", "href|url|model_url|links.self|links.web"),
             "download_url_path": get_env(
@@ -607,7 +621,9 @@ class WorksService:
         if not (url.startswith("http://") or url.startswith("https://")):
             url = self._build_url(cfg["base_url"], url)
 
-        response = requests.get(
+        session = self._service_session(cfg)
+        requester = session.get if session is not None else requests.get
+        response = requester(
             url,
             headers=self._service_request_headers(cfg),
             timeout=timeout_seconds,

@@ -142,6 +142,39 @@ def test_makerworks_library_normalizes_common_payload(monkeypatch) -> None:
     assert result["items"][0]["printer_handoff_ready"] is True
 
 
+def test_makerworks_library_thumbnail_path_keeps_fallback_fields_when_env_is_legacy(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+    monkeypatch.setenv("MAKERWORKS_LIBRARY_THUMBNAIL_PATH", "coverImagePath")
+
+    class FakeResponse:
+        ok = True
+        status_code = 200
+        headers = {"content-type": "application/json"}
+
+        def json(self) -> dict[str, object]:
+            return {
+                "models": [
+                    {
+                        "id": 99,
+                        "title": "Image URL Model",
+                        "imageUrl": "/thumbs/99.png",
+                    }
+                ],
+                "total": 1,
+            }
+
+        @property
+        def text(self) -> str:
+            return ""
+
+    monkeypatch.setattr("app.services.requests.request", lambda **kwargs: FakeResponse())
+    service = WorksService()
+
+    result = service.makerworks_library_sync()
+
+    assert result["items"][0]["thumbnail_url"] == "https://makerworks.local/thumbs/99.png"
+
+
 def test_makerworks_library_item_normalizes_detail_payload(monkeypatch) -> None:
     monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
 
@@ -198,6 +231,52 @@ def test_works_asset_endpoint_proxies_service_download(monkeypatch: pytest.Monke
     assert response.status_code == 200
     assert response.content == b"png-bytes"
     assert response.headers["content-type"].startswith("image/png")
+
+
+def test_download_asset_supports_admin_session_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+    monkeypatch.setenv("MAKERWORKS_ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("MAKERWORKS_ADMIN_PASSWORD", "secret")
+
+    events: list[tuple[str, str, object]] = []
+
+    class FakeResponse:
+        def __init__(self, *, text: str = "", content: bytes = b"", status_code: int = 200, headers: dict[str, str] | None = None) -> None:
+            self.text = text
+            self.content = content
+            self.status_code = status_code
+            self.headers = headers or {"content-type": "application/octet-stream"}
+            self.ok = status_code < 400
+            self.url = "https://makerworks.local/thumbs/42.png"
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                raise RuntimeError(f"http {self.status_code}")
+
+    class FakeSession:
+        def get(self, url: str, *, headers: dict[str, str], timeout: float, verify: bool) -> FakeResponse:
+            events.append(("GET", url, headers))
+            if url.endswith("/login"):
+                return FakeResponse(
+                    text='<meta name="csrf-token" content="csrf-123" />',
+                    headers={"content-type": "text/html"},
+                )
+            return FakeResponse(content=b"image-bytes", headers={"content-type": "image/png"})
+
+        def post(self, url: str, *, data: dict[str, str], headers: dict[str, str], timeout: float, verify: bool) -> FakeResponse:
+            events.append(("POST", url, data))
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.requests.Session", lambda: FakeSession())
+
+    service = WorksService()
+    result = service.download_asset_sync("makerworks", "https://makerworks.local/thumbs/42.png")
+
+    assert result["content"] == b"image-bytes"
+    assert result["content_type"] == "image/png"
+    assert events[0][0:2] == ("GET", "https://makerworks.local/login")
+    assert events[1] == ("POST", "https://makerworks.local/login", {"username": "admin", "password": "secret", "csrf_token": "csrf-123"})
+    assert events[2][0:2] == ("GET", "https://makerworks.local/thumbs/42.png")
 
 
 def test_makerworks_library_surfaces_upstream_http_errors(monkeypatch) -> None:

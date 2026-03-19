@@ -1064,7 +1064,11 @@ def render_makerworks_search_html() -> str:
     function openSidebar() { document.getElementById('sidebar').classList.add('open'); document.getElementById('sidebarBackdrop').classList.add('open'); }
     function closeSidebar() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebarBackdrop').classList.remove('open'); }
     function escapeHtml(value) { return String(value ?? '').replace(/[&<>\"']/g, (char) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;' }[char])); }
-    function makerworksPlaceholder(item) { const text = encodeURIComponent((item?.name || 'MakerWorks').slice(0, 32)); return `https://placehold.co/480x320/e8f0fb/23405c?text=${text}`; }
+    function makerworksPlaceholder(item) {
+      const label = String(item?.name || 'MakerWorks').slice(0, 32);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320" viewBox="0 0 480 320"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#edf5fd"/><stop offset="1" stop-color="#d6e8f7"/></linearGradient></defs><rect width="480" height="320" fill="url(#g)"/><rect x="32" y="32" width="416" height="256" rx="22" fill="#ffffff" fill-opacity=".55" stroke="#8fb2cf" stroke-opacity=".55"/><text x="240" y="162" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="28" font-weight="700" fill="#23405c">${escapeHtml(label)}</text></svg>`;
+      return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+    }
     function getRoutingModels() { try { return JSON.parse(localStorage.getItem(routingKey) || '[]'); } catch (_error) { return []; } }
     function saveRoutingModels(items) { localStorage.setItem(routingKey, JSON.stringify(items)); renderRoutingList(); }
     function showNotice(message) {
