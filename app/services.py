@@ -26,6 +26,22 @@ from pydantic import BaseModel, Field
 from app.config import get_bool, get_env
 
 try:
+    import numpy as np
+except ImportError:  # pragma: no cover - depends on local environment
+    np = None  # type: ignore[assignment]
+
+try:
+    from PIL import Image, ImageDraw
+except ImportError:  # pragma: no cover - depends on local environment
+    Image = None  # type: ignore[assignment]
+    ImageDraw = None  # type: ignore[assignment]
+
+try:
+    import trimesh
+except ImportError:  # pragma: no cover - depends on local environment
+    trimesh = None  # type: ignore[assignment]
+
+try:
     from pybambu import BambuClient
     from pybambu.commands import PAUSE, PRINT_PROJECT_FILE_TEMPLATE, RESUME, STOP
     from pybambu.const import FansEnum, TempEnum
@@ -467,6 +483,23 @@ class WorksService:
             return None
         return f"/api/works/{quote(service, safe='')}/asset?{urlencode({'url': raw})}"
 
+    def _mesh_preview_proxy_url(self, service: str, value: str | None) -> str | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        return f"/api/works/{quote(service, safe='')}/mesh-preview?{urlencode({'url': raw})}"
+
+    def _derive_preview_mesh_path(self, value: str | None) -> str | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        lowered = raw.lower()
+        if lowered.endswith(".stl"):
+            return raw
+        if lowered.endswith(".3mf"):
+            return f"{raw[:-4]}-preview.stl"
+        return None
+
     def _request_error_message(self, response: dict[str, Any], fallback: str) -> str:
         if response.get("ok"):
             return fallback
@@ -509,17 +542,29 @@ class WorksService:
         name = self._stringify_library_value(self._extract_path_value(item, cfg["name_path"])) or "Untitled model"
         summary = self._stringify_library_value(self._extract_path_value(item, cfg["summary_path"]))
         description = self._stringify_library_value(self._extract_path_value(item, cfg["description_path"]))
+        raw_thumbnail = self._stringify_library_value(self._extract_path_value(item, cfg["thumbnail_path"]))
+        raw_download = self._stringify_library_value(self._extract_path_value(item, cfg["download_url_path"]))
+        raw_preview_mesh = (
+            self._stringify_library_value(
+                self._extract_path_value(
+                    item,
+                    "viewerFilePath|previewFilePath|parts.0.previewFilePath|preview_mesh_url|preview_mesh|preview.url",
+                )
+            )
+            or self._derive_preview_mesh_path(raw_download)
+        )
         thumbnail_url = self._absolutize_external_url(
             base_url,
-            self._stringify_library_value(self._extract_path_value(item, cfg["thumbnail_path"])),
+            raw_thumbnail,
         )
+        preview_mesh_url = self._absolutize_external_url(base_url, raw_preview_mesh)
         model_url = self._absolutize_external_url(
             base_url,
             self._stringify_library_value(self._extract_path_value(item, cfg["model_url_path"])),
         )
         download_url = self._absolutize_external_url(
             base_url,
-            self._stringify_library_value(self._extract_path_value(item, cfg["download_url_path"])),
+            raw_download,
         )
         author = self._stringify_library_value(self._extract_path_value(item, cfg["author_path"]))
         tags = self._listify_library_value(self._extract_path_value(item, cfg["tags_path"]))
@@ -536,7 +581,9 @@ class WorksService:
             "summary": summary,
             "description": description,
             "thumbnail_url": thumbnail_url,
-            "thumbnail_proxy_url": self._external_proxy_url("makerworks", thumbnail_url),
+            "thumbnail_proxy_url": self._external_proxy_url("makerworks", thumbnail_url)
+            or self._mesh_preview_proxy_url("makerworks", preview_mesh_url),
+            "preview_mesh_url": preview_mesh_url,
             "model_url": model_url,
             "download_url": download_url,
             "author": author,
@@ -629,6 +676,11 @@ class WorksService:
             timeout=timeout_seconds,
             verify=cfg["verify_ssl"],
         )
+        redirected_path = urlsplit(str(response.url or "")).path.lower()
+        if redirected_path.endswith("/login") or "text/html" in str(response.headers.get("content-type") or "").lower():
+            raise RuntimeError(
+                f"{service} asset download requires login. Set {str(service).upper()}_ADMIN_USERNAME and {str(service).upper()}_ADMIN_PASSWORD."
+            )
         if not response.ok:
             error_payload = {
                 "ok": response.ok,
@@ -643,6 +695,86 @@ class WorksService:
     async def download_asset(self, service: str, asset_url: str, timeout_seconds: float = 120.0) -> dict[str, Any]:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, lambda: self.download_asset_sync(service, asset_url, timeout_seconds))
+
+    def render_mesh_preview_sync(self, service: str, asset_url: str, timeout_seconds: float = 30.0) -> tuple[bytes, str]:
+        if trimesh is None or np is None or Image is None or ImageDraw is None:
+            raise RuntimeError("Mesh preview rendering is unavailable.")
+
+        asset = self.download_asset_sync(service, asset_url, timeout_seconds=timeout_seconds)
+        content = bytes(asset.get("content") or b"")
+        if not content:
+            raise ValueError("Preview mesh is empty.")
+
+        file_type = Path(urlsplit(str(asset.get("url") or asset_url)).path).suffix.lower().lstrip(".") or "stl"
+        loaded = trimesh.load(io.BytesIO(content), file_type=file_type, force="mesh")
+        if isinstance(loaded, trimesh.Scene):
+            mesh = loaded.to_mesh()
+        else:
+            mesh = loaded
+        if mesh is None or getattr(mesh, "is_empty", False):
+            raise ValueError("Preview mesh could not be loaded.")
+
+        vertices = np.asarray(mesh.vertices, dtype=float)
+        faces = np.asarray(mesh.faces, dtype=int)
+        if vertices.size == 0 or faces.size == 0:
+            raise ValueError("Preview mesh has no geometry.")
+
+        center = (vertices.min(axis=0) + vertices.max(axis=0)) / 2.0
+        vertices = vertices - center
+        scale = float(np.ptp(vertices, axis=0).max())
+        if not np.isfinite(scale) or scale <= 0:
+            scale = 1.0
+        vertices = vertices / scale
+
+        yaw = np.deg2rad(35.0)
+        pitch = np.deg2rad(-25.0)
+        rot_y = np.array([[np.cos(yaw), 0.0, np.sin(yaw)], [0.0, 1.0, 0.0], [-np.sin(yaw), 0.0, np.cos(yaw)]])
+        rot_x = np.array([[1.0, 0.0, 0.0], [0.0, np.cos(pitch), -np.sin(pitch)], [0.0, np.sin(pitch), np.cos(pitch)]])
+        projected = vertices @ rot_y.T @ rot_x.T
+
+        width, height = 480, 320
+        margin = 28.0
+        xy = projected[:, :2]
+        xy_min = xy.min(axis=0)
+        xy_max = xy.max(axis=0)
+        span = np.maximum(xy_max - xy_min, 1e-6)
+        fit = min((width - margin * 2) / span[0], (height - margin * 2) / span[1])
+        points = (xy - (xy_min + xy_max) / 2.0) * fit
+        points[:, 0] += width / 2.0
+        points[:, 1] = height / 2.0 - points[:, 1]
+
+        face_points = points[faces]
+        face_depths = projected[faces][:, :, 2].mean(axis=1)
+        face_vertices = projected[faces]
+        normals = np.cross(face_vertices[:, 1] - face_vertices[:, 0], face_vertices[:, 2] - face_vertices[:, 0])
+        norm_lengths = np.linalg.norm(normals, axis=1, keepdims=True)
+        normals = np.divide(normals, np.maximum(norm_lengths, 1e-9))
+        light_dir = np.array([0.35, -0.45, 0.82])
+        light_dir = light_dir / np.linalg.norm(light_dir)
+        brightness = np.clip(normals @ light_dir, -0.2, 1.0)
+
+        image = Image.new("RGBA", (width, height), (237, 245, 253, 255))
+        draw = ImageDraw.Draw(image, "RGBA")
+        draw.rounded_rectangle((10, 10, width - 10, height - 10), radius=24, fill=(255, 255, 255, 110), outline=(166, 194, 219, 140), width=1)
+
+        for face_index in np.argsort(face_depths):
+            polygon = [tuple(map(float, point)) for point in face_points[face_index]]
+            shade = float(0.45 + 0.4 * brightness[face_index])
+            fill = (
+                int(max(0, min(255, 46 + 94 * shade))),
+                int(max(0, min(255, 84 + 102 * shade))),
+                int(max(0, min(255, 122 + 108 * shade))),
+                235,
+            )
+            draw.polygon(polygon, fill=fill, outline=(24, 54, 82, 72))
+
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue(), "image/png"
+
+    async def render_mesh_preview(self, service: str, asset_url: str, timeout_seconds: float = 30.0) -> tuple[bytes, str]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: self.render_mesh_preview_sync(service, asset_url, timeout_seconds))
 
     def _makerworks_library_items(self, body: Any, cfg: dict[str, Any]) -> list[Any]:
         if isinstance(body, list):

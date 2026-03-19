@@ -99,7 +99,7 @@ Interactive API docs are published at:
 
 Configure each external system in `.env`:
 
-- `MAKERWORKS_BASE_URL`, `MAKERWORKS_API_KEY`, `MAKERWORKS_BEARER_TOKEN`, `MAKERWORKS_AUTH_HEADER`, `MAKERWORKS_VERIFY_SSL`, `MAKERWORKS_ALLOWED_PATHS`, `MAKERWORKS_ALLOWED_METHODS`
+- `MAKERWORKS_BASE_URL`, `MAKERWORKS_API_KEY`, `MAKERWORKS_BEARER_TOKEN`, `MAKERWORKS_ADMIN_USERNAME`, `MAKERWORKS_ADMIN_PASSWORD`, `MAKERWORKS_AUTH_HEADER`, `MAKERWORKS_VERIFY_SSL`, `MAKERWORKS_ALLOWED_PATHS`, `MAKERWORKS_ALLOWED_METHODS`
 - Optional MakerWorks job callbacks:
   `MAKERWORKS_JOB_CALLBACK_ENABLED`, `MAKERWORKS_JOB_CALLBACK_METHOD`, `MAKERWORKS_JOB_CALLBACK_PATH_TEMPLATE`
 - Optional YouTube timelapse uploads:
@@ -116,6 +116,7 @@ Auth behavior:
 - Basic Auth still works for API clients.
 - If `*_API_KEY` is set, it is sent as `*_AUTH_HEADER` (default `X-API-Key`).
 - If `*_BEARER_TOKEN` is set, it is sent as `Authorization: Bearer ...`.
+- If `*_ADMIN_USERNAME` and `*_ADMIN_PASSWORD` are set, PrintLab can log into that service to fetch protected assets such as MakerWorks preview meshes and thumbnails.
 - `*_ALLOWED_PATHS` is a comma-separated prefix allowlist. Requests outside the list are rejected.
 - `*_ALLOWED_METHODS` is optional. If set, only those methods are proxied.
 - All env vars also support Docker-style file-based secrets via `*_FILE`.

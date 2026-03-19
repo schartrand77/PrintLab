@@ -342,6 +342,15 @@ async def works_asset(service: str, url: str, timeout_seconds: float = 20.0) -> 
         _raise_api_error(exc)
 
 
+@router.get("/api/works/{service}/mesh-preview")
+async def works_mesh_preview(service: str, url: str, timeout_seconds: float = 30.0) -> Response:
+    try:
+        content, media_type = await works_service.render_mesh_preview(service, url, timeout_seconds=timeout_seconds)
+        return Response(content=content, media_type=media_type, headers={"Cache-Control": "public, max-age=3600"})
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
 @router.get("/api/printers/{printer_id}/works/makerworks/library/{model_id}")
 async def makerworks_library_item_by_printer(printer_id: str, model_id: str, include_raw: bool = True) -> dict[str, Any]:
     service_or_404(printer_id)

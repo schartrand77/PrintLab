@@ -175,6 +175,40 @@ def test_makerworks_library_thumbnail_path_keeps_fallback_fields_when_env_is_leg
     assert result["items"][0]["thumbnail_url"] == "https://makerworks.local/thumbs/99.png"
 
 
+def test_makerworks_library_derives_preview_mesh_when_thumbnail_is_missing(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+
+    class FakeResponse:
+        ok = True
+        status_code = 200
+        headers = {"content-type": "application/json"}
+
+        def json(self) -> dict[str, object]:
+            return {
+                "models": [
+                    {
+                        "id": "preview-1",
+                        "title": "Preview Model",
+                        "filePath": "/models/preview-1.3mf",
+                    }
+                ],
+                "total": 1,
+            }
+
+        @property
+        def text(self) -> str:
+            return ""
+
+    monkeypatch.setattr("app.services.requests.request", lambda **kwargs: FakeResponse())
+    service = WorksService()
+
+    result = service.makerworks_library_sync()
+
+    assert result["items"][0]["thumbnail_url"] is None
+    assert result["items"][0]["preview_mesh_url"] == "https://makerworks.local/models/preview-1-preview.stl"
+    assert result["items"][0]["thumbnail_proxy_url"] == "/api/works/makerworks/mesh-preview?url=https%3A%2F%2Fmakerworks.local%2Fmodels%2Fpreview-1-preview.stl"
+
+
 def test_makerworks_library_item_normalizes_detail_payload(monkeypatch) -> None:
     monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
 
@@ -206,7 +240,7 @@ def test_makerworks_library_item_normalizes_detail_payload(monkeypatch) -> None:
     assert result["item"]["name"] == "Widget"
     assert result["item"]["printer_handoff_ready"] is True
     assert result["item"]["download_url"] == "https://makerworks.local/files/widget-1.3mf"
-    assert result["item"]["thumbnail_proxy_url"] is None
+    assert result["item"]["thumbnail_proxy_url"] == "/api/works/makerworks/mesh-preview?url=https%3A%2F%2Fmakerworks.local%2Ffiles%2Fwidget-1-preview.stl"
     assert result["item"]["raw"]["title"] == "Widget"
 
 
@@ -230,6 +264,24 @@ def test_works_asset_endpoint_proxies_service_download(monkeypatch: pytest.Monke
 
     assert response.status_code == 200
     assert response.content == b"png-bytes"
+    assert response.headers["content-type"].startswith("image/png")
+
+
+def test_works_mesh_preview_endpoint_renders_service_preview(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = TestClient(create_app())
+
+    async def fake_render_mesh_preview(service: str, asset_url: str, timeout_seconds: float = 30.0) -> tuple[bytes, str]:
+        assert service == "makerworks"
+        assert asset_url == "https://makerworks.local/models/preview-1-preview.stl"
+        assert timeout_seconds == 30.0
+        return (b"png-preview", "image/png")
+
+    monkeypatch.setattr("app.routers.api.works_service.render_mesh_preview", fake_render_mesh_preview)
+
+    response = client.get("/api/works/makerworks/mesh-preview", params={"url": "https://makerworks.local/models/preview-1-preview.stl"})
+
+    assert response.status_code == 200
+    assert response.content == b"png-preview"
     assert response.headers["content-type"].startswith("image/png")
 
 
@@ -277,6 +329,24 @@ def test_download_asset_supports_admin_session_login(monkeypatch: pytest.MonkeyP
     assert events[0][0:2] == ("GET", "https://makerworks.local/login")
     assert events[1] == ("POST", "https://makerworks.local/login", {"username": "admin", "password": "secret", "csrf_token": "csrf-123"})
     assert events[2][0:2] == ("GET", "https://makerworks.local/thumbs/42.png")
+
+
+def test_download_asset_surfaces_login_requirement_without_service_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+
+    class FakeResponse:
+        ok = True
+        status_code = 200
+        text = "<html>login</html>"
+        content = b"<html>login</html>"
+        url = "https://makerworks.local/login?next=%2Fthumbs%2F42.png"
+        headers = {"content-type": "text/html; charset=utf-8"}
+
+    monkeypatch.setattr("app.services.requests.get", lambda *args, **kwargs: FakeResponse())
+
+    service = WorksService()
+    with pytest.raises(RuntimeError, match="MAKERWORKS_ADMIN_USERNAME"):
+        service.download_asset_sync("makerworks", "https://makerworks.local/thumbs/42.png")
 
 
 def test_makerworks_library_surfaces_upstream_http_errors(monkeypatch) -> None:
