@@ -2266,7 +2266,7 @@ def render_conversion_html() -> str:
           <div class="dropzone">
             <strong>Select one or more source files</strong>
             <span class="meta">Supported source and target formats are loaded from the backend at runtime.</span>
-            <input id="fileInput" class="field" type="file" multiple accept=".3mf,.gcode.3mf,.dae,.dxf,.glb,.gltf,.obj,.off,.ply,.stl,.xaml,.xyz">
+            <input id="fileInput" class="field" type="file" multiple>
           </div>
           <div class="form-grid">
             <label class="label">Target format
@@ -2393,18 +2393,30 @@ def render_conversion_html() -> str:
       return parts.length > 1 ? parts.pop() : "";
     }
 
+    function detectedSourceForFile(file) {
+      const detected = fileExtension(file?.name || "");
+      const supported = new Set((supportedFormats.source_formats || []).map((item) => String(item || "").toLowerCase()));
+      return supported.has(detected) ? detected : "";
+    }
+
     function updateFileSummary() {
       const files = Array.from(document.getElementById("fileInput").files || []);
       const first = files[0] || null;
       const totalBytes = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
+      const unsupported = files.filter((file) => !detectedSourceForFile(file)).map((file) => file.name);
       document.getElementById("fileName").textContent = !files.length
         ? "No file selected"
         : (files.length === 1 ? first.name : `${files.length} files selected`);
       document.getElementById("detectedSource").textContent = !first
         ? "-"
-        : (files.length === 1 ? (fileExtension(first.name) || "Unknown") : "Mixed / batch");
+        : (files.length === 1 ? (detectedSourceForFile(first) || fileExtension(first.name) || "Unknown") : "Mixed / batch");
       document.getElementById("fileSize").textContent = files.length ? formatBytes(totalBytes) : "-";
       document.getElementById("convertBtn").textContent = files.length > 1 ? "Convert Files" : "Convert File";
+      if (unsupported.length) {
+        setStatus(`Unsupported source format: ${unsupported[0]}${unsupported.length > 1 ? ` and ${unsupported.length - 1} more` : ""}.`);
+      } else if (files.length) {
+        setStatus(`Ready to convert ${files.length === 1 ? first.name : `${files.length} files`}.`);
+      }
       renderFormatCapabilities();
     }
 
@@ -2524,6 +2536,11 @@ def render_conversion_html() -> str:
       const files = Array.from(document.getElementById("fileInput").files || []);
       if (!files.length) {
         setStatus("Choose a file first.");
+        return;
+      }
+      const unsupported = files.filter((file) => !detectedSourceForFile(file)).map((file) => file.name);
+      if (unsupported.length) {
+        setStatus(`Unsupported source format: ${unsupported.join(", ")}.`);
         return;
       }
       if (files.some((file) => file.size > 40 * 1024 * 1024)) {
