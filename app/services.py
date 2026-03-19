@@ -327,6 +327,18 @@ class WorksService:
         except (TypeError, ValueError):
             return default
 
+    def _normalize_base_url(self, service: str, raw: str) -> str:
+        value = str(raw or "").strip()
+        if not value:
+            return ""
+        if "://" not in value:
+            LOGGER.warning("%s BASE_URL is missing a scheme; assuming http://", service.upper())
+            value = f"http://{value.lstrip('/')}"
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError(f"Invalid {service.upper()}_BASE_URL: {value}")
+        return value.rstrip("/")
+
     def _makerworks_library_config(self) -> dict[str, Any]:
         return {
             "list_path": self._clean_optional_path(get_env("MAKERWORKS_LIBRARY_LIST_PATH", "/api/models"), "/api/models"),
@@ -758,7 +770,7 @@ class WorksService:
         if key is None:
             raise ValueError(f"Unknown integration service: {service}")
 
-        base_url = get_env(f"{key}_BASE_URL", "")
+        base_url = self._normalize_base_url(service.lower(), get_env(f"{key}_BASE_URL", ""))
         api_key = get_env(f"{key}_API_KEY", "")
         bearer_token = get_env(f"{key}_BEARER_TOKEN", "")
         auth_header = get_env(f"{key}_AUTH_HEADER", "X-API-Key") or "X-API-Key"

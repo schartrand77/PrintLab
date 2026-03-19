@@ -29,6 +29,15 @@ def test_build_url_normalizes_missing_leading_slash() -> None:
     assert url == "https://makerworks.local/v1/orders"
 
 
+def test_service_config_normalizes_base_url_missing_scheme(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "192.168.1.170:3777")
+    service = WorksService()
+
+    cfg = service._get_config("makerworks")
+
+    assert cfg["base_url"] == "http://192.168.1.170:3777"
+
+
 def test_request_allowlist_rejects_unlisted_path(monkeypatch) -> None:
     monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
     monkeypatch.setenv("MAKERWORKS_ALLOWED_PATHS", "/health,/v1/orders")
