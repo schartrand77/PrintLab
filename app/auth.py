@@ -386,6 +386,8 @@ def _login_html(next_path: str) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="/printlab.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <title>PrintLab Login</title>
   <style>
     :root {{
@@ -539,7 +541,7 @@ def register_admin_auth(app: FastAPI) -> None:
             return await call_next(request)
 
         path = request.url.path
-        if path in {"/login", "/auth/login", "/auth/session", "/manifest.webmanifest", "/sw.js", "/favicon.ico"}:
+        if path in {"/login", "/auth/login", "/auth/session", "/manifest.webmanifest", "/sw.js", "/favicon.ico", "/printlab.png", "/apple-touch-icon.png"}:
             return await call_next(request)
 
         if _is_makerworks_boundary_request(path):

@@ -21,8 +21,9 @@ def render_gallery_html() -> str:
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="PrintLab">
+  <link rel="icon" type="image/png" href="/printlab.png">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <title>PrintLab - Printers</title>
   <script>
     (function() {
@@ -487,8 +488,9 @@ def render_add_printer_html() -> str:
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="PrintLab">
+  <link rel="icon" type="image/png" href="/printlab.png">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <title>PrintLab - Add Printer</title>
   <script>
     (function() {
@@ -939,8 +941,9 @@ def render_makerworks_search_html() -> str:
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="PrintLab">
+  <link rel="icon" type="image/png" href="/printlab.png">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <title>PrintLab - MakerWorks Search</title>
   <script>
     (function() {
@@ -1201,8 +1204,9 @@ def render_makerworks_routing_html() -> str:
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="PrintLab">
+  <link rel="icon" type="image/png" href="/printlab.png">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <title>PrintLab - Routing Board</title>
   <script>
     (function() {
@@ -1957,8 +1961,9 @@ def render_conversion_html() -> str:
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="PrintLab">
+  <link rel="icon" type="image/png" href="/printlab.png">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <title>PrintLab - 3D Conversion</title>
   <script>
     (function() {

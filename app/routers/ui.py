@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
@@ -15,6 +17,7 @@ from app.views import (
 )
 
 router = APIRouter()
+public_dir = Path(__file__).resolve().parents[2] / "public"
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -60,4 +63,14 @@ async def service_worker() -> FileResponse:
 
 @router.get("/favicon.ico")
 async def favicon() -> FileResponse:
-    return FileResponse(static_dir / "icons" / "icon-192.png", media_type="image/png")
+    return FileResponse(public_dir / "printlab.png", media_type="image/png")
+
+
+@router.get("/printlab.png")
+async def printlab_icon() -> FileResponse:
+    return FileResponse(public_dir / "printlab.png", media_type="image/png")
+
+
+@router.get("/apple-touch-icon.png")
+async def apple_touch_icon() -> FileResponse:
+    return FileResponse(public_dir / "printlab.png", media_type="image/png")
