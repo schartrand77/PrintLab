@@ -67,7 +67,7 @@ async def service_worker() -> FileResponse:
 
 @router.get("/favicon.ico")
 async def favicon() -> FileResponse:
-    return FileResponse(public_dir / "printlab.png", media_type="image/png")
+    return FileResponse(public_dir / "icon-192.png", media_type="image/png")
 
 
 @router.get("/printlab.png")
@@ -77,4 +77,29 @@ async def printlab_icon() -> FileResponse:
 
 @router.get("/apple-touch-icon.png")
 async def apple_touch_icon() -> FileResponse:
-    return FileResponse(public_dir / "printlab.png", media_type="image/png")
+    return FileResponse(public_dir / "apple-touch-icon.png", media_type="image/png")
+
+
+@router.get("/apple-touch-icon-152x152.png")
+async def apple_touch_icon_152() -> FileResponse:
+    return FileResponse(public_dir / "apple-touch-icon-152x152.png", media_type="image/png")
+
+
+@router.get("/apple-touch-icon-167x167.png")
+async def apple_touch_icon_167() -> FileResponse:
+    return FileResponse(public_dir / "apple-touch-icon-167x167.png", media_type="image/png")
+
+
+@router.get("/apple-touch-icon-180x180.png")
+async def apple_touch_icon_180() -> FileResponse:
+    return FileResponse(public_dir / "apple-touch-icon-180x180.png", media_type="image/png")
+
+
+@router.get("/icon-192.png")
+async def icon_192() -> FileResponse:
+    return FileResponse(public_dir / "icon-192.png", media_type="image/png")
+
+
+@router.get("/icon-512.png")
+async def icon_512() -> FileResponse:
+    return FileResponse(public_dir / "icon-512.png", media_type="image/png")
