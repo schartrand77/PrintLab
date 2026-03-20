@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from app.auth import CSRF_COOKIE_NAME, SESSION_COOKIE_NAME, auth_router, hash_password, register_admin_auth, require_role, validate_auth_configuration
+from app.routers.ui import router as ui_router
 
 
 def _basic(username: str, password: str) -> dict[str, str]:
@@ -214,6 +215,27 @@ def test_manifest_and_service_worker_are_public_when_auth_is_enabled(monkeypatch
 
     assert manifest_response.status_code == 200
     assert sw_response.status_code == 200
+
+
+def test_icon_route_falls_back_to_static_icon_when_public_asset_is_missing(monkeypatch) -> None:
+    _set_admin_auth(monkeypatch)
+    from app.routers import ui
+
+    app = FastAPI()
+    register_admin_auth(app)
+    app.include_router(auth_router)
+    app.include_router(ui_router)
+    original_public_dir = ui.public_dir
+
+    try:
+        ui.public_dir = ui.public_dir / "__missing__"
+        with TestClient(app) as client:
+            response = client.get("/icon-192.png")
+    finally:
+        ui.public_dir = original_public_dir
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/png")
 
 
 def test_validate_auth_configuration_requires_session_secret(monkeypatch) -> None:

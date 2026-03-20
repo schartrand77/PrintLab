@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
 from app.auth import require_role
@@ -18,6 +18,14 @@ from app.views import (
 
 router = APIRouter()
 public_dir = Path(__file__).resolve().parents[2] / "public"
+static_icons_dir = static_dir / "icons"
+
+
+def _first_existing_file(*paths: Path) -> Path:
+    for path in paths:
+        if path.exists():
+            return path
+    raise HTTPException(status_code=404, detail="Static asset not found.")
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -67,7 +75,7 @@ async def service_worker() -> FileResponse:
 
 @router.get("/favicon.ico")
 async def favicon() -> FileResponse:
-    return FileResponse(public_dir / "icon-192.png", media_type="image/png")
+    return FileResponse(_first_existing_file(public_dir / "icon-192.png", static_icons_dir / "icon-192.png"), media_type="image/png")
 
 
 @router.get("/printlab.png")
@@ -77,7 +85,10 @@ async def printlab_icon() -> FileResponse:
 
 @router.get("/apple-touch-icon.png")
 async def apple_touch_icon() -> FileResponse:
-    return FileResponse(public_dir / "apple-touch-icon.png", media_type="image/png")
+    return FileResponse(
+        _first_existing_file(public_dir / "apple-touch-icon.png", static_icons_dir / "apple-touch-icon.png"),
+        media_type="image/png",
+    )
 
 
 @router.get("/apple-touch-icon-152x152.png")
@@ -97,9 +108,9 @@ async def apple_touch_icon_180() -> FileResponse:
 
 @router.get("/icon-192.png")
 async def icon_192() -> FileResponse:
-    return FileResponse(public_dir / "icon-192.png", media_type="image/png")
+    return FileResponse(_first_existing_file(public_dir / "icon-192.png", static_icons_dir / "icon-192.png"), media_type="image/png")
 
 
 @router.get("/icon-512.png")
 async def icon_512() -> FileResponse:
-    return FileResponse(public_dir / "icon-512.png", media_type="image/png")
+    return FileResponse(_first_existing_file(public_dir / "icon-512.png", static_icons_dir / "icon-512.png"), media_type="image/png")

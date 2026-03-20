@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.auth import hash_password, register_admin_auth
+from app.errors import ApiError
 from app.main import create_app
 from app.routers.api import router as api_router
 from app.services import MakerworksSubmitError, PrinterService, WorksRequest, WorksService
@@ -364,8 +365,13 @@ def test_makerworks_library_surfaces_upstream_http_errors(monkeypatch) -> None:
     monkeypatch.setattr("app.services.requests.request", lambda **kwargs: FakeResponse())
     service = WorksService()
 
-    with pytest.raises(RuntimeError, match="MakerWorks library request failed"):
+    with pytest.raises(ApiError) as exc_info:
         service.makerworks_library_sync()
+
+    assert exc_info.value.code == "upstream_rejected"
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.details["upstream_status_code"] == 404
+    assert "MakerWorks library request failed" in exc_info.value.message
 
 
 def test_makerworks_library_retries_without_pagination_after_400(monkeypatch) -> None:

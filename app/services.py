@@ -24,6 +24,7 @@ import requests
 from pydantic import BaseModel, Field
 
 from app.config import get_bool, get_env
+from app.errors import api_error
 
 try:
     import numpy as np
@@ -803,6 +804,13 @@ class WorksService:
         )
         return self.request_sync("makerworks", payload)
 
+    def _raise_upstream_response_error(self, response: dict[str, Any], fallback: str) -> None:
+        status_code = int(response.get("status_code") or 0)
+        message = self._request_error_message(response, fallback)
+        if 400 <= status_code < 500:
+            raise api_error("upstream_rejected", message, 502, upstream_status_code=status_code)
+        raise api_error("upstream_error", message, 502, upstream_status_code=status_code)
+
     def makerworks_library_sync(
         self,
         *,
@@ -839,7 +847,7 @@ class WorksService:
             }
             response = self._makerworks_library_request(str(library_cfg["list_path"]), fallback_query_params)
         if not response.get("ok"):
-            raise RuntimeError(self._request_error_message(response, "MakerWorks library request failed"))
+            self._raise_upstream_response_error(response, "MakerWorks library request failed")
         body = response.get("body")
         items = [
             self._normalize_makerworks_item(
@@ -894,7 +902,7 @@ class WorksService:
         )
         response = self.request_sync("makerworks", payload)
         if not response.get("ok"):
-            raise RuntimeError(self._request_error_message(response, "MakerWorks model detail request failed"))
+            self._raise_upstream_response_error(response, "MakerWorks model detail request failed")
         body = response.get("body")
         if isinstance(body, dict):
             raw_item = self._extract_path_value(body, "item|data|model") or body

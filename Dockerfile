@@ -23,6 +23,7 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY app /app/app
+COPY public /app/public
 COPY docker/start-printlab.sh /usr/local/bin/start-printlab.sh
 RUN chmod +x /usr/local/bin/start-printlab.sh \
     && mkdir -p /data /config
