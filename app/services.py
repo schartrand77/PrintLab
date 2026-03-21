@@ -217,6 +217,11 @@ class MakerworksQueueJobRequest(BaseModel):
     layer_inspect: bool = True
 
 
+class MakerworksPreflightRequest(BaseModel):
+    model_id: str = Field(min_length=1)
+    printer_id: str | None = Field(default=None, min_length=1, max_length=64)
+
+
 class MakerworksSubmitJobRequest(BaseModel):
     model_id: str = Field(min_length=1)
     printer_id: str | None = Field(default=None, min_length=1, max_length=64)
@@ -470,6 +475,24 @@ class WorksService:
         single = self._stringify_library_value(value)
         return [single] if single else []
 
+    def _integer_library_value(self, value: Any) -> int | None:
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        text = self._stringify_library_value(value)
+        if not text:
+            return None
+        digits = re.search(r"-?\d+", text)
+        if not digits:
+            return None
+        try:
+            return int(digits.group(0))
+        except Exception:
+            return None
+
     def _absolutize_external_url(self, base_url: str, value: str | None) -> str | None:
         raw = str(value or "").strip()
         if not raw:
@@ -574,6 +597,30 @@ class WorksService:
         file_count = len(files) if isinstance(files, list) else 0
         has_assets = bool(download_url or file_count)
         queue_supported = self._makerworks_queue_supported(download_url, file_type)
+        materials = self._listify_library_value(
+            self._extract_path_value(
+                item,
+                "materials|material|filamentType|filament_type|filament.type|filament.name|material.name",
+            )
+        )
+        colors = self._listify_library_value(
+            self._extract_path_value(
+                item,
+                "colors|color|filamentColor|filament_color|filament.color|color.name|colour.name",
+            )
+        )
+        printer_profiles = self._listify_library_value(
+            self._extract_path_value(
+                item,
+                "printerProfiles|printer_profiles|compatiblePrinters|compatible_printers|supportedPrinters|supported_printers|machineTypes|machine_types|printerTypes|printer_types",
+            )
+        )
+        estimated_print_minutes = self._integer_library_value(
+            self._extract_path_value(
+                item,
+                "estimatedPrintMinutes|estimated_print_minutes|printTimeMinutes|print_time_minutes|durationMinutes|duration_minutes|estimatedDurationMinutes|estimated_duration_minutes",
+            )
+        )
 
         normalized = {
             "source": "makerworks",
@@ -589,6 +636,10 @@ class WorksService:
             "download_url": download_url,
             "author": author,
             "tags": tags,
+            "materials": materials,
+            "colors": colors,
+            "printer_profiles": printer_profiles,
+            "estimated_print_minutes": estimated_print_minutes,
             "file_type": file_type,
             "file_count": file_count,
             "created_at": self._stringify_library_value(self._extract_path_value(item, cfg["created_at_path"])),
@@ -1830,12 +1881,44 @@ class PrinterService:
             },
             timeout=30,
         )
-        response.raise_for_status()
+        if not bool(getattr(response, "ok", int(getattr(response, "status_code", 500)) < 400)):
+            raise RuntimeError(self._youtube_error_message(response, "YouTube OAuth token exchange failed"))
         body = response.json()
         token = str(body.get("access_token") or "").strip()
         if not token:
             raise RuntimeError("YouTube OAuth token exchange returned no access_token.")
         return token
+
+    def _youtube_error_message(self, response: requests.Response, fallback: str) -> str:
+        status_code = int(getattr(response, "status_code", 500) or 500)
+        detail = ""
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                error = payload.get("error")
+                if isinstance(error, dict):
+                    message = str(error.get("message") or "").strip()
+                    if message:
+                        detail = message
+                    errors = error.get("errors")
+                    if not detail and isinstance(errors, list) and errors:
+                        first = errors[0] if isinstance(errors[0], dict) else {}
+                        detail = str(first.get("message") or first.get("reason") or "").strip()
+                elif error:
+                    detail = str(error).strip()
+        except Exception:
+            detail = ""
+        if not detail:
+            try:
+                detail = str(response.text or "").strip()
+            except Exception:
+                detail = ""
+        detail = re.sub(r"https://[^\s]+", "[redacted-url]", detail)
+        detail = re.sub(r"\s+", " ", detail).strip()
+        if detail:
+            detail = detail[:240]
+            return f"{fallback} (HTTP {status_code}): {detail}"
+        return f"{fallback} (HTTP {status_code})."
 
     def _youtube_upload_video(self, record: dict[str, Any], video_path: Path, cfg: dict[str, Any]) -> dict[str, Any]:
         if not video_path.exists():
@@ -1883,7 +1966,8 @@ class PrinterService:
             },
             timeout=30,
         )
-        init_response.raise_for_status()
+        if not bool(getattr(init_response, "ok", int(getattr(init_response, "status_code", 500)) < 400)):
+            raise RuntimeError(self._youtube_error_message(init_response, "YouTube rejected the upload metadata"))
         upload_url = str(init_response.headers.get("Location") or "").strip()
         if not upload_url:
             raise RuntimeError("YouTube resumable upload returned no session URL.")
@@ -1895,7 +1979,8 @@ class PrinterService:
                 headers={"Content-Type": mime_type},
                 timeout=cfg["timeout_seconds"],
             )
-        upload_response.raise_for_status()
+        if not bool(getattr(upload_response, "ok", int(getattr(upload_response, "status_code", 500)) < 400)):
+            raise RuntimeError(self._youtube_error_message(upload_response, "YouTube rejected the video upload"))
         body = upload_response.json()
         video_id = str(body.get("id") or "").strip()
         if not video_id:
@@ -4027,6 +4112,229 @@ class PrintJobManager:
                 return copy.deepcopy(match)
         return None
 
+    def _tokenize(self, values: Any) -> list[str]:
+        if values is None:
+            return []
+        if isinstance(values, str):
+            items = [values]
+        elif isinstance(values, list):
+            items = [str(item or "") for item in values]
+        else:
+            items = [str(values or "")]
+        tokens: list[str] = []
+        for item in items:
+            lowered = re.sub(r"[^a-z0-9]+", " ", item.lower()).strip()
+            if not lowered:
+                continue
+            tokens.extend(part for part in lowered.split() if part)
+            tokens.append(lowered.replace(" ", ""))
+        return list(dict.fromkeys(tokens))
+
+    def _contains_token_match(self, haystacks: list[str], needles: list[str]) -> bool:
+        if not haystacks or not needles:
+            return False
+        for needle in needles:
+            for haystack in haystacks:
+                if needle == haystack or needle in haystack or haystack in needle:
+                    return True
+        return False
+
+    def _material_requirement(self, source_item: dict[str, Any]) -> str | None:
+        materials = [item.strip() for item in source_item.get("materials") or [] if str(item or "").strip()]
+        if not materials:
+            return None
+        return materials[0]
+
+    def _color_requirement(self, source_item: dict[str, Any]) -> str | None:
+        colors = [item.strip() for item in source_item.get("colors") or [] if str(item or "").strip()]
+        if not colors:
+            return None
+        return colors[0]
+
+    def _printer_profile_matches(self, source_item: dict[str, Any], printer_id: str, service: PrinterService, state: dict[str, Any]) -> tuple[bool, str]:
+        profiles = [item for item in source_item.get("printer_profiles") or [] if str(item or "").strip()]
+        if not profiles:
+            return True, "No printer profile restriction found."
+        haystacks = self._tokenize(
+            [
+                printer_id,
+                service.display_name,
+                (state.get("printer") or {}).get("device_type"),
+            ]
+        )
+        needles = self._tokenize(profiles)
+        if self._contains_token_match(haystacks, needles):
+            return True, f"Matches MakerWorks printer profile: {profiles[0]}."
+        return False, f"MakerWorks profiles prefer {', '.join(profiles[:3])}."
+
+    def _filament_check(self, source_item: dict[str, Any], service: PrinterService) -> dict[str, Any]:
+        material = self._material_requirement(source_item)
+        color = self._color_requirement(source_item)
+        snapshot = service.filament_snapshot()
+        slots = snapshot.get("remaining_filament") or []
+        if not material and not color:
+            return {
+                "status": "not_required",
+                "ok": True,
+                "message": "MakerWorks model does not declare a filament requirement.",
+                "loaded_match": False,
+                "available_match": False,
+                "loaded_filament": snapshot.get("loaded_filament"),
+            }
+
+        loaded = snapshot.get("loaded_filament") or {}
+        loaded_tokens = self._tokenize([loaded.get("type"), loaded.get("name"), loaded.get("color_name"), loaded.get("color_hex")])
+        material_tokens = self._tokenize(material)
+        color_tokens = self._tokenize(color)
+        loaded_material_match = not material_tokens or self._contains_token_match(loaded_tokens, material_tokens)
+        loaded_color_match = not color_tokens or self._contains_token_match(loaded_tokens, color_tokens)
+        if loaded and loaded_material_match and loaded_color_match:
+            return {
+                "status": "loaded_match",
+                "ok": True,
+                "message": "Loaded filament already matches the MakerWorks requirement.",
+                "loaded_match": True,
+                "available_match": True,
+                "loaded_filament": loaded,
+            }
+
+        for slot in slots:
+            slot_tokens = self._tokenize([slot.get("type"), slot.get("name"), slot.get("color_name"), slot.get("color_hex")])
+            material_match = not material_tokens or self._contains_token_match(slot_tokens, material_tokens)
+            color_match = not color_tokens or self._contains_token_match(slot_tokens, color_tokens)
+            if material_match and color_match and not slot.get("empty"):
+                return {
+                    "status": "available_match",
+                    "ok": True,
+                    "message": "Matching filament is available in AMS inventory.",
+                    "loaded_match": False,
+                    "available_match": True,
+                    "loaded_filament": loaded or None,
+                }
+
+        requirement_bits = [bit for bit in (material, color) if bit]
+        return {
+            "status": "unavailable",
+            "ok": False,
+            "message": f"Required filament not available: {' / '.join(requirement_bits)}.",
+            "loaded_match": False,
+            "available_match": False,
+            "loaded_filament": loaded or None,
+        }
+
+    def _preflight_time_estimate(self, source_item: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+        queue = state.get("queue") or {}
+        job = state.get("job") or {}
+        model_minutes = source_item.get("estimated_print_minutes")
+        try:
+            model_minutes = int(model_minutes) if model_minutes is not None else None
+        except Exception:
+            model_minutes = None
+        queue_count = max(0, int(queue.get("count") or 0))
+        remaining_minutes = max(0, int(job.get("remaining_minutes") or 0))
+        per_job_minutes = model_minutes or 30
+        wait_minutes = remaining_minutes + (queue_count * per_job_minutes)
+        total_minutes = wait_minutes + model_minutes if model_minutes is not None else None
+        return {
+            "job_minutes": model_minutes,
+            "wait_minutes": wait_minutes,
+            "completion_minutes": total_minutes,
+            "message": (
+                f"Estimated start in about {wait_minutes} min; print takes about {model_minutes} min."
+                if model_minutes is not None
+                else f"Estimated start in about {wait_minutes} min; MakerWorks did not provide a print duration."
+            ),
+        }
+
+    async def makerworks_preflight(self, model_id: str, *, printer_id: str | None = None) -> dict[str, Any]:
+        detail = await self._works_service.makerworks_library_item(model_id, include_raw=False)
+        source_item = detail["item"]
+        if not source_item.get("queue_supported"):
+            raise ValueError(source_item.get("printer_handoff_note") or "This MakerWorks model cannot be queued yet.")
+
+        candidates: list[dict[str, Any]] = []
+        for entry in self._printer_manager.list_items():
+            service = self._printer_manager.get(entry["id"])
+            state = await service.state()
+            connected = bool(state.get("connected"))
+            compatible, compatibility_message = self._printer_profile_matches(source_item, entry["id"], service, state)
+            filament = self._filament_check(source_item, service)
+            estimate = self._preflight_time_estimate(source_item, state)
+            qualifies = connected and compatible and filament["ok"]
+            queue_count = int((state.get("queue") or {}).get("count") or 0)
+            health_score = int((state.get("health") or {}).get("score") or 0)
+            busy_penalty = 90 if service.job_busy() else 0
+            queue_penalty = queue_count * 15
+            wait_penalty = int(estimate["wait_minutes"] or 0)
+            filament_bonus = {
+                "loaded_match": 140,
+                "available_match": 80,
+                "not_required": 40,
+                "unavailable": -400,
+            }.get(str(filament.get("status") or ""), 0)
+            score = (600 if qualifies else 0) + filament_bonus + health_score - busy_penalty - queue_penalty - wait_penalty
+            candidate = {
+                "printer_id": entry["id"],
+                "printer_name": service.display_name,
+                "connected": connected,
+                "compatible": compatible,
+                "qualifies": qualifies,
+                "queue_count": queue_count,
+                "busy": service.job_busy(),
+                "device_type": (state.get("printer") or {}).get("device_type"),
+                "health_score": health_score,
+                "score": score,
+                "compatibility": {"ok": compatible, "message": compatibility_message},
+                "filament": filament,
+                "estimate": estimate,
+                "reason": (
+                    "Qualified for automatic routing."
+                    if qualifies
+                    else (
+                        "Printer is offline."
+                        if not connected
+                        else compatibility_message if not compatible else filament["message"]
+                    )
+                ),
+            }
+            if printer_id and entry["id"] == printer_id:
+                candidate["requested"] = True
+            candidates.append(candidate)
+
+        candidates.sort(
+            key=lambda item: (
+                not bool(item.get("qualifies")),
+                -(int(item.get("score") or 0)),
+                int((item.get("estimate") or {}).get("wait_minutes") or 0),
+                str(item.get("printer_id") or ""),
+            )
+        )
+        qualified = [item for item in candidates if item.get("qualifies")]
+        selected_printer_id = printer_id or (qualified[0]["printer_id"] if qualified else None)
+        score_gap = None
+        if len(qualified) > 1:
+            score_gap = int(qualified[0].get("score") or 0) - int(qualified[1].get("score") or 0)
+        approval_required = not printer_id and len(qualified) > 1 and (score_gap is None or score_gap < 60)
+        if approval_required:
+            selected_printer_id = None
+        return {
+            "item": source_item,
+            "requirements": {
+                "material": self._material_requirement(source_item),
+                "color": self._color_requirement(source_item),
+                "printer_profiles": source_item.get("printer_profiles") or [],
+                "estimated_print_minutes": source_item.get("estimated_print_minutes"),
+            },
+            "candidates": candidates,
+            "qualified_printer_count": len(qualified),
+            "selected_printer_id": selected_printer_id,
+            "approval_required": approval_required,
+            "policy": {
+                "routing_rule": "Prefer connected printers that pass compatibility, have matching filament, and minimize wait time.",
+                "approval_rule": "Approval is required when multiple printers qualify with comparable routing scores.",
+            },
+        }
+
     async def _resolve_printer(self, printer_id: str | None) -> PrinterService:
         if printer_id:
             service = self._printer_manager.get(printer_id)
@@ -4112,11 +4420,24 @@ class PrintJobManager:
         job_id = uuid4().hex
         target_printer: PrinterService | None = None
         try:
-            target_printer = await self._resolve_printer(payload.printer_id)
             detail = await self._works_service.makerworks_library_item(payload.model_id, include_raw=False)
             source_item = detail["item"]
             if not source_item.get("queue_supported"):
                 raise ValueError(source_item.get("printer_handoff_note") or "This MakerWorks model cannot be queued yet.")
+            preflight = await self.makerworks_preflight(payload.model_id, printer_id=payload.printer_id)
+            if payload.printer_id:
+                selected = next((item for item in preflight["candidates"] if item.get("printer_id") == payload.printer_id), None)
+                if not selected or not selected.get("qualifies"):
+                    raise ValueError((selected or {}).get("reason") or f"Printer {payload.printer_id} did not pass preflight.")
+                target_printer = self._printer_manager.get(payload.printer_id)
+            else:
+                if preflight.get("approval_required"):
+                    names = ", ".join(str(item.get("printer_name") or item.get("printer_id")) for item in preflight["candidates"] if item.get("qualifies"))
+                    raise ValueError(f"Multiple printers qualify. Approval required before queueing: {names}.")
+                selected_printer_id = str(preflight.get("selected_printer_id") or "")
+                if not selected_printer_id:
+                    raise ValueError("No connected printer passed MakerWorks preflight.")
+                target_printer = self._printer_manager.get(selected_printer_id)
 
             asset = await self._works_service.download_asset("makerworks", str(source_item.get("download_url") or ""))
             preferred_name = self._build_preferred_name(source_item, payload, asset)
@@ -4169,6 +4490,11 @@ class PrintJobManager:
                     "file_type": source_item.get("file_type"),
                     "file_path": staged.get("file_path"),
                     "file_name": staged.get("file_name"),
+                    "preflight": {
+                        "selected_printer_id": target_printer.printer_id,
+                        "qualified_printer_count": preflight.get("qualified_printer_count"),
+                        "approval_required": preflight.get("approval_required"),
+                    },
                     "plate_gcode": payload.plate_gcode,
                     "start_at": queue_item.get("start_at"),
                     "use_ams": payload.use_ams,

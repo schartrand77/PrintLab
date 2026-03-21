@@ -77,6 +77,11 @@ class MakerworksQueueJobRequest(BaseModel):
     layer_inspect: bool = True
 
 
+class MakerworksPreflightRequest(BaseModel):
+    model_id: str = Field(min_length=1)
+    printer_id: str | None = Field(default=None, min_length=1, max_length=64)
+
+
 class MakerworksSubmitJobRequest(BaseModel):
     model_id: str = Field(min_length=1)
     printer_id: str | None = Field(default=None, min_length=1, max_length=64)

@@ -91,19 +91,43 @@ def test_timeline_entries_are_copied_to_audit_log() -> None:
 
 
 class _FakePrinter:
-    def __init__(self, printer_id: str, *, connected: bool, busy: bool, queue_count: int) -> None:
+    def __init__(
+        self,
+        printer_id: str,
+        *,
+        connected: bool,
+        busy: bool,
+        queue_count: int,
+        device_type: str = "x1c",
+        loaded_filament: dict[str, object] | None = None,
+    ) -> None:
         self.printer_id = printer_id
         self.display_name = printer_id.upper()
         self._connected = connected
         self._busy = busy
         self._queue_count = queue_count
+        self._device_type = device_type
+        self._loaded_filament = loaded_filament
         self.created_jobs: list[dict[str, object]] = []
 
     async def state(self) -> dict[str, object]:
-        return {"connected": self._connected, "queue": {"count": self._queue_count}}
+        return {
+            "connected": self._connected,
+            "queue": {"count": self._queue_count},
+            "printer": {"device_type": self._device_type},
+            "job": {"remaining_minutes": 45 if self._busy else 0},
+            "health": {"score": 90 if self._connected else 0},
+        }
 
     def job_busy(self) -> bool:
         return self._busy
+
+    def filament_snapshot(self) -> dict[str, object]:
+        loaded = self._loaded_filament
+        return {
+            "loaded_filament": loaded,
+            "remaining_filament": [loaded] if loaded else [],
+        }
 
     def find_submitted_job_by_idempotency(self, idempotency_key: str) -> dict[str, object] | None:
         for job in self.created_jobs:
@@ -158,6 +182,9 @@ class _FakeWorksService:
                 "download_url": "https://makerworks.local/files/widget.3mf",
                 "file_type": "3mf",
                 "queue_supported": True,
+                "materials": [],
+                "colors": [],
+                "printer_profiles": [],
             }
         }
 
@@ -216,3 +243,35 @@ def test_print_job_manager_reuses_existing_idempotent_job_across_printers() -> N
 
     assert result["id"] == "job-existing"
     assert len(second.created_jobs) == 0
+
+
+def test_print_job_manager_preflight_requires_approval_when_multiple_printers_qualify() -> None:
+    first = _FakePrinter(
+        "first-printer",
+        connected=True,
+        busy=False,
+        queue_count=0,
+        loaded_filament={"type": "PLA", "name": "PLA White", "color_name": "White", "color_hex": "#ffffff"},
+    )
+    second = _FakePrinter(
+        "second-printer",
+        connected=True,
+        busy=False,
+        queue_count=0,
+        loaded_filament={"type": "PLA", "name": "PLA White", "color_name": "White", "color_hex": "#ffffff"},
+    )
+
+    class _FilamentWorks(_FakeWorksService):
+        async def makerworks_library_item(self, model_id: str, *, include_raw: bool = False) -> dict[str, object]:
+            result = await super().makerworks_library_item(model_id, include_raw=include_raw)
+            result["item"]["materials"] = ["PLA"]
+            result["item"]["colors"] = ["White"]
+            return result
+
+    manager = PrintJobManager(_FakePrinterManager([first, second]), _FilamentWorks())
+
+    preflight = asyncio.run(manager.makerworks_preflight("widget-1"))
+
+    assert preflight["approval_required"] is True
+    assert preflight["qualified_printer_count"] == 2
+    assert preflight["selected_printer_id"] is None

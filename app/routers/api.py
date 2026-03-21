@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -18,6 +19,7 @@ from app.services import (
     ChamberLightRequest,
     ControlPresetRequest,
     FanRequest,
+    MakerworksPreflightRequest,
     MakerworksQueueJobRequest,
     MakerworksSubmitError,
     MakerworksSubmitJobRequest,
@@ -375,6 +377,9 @@ async def makerworks_queue_job_by_printer(
             MakerworksSubmitJobRequest(
                 model_id=payload.model_id,
                 printer_id=printer_id,
+                idempotency_key=f"makerworks-printer-queue:{printer_id}:{payload.model_id}:{uuid4().hex}",
+                source_job_id=f"makerworks-printer-job:{printer_id}:{payload.model_id}:{uuid4().hex}",
+                source_order_id=f"makerworks-printer-order:{payload.model_id}",
                 start_at=payload.start_at,
                 plate_gcode=payload.plate_gcode,
                 use_ams=payload.use_ams,
@@ -389,6 +394,15 @@ async def makerworks_queue_job_by_printer(
             actor=actor_from_request(request),
         )
         return {"ok": True, "queued": True, "printer_id": printer_id, "source_item": result.get("source_item"), **result}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.post("/api/works/makerworks/preflight")
+async def makerworks_preflight(request: Request, payload: MakerworksPreflightRequest) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        return await job_manager.makerworks_preflight(payload.model_id, printer_id=payload.printer_id)
     except Exception as exc:
         _raise_api_error(exc)
 

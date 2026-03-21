@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 import app.views as views
 from app.main import create_app
-from app.models import MakerworksSubmitJobRequest, QueuePrintJobRequest, WorksRequest
+from app.models import MakerworksPreflightRequest, MakerworksSubmitJobRequest, QueuePrintJobRequest, WorksRequest
 from app.views import (
     render_add_printer_html,
     render_conversion_html,
@@ -39,6 +39,11 @@ def test_makerworks_submit_job_request_accepts_metadata() -> None:
     assert payload.metadata == {"priority": "rush"}
 
 
+def test_makerworks_preflight_request_accepts_optional_printer() -> None:
+    payload = MakerworksPreflightRequest(model_id="widget-1", printer_id="printer-1")
+    assert payload.printer_id == "printer-1"
+
+
 def test_openapi_contains_queue_schema() -> None:
     schema = create_app().openapi()
     assert "/api/queue" in schema["paths"]
@@ -46,6 +51,7 @@ def test_openapi_contains_queue_schema() -> None:
     assert "/api/conversion/batch" in schema["paths"]
     assert "/api/conversion/formats" in schema["paths"]
     assert "/api/works/makerworks/jobs" in schema["paths"]
+    assert "/api/works/makerworks/preflight" in schema["paths"]
     assert "/api/works/makerworks/jobs/{job_id}" in schema["paths"]
     assert "/api/jobs" in schema["paths"]
     assert "/api/jobs/{job_id}/sync-makerworks" in schema["paths"]
@@ -112,10 +118,12 @@ def test_render_makerworks_search_page_contains_search_only_controls() -> None:
     html = render_makerworks_search_html()
     assert 'id="makerworksSearch"' in html
     assert 'id="makerworksPageInfo"' in html
+    assert "Queue Now" in html
     assert "Add To Routing Board" in html
     assert "/makerworks-routing" in html
     assert "changeMakerworksPage" in html
     assert "/api/works/makerworks/library" in html
+    assert "/api/works/makerworks/preflight" in html
     assert 'id="routingList"' in html
 
 

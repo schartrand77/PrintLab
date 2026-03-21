@@ -699,6 +699,9 @@ def test_successful_gcode_can_upload_timelapse_to_youtube(monkeypatch: pytest.Mo
     }
 
     class TokenResponse:
+        ok = True
+        status_code = 200
+
         def raise_for_status(self) -> None:
             return None
 
@@ -811,6 +814,9 @@ def test_successful_gcode_can_download_sd_timelapse_before_youtube_upload(monkey
     service.client = SimpleNamespace(ftp_connection=lambda: FakeFtp(), connected=True)
 
     class TokenResponse:
+        ok = True
+        status_code = 200
+
         def raise_for_status(self) -> None:
             return None
 
@@ -858,6 +864,97 @@ def test_successful_gcode_can_download_sd_timelapse_before_youtube_upload(monkey
     assert result["youtube"]["video_id"] == "video-ftp-123"
     assert captured["upload_bytes"] == b"fake-video-from-ftp"
     assert Path(str(result["youtube"]["path"])).exists()
+
+
+def test_successful_gcode_surfaces_youtube_api_message_without_upload_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = Path("tests/.tmp/youtube-upload-failure")
+    cache_dir = tmp_path / "cache" / "timelapse"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    video_path = cache_dir / "video_2026-03-13_12-12-18.mp4"
+    video_path.write_bytes(b"fake-video")
+
+    monkeypatch.setenv("YOUTUBE_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("YOUTUBE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("YOUTUBE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("YOUTUBE_REFRESH_TOKEN", "refresh-token")
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE", "file_cache_path": str(tmp_path / "cache")},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    record = {
+        "id": "record-youtube-failure",
+        "file_name": "widget.3mf",
+        "model_name": "Widget",
+        "completed_at": "2026-03-13T12:00:00+00:00",
+        "youtube": {"uploaded": False},
+    }
+
+    class TokenResponse:
+        ok = True
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"access_token": "access-token"}
+
+    class InitResponse:
+        ok = False
+        status_code = 400
+        headers: dict[str, str] = {}
+        text = '{"error":{"message":"Request contains an invalid argument."}}'
+
+        def json(self) -> dict[str, object]:
+            return {"error": {"message": "Request contains an invalid argument."}}
+
+    class FakeSession:
+        headers: dict[str, str]
+
+        def __init__(self) -> None:
+            self.headers = {}
+
+        def post(self, url: str, *, params=None, json=None, headers=None, timeout=None):
+            return InitResponse()
+
+    monkeypatch.setattr("app.services.requests.post", lambda *args, **kwargs: TokenResponse())
+    monkeypatch.setattr("app.services.requests.Session", FakeSession)
+
+    with pytest.raises(RuntimeError, match="Request contains an invalid argument"):
+        asyncio.run(service._sync_successful_gcode_to_youtube(record, force=True, video_path=video_path))
+
+    error_text = str(record["youtube"]["last_error"])
+    assert "invalid argument" in error_text.lower()
+    assert "googleapis.com/upload" not in error_text
+
+
+def test_youtube_token_exchange_surfaces_oauth_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    class TokenResponse:
+        ok = False
+        status_code = 400
+        text = '{"error":"invalid_grant","error_description":"Bad Request"}'
+
+        def json(self) -> dict[str, object]:
+            return {"error": "invalid_grant", "error_description": "Bad Request"}
+
+    monkeypatch.setattr("app.services.requests.post", lambda *args, **kwargs: TokenResponse())
+
+    with pytest.raises(RuntimeError, match="invalid_grant"):
+        service._youtube_access_token(
+            {
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "refresh_token": "refresh-token",
+            }
+        )
 
 
 def test_youtube_video_snapshot_is_paginated() -> None:

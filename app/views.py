@@ -1045,6 +1045,18 @@ def render_makerworks_search_html() -> str:
     .notice.show { display:block; }
     .route-list { display:grid; gap:8px; margin-top:10px; }
     .route-item { border:1px solid var(--line); border-radius:14px; padding:10px; background:var(--soft); }
+    .modal-backdrop { position:fixed; inset:0; background:rgba(18,34,52,.56); display:none; align-items:center; justify-content:center; padding:18px; z-index:60; }
+    .modal-backdrop.open { display:flex; }
+    .modal { width:min(860px, 100%); max-height:90vh; overflow:auto; background:var(--panel); border:1px solid var(--line); border-radius:22px; padding:18px; box-shadow:0 24px 60px rgba(10,18,28,.28); }
+    .modal-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:10px; }
+    .modal-title { font-size:22px; font-weight:800; }
+    .modal-close { border:1px solid var(--line); background:var(--soft); color:var(--text); border-radius:999px; padding:8px 12px; cursor:pointer; font-weight:700; }
+    .candidate-list { display:grid; gap:10px; margin-top:14px; }
+    .candidate { border:1px solid var(--line); border-radius:18px; padding:12px; background:var(--soft); display:grid; gap:8px; }
+    .candidate-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+    .candidate-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px; }
+    .candidate-stat { border:1px solid var(--line); border-radius:14px; padding:8px 10px; background:var(--panel); }
+    .candidate-stat strong { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.3px; color:var(--muted); margin-bottom:4px; }
     .sidebar-backdrop { position:fixed; inset:0; background:rgba(18,34,52,.36); display:none; z-index:40; }
     .sidebar-backdrop.open { display:block; }
     .sidebar { position:fixed; z-index:41; top:0; left:0; height:100vh; height:100dvh; width:320px; max-width:85vw; background:var(--panel); border-right:1px solid var(--line); transform:translateX(-101%); transition:transform .18s ease; padding:calc(var(--safe-top) + 18px) calc(var(--safe-right) + 14px) calc(var(--safe-bottom) + 16px) calc(var(--safe-left) + 14px); overflow:auto; }
@@ -1053,14 +1065,14 @@ def render_makerworks_search_html() -> str:
     .sidebar-tab { display:block; text-decoration:none; border:1px solid var(--line); background:var(--soft); color:var(--text); border-radius:999px; padding:6px 10px; font-size:12px; font-weight:600; }
     .sidebar-tab.active { background:var(--button); color:var(--button-text); border-color:var(--button); }
     @media (max-width: 960px) { .layout { grid-template-columns:1fr; } }
-    @media (max-width: 720px) { .controls, .actions { grid-template-columns:1fr; } .grid { grid-template-columns:1fr; } }
+    @media (max-width: 720px) { .controls, .actions, .candidate-grid { grid-template-columns:1fr; } .grid { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
   <div id="sidebarBackdrop" class="sidebar-backdrop" onclick="closeSidebar()"></div>
   <aside id="sidebar" class="sidebar" aria-hidden="true">
     <h2>Menu</h2>
-    <p>Search the model library here. Use the routing board for queueing and printer assignment.</p>
+    <p>Search the model library here. One-click handoff runs preflight checks first, and the routing board stays available for manual overrides.</p>
     <div class="sidebar-tabs">
       <a class="sidebar-tab" href="/">Dashboard</a>
       <a class="sidebar-tab" href="/conversion">3D Conversion</a>
@@ -1074,7 +1086,7 @@ def render_makerworks_search_html() -> str:
       <button class="menu" type="button" onclick="openSidebar()">Menu</button>
       <div>
         <h1>MakerWorks Search</h1>
-        <p>Search and shortlist models here. Queueing and routing are handled on the separate routing board.</p>
+        <p>Search, preflight, and queue MakerWorks models here. If more than one printer qualifies, PrintLab stops for approval instead of guessing.</p>
       </div>
     </div>
     <div class="layout">
@@ -1104,6 +1116,19 @@ def render_makerworks_search_html() -> str:
       </aside>
     </div>
   </div>
+  <div id="approvalModal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="approvalTitle">
+      <div class="modal-head">
+        <div>
+          <div id="approvalTitle" class="modal-title">Approve Printer Route</div>
+          <div id="approvalSummary" class="meta"></div>
+        </div>
+        <button class="modal-close" type="button" onclick="closeApprovalModal()">Close</button>
+      </div>
+      <div id="approvalRequirements" class="status"></div>
+      <div id="approvalCandidates" class="candidate-list"></div>
+    </div>
+  </div>
   <script>
     const nativeFetch = window.fetch.bind(window);
     const routingKey = 'printlab.makerworks.routingModels';
@@ -1111,6 +1136,7 @@ def render_makerworks_search_html() -> str:
     const makerworksPageSize = 12;
     let makerworksTotal = 0;
     let modelSearchTimer = null;
+    let activePreflight = null;
     function readCookie(name) {
       const prefix = `${name}=`;
       return document.cookie.split(';').map((item) => item.trim()).find((item) => item.startsWith(prefix))?.slice(prefix.length) || '';
@@ -1142,6 +1168,86 @@ def render_makerworks_search_html() -> str:
       el.className = 'notice show';
       window.clearTimeout(showNotice._timer);
       showNotice._timer = window.setTimeout(() => { el.className = 'notice'; }, 3200);
+    }
+    function closeApprovalModal() {
+      activePreflight = null;
+      const modal = document.getElementById('approvalModal');
+      modal.classList.remove('open');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+    function openApprovalModal(preflight) {
+      activePreflight = preflight;
+      document.getElementById('approvalTitle').textContent = `Approve Printer Route For ${preflight.item?.name || 'Model'}`;
+      document.getElementById('approvalSummary').textContent = preflight.policy?.approval_rule || 'Choose one of the qualifying printers below.';
+      const requirementPills = [];
+      if (preflight.requirements?.material) requirementPills.push(`<span class="pill">Material ${escapeHtml(preflight.requirements.material)}</span>`);
+      if (preflight.requirements?.color) requirementPills.push(`<span class="pill">Color ${escapeHtml(preflight.requirements.color)}</span>`);
+      if (preflight.requirements?.estimated_print_minutes) requirementPills.push(`<span class="pill">Print ${escapeHtml(String(preflight.requirements.estimated_print_minutes))} min</span>`);
+      if (Array.isArray(preflight.requirements?.printer_profiles) && preflight.requirements.printer_profiles.length) {
+        requirementPills.push(`<span class="pill">Profiles ${escapeHtml(preflight.requirements.printer_profiles.slice(0, 2).join(', '))}</span>`);
+      }
+      document.getElementById('approvalRequirements').innerHTML = requirementPills.join('') || "<span class='pill'>No explicit MakerWorks requirements found</span>";
+      document.getElementById('approvalCandidates').innerHTML = (Array.isArray(preflight.candidates) ? preflight.candidates : []).map((candidate) => `
+        <article class="candidate">
+          <div class="candidate-head">
+            <div>
+              <div style="font-size:18px;font-weight:800;">${escapeHtml(candidate.printer_name || candidate.printer_id || 'Printer')}</div>
+              <div class="meta">${escapeHtml(candidate.reason || '')}</div>
+            </div>
+            <span class="pill">${escapeHtml(candidate.qualifies ? 'Qualified' : 'Blocked')}</span>
+          </div>
+          <div class="candidate-grid">
+            <div class="candidate-stat"><strong>Compatibility</strong>${escapeHtml(candidate.compatibility?.message || 'Unknown')}</div>
+            <div class="candidate-stat"><strong>Filament</strong>${escapeHtml(candidate.filament?.message || 'Unknown')}</div>
+            <div class="candidate-stat"><strong>Time</strong>${escapeHtml(candidate.estimate?.message || 'Unknown')}</div>
+          </div>
+          <div class="actions">
+            <button class="btn" type="button" onclick="queueMakerworksModel('${escapeHtml(String(preflight.item?.id || ''))}', '${escapeHtml(String(candidate.printer_id || ''))}')" ${candidate.qualifies ? '' : 'disabled'}>Approve And Queue</button>
+            <a class="link-btn" href="/printer/${encodeURIComponent(candidate.printer_id || '')}">Open Printer</a>
+          </div>
+        </article>
+      `).join('');
+      const modal = document.getElementById('approvalModal');
+      modal.classList.add('open');
+      modal.setAttribute('aria-hidden', 'false');
+    }
+    async function fetchMakerworksPreflight(modelId, printerId = '') {
+      const response = await fetch('/api/works/makerworks/preflight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_id: String(modelId || ''), printer_id: printerId || null }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error?.message || data?.detail || `HTTP ${response.status}`);
+      return data;
+    }
+    async function queueMakerworksModel(modelId, printerId = '') {
+      try {
+        const preflight = await fetchMakerworksPreflight(modelId, printerId);
+        if (!printerId && preflight.approval_required) {
+          openApprovalModal(preflight);
+          return;
+        }
+        const resolvedPrinterId = printerId || preflight.selected_printer_id;
+        if (!resolvedPrinterId) throw new Error('No printer passed preflight.');
+        const response = await fetch('/api/works/makerworks/jobs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model_id: String(modelId || ''),
+            printer_id: resolvedPrinterId,
+            idempotency_key: `makerworks-search:${resolvedPrinterId}:${String(modelId || '')}`,
+            source_job_id: `makerworks-search-job:${resolvedPrinterId}:${String(modelId || '')}`,
+            source_order_id: `makerworks-search-order:${String(modelId || '')}`,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.error?.message || data?.message || data?.detail || `HTTP ${response.status}`);
+        closeApprovalModal();
+        showNotice(`${data.model_name || 'Model'} queued to ${data.printer_name || resolvedPrinterId}.`);
+      } catch (error) {
+        showNotice(`Failed to queue model: ${String(error?.message || error)}`);
+      }
     }
     function addToRouting(encoded) {
       const item = JSON.parse(decodeURIComponent(encoded));
@@ -1223,7 +1329,8 @@ def render_makerworks_search_html() -> str:
                   ${tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}
                 </div>
                 <div class="actions">
-                  <button class="btn" type="button" onclick="addToRouting('${encoded}')">Add To Routing Board</button>
+                  <button class="btn" type="button" onclick="queueMakerworksModel('${escapeHtml(String(item.id || ''))}')">Queue Now</button>
+                  <button class="btn secondary" type="button" onclick="addToRouting('${encoded}')">Add To Routing Board</button>
                   <a class="link-btn" href="${escapeHtml(openModelHref)}" target="_blank" rel="noreferrer"${openModelHref === '#' ? " onclick='return false;'" : ''}>Open Model</a>
                 </div>
               </div>
@@ -1244,6 +1351,12 @@ def render_makerworks_search_html() -> str:
         makerworksPage = 1;
         loadMakerworks();
       }, 240);
+    });
+    document.getElementById('approvalModal').addEventListener('click', (event) => {
+      if (event.target === document.getElementById('approvalModal')) closeApprovalModal();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeApprovalModal();
     });
     refreshPageData();
   </script>

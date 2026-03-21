@@ -72,6 +72,7 @@ Interactive API docs are published at:
 - `GET /api/works/{makerworks|orderworks|stockworks}/health?path=/health`
 - `GET /api/works/makerworks/library`
 - `GET /api/works/makerworks/library/{model_id}`
+- `POST /api/works/makerworks/preflight`
 - `POST /api/works/makerworks/jobs`
   with:
   `{"model_id":"widget-1","printer_id":"printer-1","idempotency_key":"mw-job-123","source_job_id":"makerworks-123","metadata":{"priority":"rush"}}`
@@ -124,13 +125,16 @@ Auth behavior:
 
 MakerWorks library notes:
 - The dashboard now has a `MakerWorks` tab inside the model library modal.
-- Responses are normalized into a stable shape (`id`, `name`, `summary`, `thumbnail_url`, `model_url`, `download_url`, `author`, `tags`, `printer_handoff_ready`) so the UI does not need to match your upstream schema exactly.
-- This pass is read-only for external models: it surfaces whether downloadable assets exist, and leaves the actual printer handoff as the next step.
+- Responses are normalized into a stable shape (`id`, `name`, `summary`, `thumbnail_url`, `model_url`, `download_url`, `author`, `tags`, `printer_handoff_ready`, `materials`, `colors`, `printer_profiles`, `estimated_print_minutes`) so the UI does not need to match your upstream schema exactly.
+- The MakerWorks search page now supports one-click handoff into the PrintLab queue. PrintLab runs preflight checks before queueing and only auto-selects a printer when exactly one printer qualifies.
+- When multiple printers qualify, PrintLab stops for approval and shows ranked candidates with compatibility, filament, and wait-time checks instead of guessing.
 
 MakerWorks job intake:
 - `POST /api/works/makerworks/jobs` is the new PrintLab-native submission path for MakerWorks.
+- `POST /api/works/makerworks/preflight` returns policy checks and ranked printer candidates before queueing.
 - PrintLab stages the asset to printer storage, creates a queue entry, and persists a submitted-job ledger in `/data/submitted_jobs_{printer_id}.json`.
 - Use `idempotency_key` when MakerWorks may retry the same submission; PrintLab will return the existing job record instead of queueing a duplicate.
+- Preflight checks cover printer compatibility, filament availability, and queue-aware time estimates. Routing prefers connected printers that pass compatibility, have matching filament, and minimize wait time.
 - Job status currently advances through `queued`, `started`, `completed`, `failed`, `cancelled`, and `submit_failed`.
 - If `MAKERWORKS_JOB_CALLBACK_ENABLED=true`, each new status is pushed back to MakerWorks once using `MAKERWORKS_JOB_CALLBACK_PATH_TEMPLATE`.
 
@@ -156,6 +160,9 @@ Successful G-code tracking:
   - `YOUTUBE_CLIENT_ID=...`
   - `YOUTUBE_CLIENT_SECRET=...`
   - `YOUTUBE_REFRESH_TOKEN=...`
+- To generate a YouTube refresh token locally, run:
+  - `python scripts/get_youtube_refresh_token.py --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET`
+  - Add `http://127.0.0.1:8080/callback` as an authorized redirect URI in your Google OAuth client before running it.
 - The YouTube uploader waits for the newest cached timelapse in `{FILE_CACHE_PATH}/timelapse`, uploads it with the configured title/description templates, and stores status back into each successful G-code record under the `youtube` key.
 
 Stockworks enrichment:
