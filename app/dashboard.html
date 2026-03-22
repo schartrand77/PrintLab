@@ -1889,7 +1889,21 @@
     let activeTemperatureEditor = null;
 
     function buildCurrentJobThumbnailUrl(state) {
-      return state?.job?.thumbnail_url || placeholderThumb;
+      const rawUrl = state?.job?.thumbnail_url || placeholderThumb;
+      if (!rawUrl || rawUrl.startsWith("data:")) return rawUrl;
+      if (!rawUrl.includes("/api/printers/") || !rawUrl.includes("/sd/thumbnail")) return rawUrl;
+      try {
+        const url = new URL(rawUrl, window.location.origin);
+        const jobKey = [
+          state?.job?.file || "",
+          state?.job?.subtask_name || "",
+          state?.job?.state || "",
+        ].join("|");
+        if (jobKey) url.searchParams.set("job_key", jobKey);
+        return `${url.pathname}${url.search}${url.hash}`;
+      } catch (_error) {
+        return rawUrl;
+      }
     }
 
     function updatePhotoPreview(state) {
