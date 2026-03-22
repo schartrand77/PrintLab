@@ -931,7 +931,11 @@ async def sd_thumbnail_by_printer(printer_id: str, path: str) -> Response:
         content, mime = await service_or_404(printer_id).get_sd_thumbnail(path)
         if not content or not mime:
             raise HTTPException(status_code=404, detail="Thumbnail not found.")
-        return Response(content=content, media_type=mime, headers={"Cache-Control": "public, max-age=86400"})
+        return Response(
+            content=content,
+            media_type=mime,
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+        )
     except HTTPException:
         raise
     except Exception as exc:
