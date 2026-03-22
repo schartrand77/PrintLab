@@ -1741,7 +1741,15 @@
         if (csrf && !headers.has("X-CSRF-Token")) headers.set("X-CSRF-Token", csrf);
         next.headers = headers;
       }
-      return nativeFetch(input, next);
+      return nativeFetch(input, next).then((response) => {
+        const targetUrl = typeof input === "string" ? input : (input && "url" in input ? input.url : "");
+        const sameOrigin = !targetUrl || targetUrl.startsWith("/") || targetUrl.startsWith(window.location.origin);
+        if (sameOrigin && response.status === 401 && !targetUrl.includes("/auth/login") && !targetUrl.includes("/auth/session")) {
+          const nextPath = `${window.location.pathname}${window.location.search || ""}`;
+          window.location.assign(`/login?next=${encodeURIComponent(nextPath)}`);
+        }
+        return response;
+      });
     };
 
     function currentRole() {

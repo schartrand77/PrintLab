@@ -301,7 +301,15 @@ def render_gallery_html() -> str:
         if (csrf && !headers.has('X-CSRF-Token')) headers.set('X-CSRF-Token', csrf);
         next.headers = headers;
       }
-      return nativeFetch(input, next);
+      return nativeFetch(input, next).then((response) => {
+        const targetUrl = typeof input === 'string' ? input : (input && 'url' in input ? input.url : '');
+        const sameOrigin = !targetUrl || targetUrl.startsWith('/') || targetUrl.startsWith(window.location.origin);
+        if (sameOrigin && response.status === 401 && !targetUrl.includes('/auth/login') && !targetUrl.includes('/auth/session')) {
+          const nextPath = `${window.location.pathname}${window.location.search || ''}`;
+          window.location.assign(`/login?next=${encodeURIComponent(nextPath)}`);
+        }
+        return response;
+      });
     };
 
     function applyTheme(theme) {
@@ -775,7 +783,15 @@ def render_add_printer_html() -> str:
         if (csrf && !headers.has('X-CSRF-Token')) headers.set('X-CSRF-Token', csrf);
         next.headers = headers;
       }
-      return nativeFetch(input, next);
+      return nativeFetch(input, next).then((response) => {
+        const targetUrl = typeof input === 'string' ? input : (input && 'url' in input ? input.url : '');
+        const sameOrigin = !targetUrl || targetUrl.startsWith('/') || targetUrl.startsWith(window.location.origin);
+        if (sameOrigin && response.status === 401 && !targetUrl.includes('/auth/login') && !targetUrl.includes('/auth/session')) {
+          const nextPath = `${window.location.pathname}${window.location.search || ''}`;
+          window.location.assign(`/login?next=${encodeURIComponent(nextPath)}`);
+        }
+        return response;
+      });
     };
 
     function applyTheme(theme) {
@@ -1150,7 +1166,15 @@ def render_makerworks_search_html() -> str:
         if (csrf && !headers.has('X-CSRF-Token')) headers.set('X-CSRF-Token', csrf);
         next.headers = headers;
       }
-      return nativeFetch(input, next);
+      return nativeFetch(input, next).then((response) => {
+        const targetUrl = typeof input === 'string' ? input : (input && 'url' in input ? input.url : '');
+        const sameOrigin = !targetUrl || targetUrl.startsWith('/') || targetUrl.startsWith(window.location.origin);
+        if (sameOrigin && response.status === 401 && !targetUrl.includes('/auth/login') && !targetUrl.includes('/auth/session')) {
+          const nextPath = `${window.location.pathname}${window.location.search || ''}`;
+          window.location.assign(`/login?next=${encodeURIComponent(nextPath)}`);
+        }
+        return response;
+      });
     };
     function openSidebar() { document.getElementById('sidebar').classList.add('open'); document.getElementById('sidebarBackdrop').classList.add('open'); }
     function closeSidebar() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebarBackdrop').classList.remove('open'); }
@@ -1589,7 +1613,15 @@ def render_makerworks_routing_html() -> str:
         if (csrf && !headers.has('X-CSRF-Token')) headers.set('X-CSRF-Token', csrf);
         next.headers = headers;
       }
-      return nativeFetch(input, next);
+      return nativeFetch(input, next).then((response) => {
+        const targetUrl = typeof input === 'string' ? input : (input && 'url' in input ? input.url : '');
+        const sameOrigin = !targetUrl || targetUrl.startsWith('/') || targetUrl.startsWith(window.location.origin);
+        if (sameOrigin && response.status === 401 && !targetUrl.includes('/auth/login') && !targetUrl.includes('/auth/session')) {
+          const nextPath = `${window.location.pathname}${window.location.search || ''}`;
+          window.location.assign(`/login?next=${encodeURIComponent(nextPath)}`);
+        }
+        return response;
+      });
     };
     function escapeHtml(value) { return String(value ?? '').replace(/[&<>\"']/g, (char) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;' }[char])); }
     function openSidebar() { document.getElementById('sidebar').classList.add('open'); document.getElementById('sidebarBackdrop').classList.add('open'); document.getElementById('sidebar').setAttribute('aria-hidden', 'false'); }
@@ -2523,7 +2555,15 @@ def render_conversion_html() -> str:
         if (csrf && !headers.has("X-CSRF-Token")) headers.set("X-CSRF-Token", csrf);
         next.headers = headers;
       }
-      return nativeFetch(input, next);
+      return nativeFetch(input, next).then((response) => {
+        const targetUrl = typeof input === "string" ? input : (input && "url" in input ? input.url : "");
+        const sameOrigin = !targetUrl || targetUrl.startsWith("/") || targetUrl.startsWith(window.location.origin);
+        if (sameOrigin && response.status === 401 && !targetUrl.includes("/auth/login") && !targetUrl.includes("/auth/session")) {
+          const nextPath = `${window.location.pathname}${window.location.search || ""}`;
+          window.location.assign(`/login?next=${encodeURIComponent(nextPath)}`);
+        }
+        return response;
+      });
     };
 
     function applyTheme(theme) {

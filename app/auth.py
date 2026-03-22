@@ -580,12 +580,23 @@ def register_admin_auth(app: FastAPI) -> None:
             request.state.auth_scheme = "session"
             return await call_next(request)
 
-        wants_html = request.method.upper() == "GET" and "text/html" in request.headers.get("accept", "").lower()
+        accept_header = request.headers.get("accept", "").lower()
+        sec_fetch_dest = request.headers.get("sec-fetch-dest", "").lower()
+        sec_fetch_mode = request.headers.get("sec-fetch-mode", "").lower()
+        wants_html = request.method.upper() == "GET" and "text/html" in accept_header
+        is_browser_request = bool(sec_fetch_dest or sec_fetch_mode or request.headers.get("origin"))
         if wants_html:
             target = quote(request.url.path or "/", safe="/")
             if request.url.query:
                 target = f"{target}%3F{quote(request.url.query, safe='=&')}"
             return RedirectResponse(url=f"/login?next={target}", status_code=303)
+
+        if is_browser_request:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Authentication required.", "login_url": f"/login?next={quote(request.url.path or '/', safe='/')}"},
+                headers={"Cache-Control": "no-store"},
+            )
 
         return Response(
             content="Unauthorized",

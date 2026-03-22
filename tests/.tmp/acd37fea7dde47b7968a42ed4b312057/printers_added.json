@@ -1,0 +1,26 @@
+[
+  {
+    "id": "printer-2",
+    "name": "Updated Printer",
+    "config": {
+      "name": "Updated Printer",
+      "host": "192.168.1.12",
+      "serial": "ADD999",
+      "access_code": "CODE2",
+      "device_type": "unknown",
+      "local_mqtt": true,
+      "enable_camera": false,
+      "disable_ssl_verify": false,
+      "user_language": "en",
+      "file_cache_path": "/data/cache",
+      "print_cache_count": 1,
+      "timelapse_cache_count": 0,
+      "usage_hours": 0.0,
+      "force_ip": false,
+      "region": "",
+      "email": "",
+      "username": "",
+      "auth_token": ""
+    }
+  }
+]
