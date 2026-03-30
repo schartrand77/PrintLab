@@ -1545,12 +1545,12 @@
               <div class="youtube-topline">
                 <div>
                   <h3 id="youtubeTitle">YouTube Uploads</h3>
-                  <div id="youtubeSummary" class="status-line">Most recent uploaded videos for this printer.</div>
+                  <div id="youtubeSummary" class="status-line">Most recent YouTube upload attempts for this printer.</div>
                 </div>
                 <div id="youtubeConnection" class="youtube-connection">Checking status</div>
               </div>
               <div id="youtubeList" class="youtube-list">
-                <div class="youtube-empty">No uploaded videos yet.</div>
+                <div class="youtube-empty">No YouTube upload attempts yet.</div>
               </div>
               <div class="youtube-pager">
                 <div id="youtubePageInfo" class="status-line">Page 1 of 1</div>
@@ -3094,7 +3094,7 @@
         <div class="status-list-row"><strong>Callbacks</strong><span>${escapeHtml(callback.last_error ? `Error (${callback.status_code || "-"})` : (callback.last_delivered_at ? `Healthy at ${formatDateTime(callback.last_delivered_at)}` : (callback.enabled ? "Waiting for first delivery" : "Disabled")))}</span></div>
         <div class="status-list-row"><strong>Webhooks</strong><span>${escapeHtml(webhooks.enabled_count ? `${webhooks.enabled_count} enabled` : "None configured")}</span></div>
         <div class="status-list-row"><strong>Last Sync Error</strong><span>${escapeHtml(sync.last_error || "-")}</span></div>
-        <div class="status-list-row"><strong>YouTube</strong><span>${escapeHtml(youtube.enabled ? (youtube.ready ? `Ready - ${youtube.uploaded_count || 0} uploaded` : "Enabled - config incomplete") : "Disabled")}</span></div>
+        <div class="status-list-row"><strong>YouTube</strong><span>${escapeHtml(youtube.enabled ? (youtube.last_error ? `Error - ${youtube.last_error}` : (youtube.ready ? `Ready - ${youtube.uploaded_count || 0} uploaded` : "Enabled - config incomplete")) : "Disabled")}</span></div>
       `;
     }
 
@@ -3135,7 +3135,7 @@
       prev.disabled = youtubePage <= 1;
       next.disabled = youtubePage >= youtubePageCount;
       if (!items.length) {
-        list.innerHTML = "<div class='youtube-empty'>No uploaded videos yet for this printer.</div>";
+        list.innerHTML = "<div class='youtube-empty'>No YouTube upload attempts yet for this printer.</div>";
         return;
       }
       list.innerHTML = items.map((item) => `
@@ -3144,7 +3144,8 @@
           <div class="youtube-meta">
             <div class="youtube-title">${escapeHtml(item.title || item.model_name || item.file_name || "Untitled video")}</div>
             <div class="youtube-subline">${escapeHtml(item.model_name || item.file_name || "-")}</div>
-            <div class="youtube-subline">Uploaded ${escapeHtml(formatDateTime(item.uploaded_at))}${item.completed_at ? ` - Print completed ${escapeHtml(formatDateTime(item.completed_at))}` : ""}</div>
+            <div class="youtube-subline">${escapeHtml((item.status || "pending").toString().replace(/^./, (c) => c.toUpperCase()))}${item.uploaded_at ? ` ${escapeHtml(formatDateTime(item.uploaded_at))}` : (item.last_attempt_at ? ` ${escapeHtml(formatDateTime(item.last_attempt_at))}` : "")}${item.completed_at ? ` - Print completed ${escapeHtml(formatDateTime(item.completed_at))}` : ""}</div>
+            <div class="youtube-subline">${escapeHtml(item.last_error || item.path || "-")}</div>
             <div class="youtube-actions">
               ${item.video_url ? `<a href="${escapeHtml(item.video_url)}" target="_blank" rel="noopener noreferrer">Watch on YouTube</a>` : ""}
               ${item.video_id ? `<span class="youtube-subline">Video ID: ${escapeHtml(item.video_id)}</span>` : ""}

@@ -656,6 +656,35 @@ async def sync_successful_gcode_by_printer(
         _raise_api_error(exc)
 
 
+@router.post("/api/successful-gcodes/{record_id}/sync-youtube")
+async def sync_successful_gcode_to_youtube(
+    record_id: str,
+    request: Request,
+    payload: SuccessfulGcodeSyncRequest | None = None,
+) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        record = await service_or_404().sync_successful_gcode_to_youtube(record_id, force=bool(payload and payload.force))
+        return {"ok": True, "item": record}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.post("/api/printers/{printer_id}/successful-gcodes/{record_id}/sync-youtube")
+async def sync_successful_gcode_to_youtube_by_printer(
+    printer_id: str,
+    record_id: str,
+    request: Request,
+    payload: SuccessfulGcodeSyncRequest | None = None,
+) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        record = await service_or_404(printer_id).sync_successful_gcode_to_youtube(record_id, force=bool(payload and payload.force))
+        return {"ok": True, "item": record}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
 @router.get("/api/control-presets")
 async def control_presets() -> dict[str, Any]:
     return {"items": service_or_404().presets_snapshot()}

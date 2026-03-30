@@ -1367,17 +1367,33 @@ class PrinterService:
     def youtube_videos_snapshot(self, *, page: int = 1, page_size: int = 5) -> dict[str, Any]:
         page_value = max(1, int(page))
         size_value = max(1, min(50, int(page_size)))
-        uploaded = [item for item in self._successful_gcodes if (item.get("youtube") or {}).get("uploaded")]
-        uploaded.sort(
-            key=lambda item: str((item.get("youtube") or {}).get("uploaded_at") or item.get("completed_at") or ""),
+        attempted = [
+            item
+            for item in self._successful_gcodes
+            if isinstance(item, dict)
+            and (
+                (item.get("youtube") or {}).get("uploaded")
+                or (item.get("youtube") or {}).get("last_attempt_at")
+                or (item.get("youtube") or {}).get("last_error")
+                or (item.get("youtube") or {}).get("path")
+            )
+        ]
+        attempted.sort(
+            key=lambda item: str(
+                (item.get("youtube") or {}).get("uploaded_at")
+                or (item.get("youtube") or {}).get("last_attempt_at")
+                or item.get("completed_at")
+                or ""
+            ),
             reverse=True,
         )
-        total = len(uploaded)
+        total = len(attempted)
         start = (page_value - 1) * size_value
         end = start + size_value
         items = []
-        for record in uploaded[start:end]:
+        for record in attempted[start:end]:
             youtube = record.get("youtube") or {}
+            status = "uploaded" if youtube.get("uploaded") else ("failed" if youtube.get("last_error") else "pending")
             items.append(
                 {
                     "record_id": record.get("id"),
@@ -1387,6 +1403,9 @@ class PrinterService:
                     "model_name": record.get("model_name"),
                     "file_name": record.get("file_name"),
                     "completed_at": record.get("completed_at"),
+                    "status": status,
+                    "last_attempt_at": youtube.get("last_attempt_at"),
+                    "last_error": youtube.get("last_error"),
                     "uploaded_at": youtube.get("uploaded_at"),
                     "video_id": youtube.get("video_id"),
                     "video_url": youtube.get("video_url"),
@@ -2212,6 +2231,12 @@ class PrinterService:
         for record in self._successful_gcodes:
             if record.get("id") == record_id:
                 return await self._sync_successful_gcode_to_makerworks(record, force=force)
+        raise ValueError(f"Unknown successful G-code record: {record_id}")
+
+    async def sync_successful_gcode_to_youtube(self, record_id: str, *, force: bool = False) -> dict[str, Any]:
+        for record in self._successful_gcodes:
+            if record.get("id") == record_id:
+                return await self._sync_successful_gcode_to_youtube(record, force=force)
         raise ValueError(f"Unknown successful G-code record: {record_id}")
 
     async def _sync_successful_gcode_to_youtube(

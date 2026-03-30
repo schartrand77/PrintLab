@@ -57,6 +57,8 @@ def test_openapi_contains_queue_schema() -> None:
     assert "/api/jobs/{job_id}/sync-makerworks" in schema["paths"]
     assert "/api/youtube/videos" in schema["paths"]
     assert "/api/printers/{printer_id}/youtube/videos" in schema["paths"]
+    assert "/api/successful-gcodes/{record_id}/sync-youtube" in schema["paths"]
+    assert "/api/printers/{printer_id}/successful-gcodes/{record_id}/sync-youtube" in schema["paths"]
     assert "QueuePrintJobRequest" in schema["components"]["schemas"]
 
 
