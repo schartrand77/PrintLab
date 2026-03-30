@@ -1889,6 +1889,8 @@
     let youtubePage = 1;
     let youtubePageCount = 1;
     const youtubePageSize = 5;
+    let lastYoutubePayloadSignature = null;
+    let lastYoutubeFetchAt = 0;
     let currentPhotoSrc = placeholderThumb;
     let liveRetryTimer = null;
     let liveRetryAttempt = 0;
@@ -3121,6 +3123,36 @@
         : `Uploaded ${connection?.uploaded_count || 0} video${(connection?.uploaded_count || 0) === 1 ? "" : "s"}${connection?.last_uploaded_at ? ` - Last upload ${formatDateTime(connection.last_uploaded_at)}` : ""}`;
     }
 
+    function youtubePayloadSignature(payload) {
+      const items = Array.isArray(payload?.items) ? payload.items : [];
+      const compactItems = items.map((item) => ({
+        record_id: item?.record_id || "",
+        status: item?.status || "",
+        uploaded_at: item?.uploaded_at || "",
+        last_attempt_at: item?.last_attempt_at || "",
+        last_error: item?.last_error || "",
+        video_id: item?.video_id || "",
+        video_url: item?.video_url || "",
+        title: item?.title || "",
+        path: item?.path || "",
+        thumbnail_url: item?.thumbnail_url || "",
+      }));
+      const compactConnection = {
+        enabled: !!payload?.connection?.enabled,
+        ready: !!payload?.connection?.ready,
+        uploaded_count: Number(payload?.connection?.uploaded_count || 0),
+        last_uploaded_at: payload?.connection?.last_uploaded_at || "",
+        last_attempt_at: payload?.connection?.last_attempt_at || "",
+        last_error: payload?.connection?.last_error || "",
+      };
+      return JSON.stringify({
+        page: Number(payload?.page || 1),
+        pages: Number(payload?.pages || 1),
+        items: compactItems,
+        connection: compactConnection,
+      });
+    }
+
     function renderYoutubeVideos(payload) {
       const list = document.getElementById("youtubeList");
       const info = document.getElementById("youtubePageInfo");
@@ -3155,10 +3187,16 @@
       `).join("");
     }
 
-    async function loadYoutubeVideos() {
+    async function loadYoutubeVideos(force = false) {
+      const now = Date.now();
+      if (!force && now - lastYoutubeFetchAt < 12000) return;
       const r = await fetch(apiPath(`/api/youtube/videos?page=${youtubePage}&page_size=${youtubePageSize}`));
       const payload = await r.json();
       if (!r.ok) throw new Error(payload?.detail || `HTTP ${r.status}`);
+      lastYoutubeFetchAt = now;
+      const signature = youtubePayloadSignature(payload);
+      if (!force && signature === lastYoutubePayloadSignature) return;
+      lastYoutubePayloadSignature = signature;
       renderYoutubeVideos(payload);
     }
 
@@ -3166,7 +3204,7 @@
       const nextPage = Math.max(1, Math.min(youtubePageCount, youtubePage + Number(delta || 0)));
       if (nextPage === youtubePage) return;
       youtubePage = nextPage;
-      loadYoutubeVideos().catch((error) => {
+      loadYoutubeVideos(true).catch((error) => {
         const list = document.getElementById("youtubeList");
         if (list) list.innerHTML = `<div class="youtube-empty">Failed to load videos. ${escapeHtml(String(error?.message || error))}</div>`;
       });
@@ -3349,7 +3387,7 @@
       renderWebhooks(s.webhooks);
       renderSystemStatus(s.system_status);
       renderAms(s.ams);
-      await loadYoutubeVideos();
+      await loadYoutubeVideos(false);
 
       const jobStateRaw = (s.job?.state || "").toString();
       const jobState = jobStateRaw.toUpperCase();
