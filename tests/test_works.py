@@ -460,6 +460,18 @@ def test_job_thumbnail_url_uses_active_context_for_internal_plate_path() -> None
     assert url == "/api/printers/printer-1/sd/thumbnail?path=%2Fcache%2Ffigurine_plate_2.gcode.3mf"
 
 
+def test_job_thumbnail_url_skips_internal_system_gcode_path() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    url = service._job_thumbnail_url("/usr/etc/print/auto_cali_for_user_param.gcode", None)
+
+    assert url is None
+
+
 def test_resolve_sd_path_from_internal_plate_path_uses_current_subtask_name() -> None:
     service = PrinterService(
         config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},

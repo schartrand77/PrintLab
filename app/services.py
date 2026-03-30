@@ -1559,6 +1559,7 @@ class PrinterService:
         context = self._active_job_context or {}
         context_path = str(context.get("file_path") or "").strip()
         lowered = resolved_path.lower()
+        looks_like_internal_system_path = lowered.startswith("/usr/")
         looks_like_internal_plate_path = (
             lowered.startswith("/data/metadata/")
             or lowered.startswith("data/metadata/")
@@ -1574,6 +1575,8 @@ class PrinterService:
             context_name = Path(context_path).name
             if resolved_name == context_name or resolved_name == str(subtask_name or "").strip():
                 resolved_path = context_path
+        elif looks_like_internal_system_path:
+            return None
 
         if not resolved_path:
             return None
