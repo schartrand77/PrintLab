@@ -2233,6 +2233,29 @@
       }
     }
 
+    async function retryYoutubeUpload(recordId) {
+      if (!ensureRole("operator")) return;
+      try {
+        const res = await fetch(apiPath(`/api/successful-gcodes/${encodeURIComponent(recordId)}/sync-youtube`), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ force: true })
+        });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(extractErrorMessage(payload, `HTTP ${res.status}`));
+        }
+        lastYoutubePayloadSignature = null;
+        lastYoutubeFetchAt = 0;
+        await load();
+      } catch (err) {
+        const errors = document.getElementById("errors");
+        if (errors) {
+          errors.textContent = `YouTube re-upload failed: ${String(err?.message || err)}`;
+        }
+      }
+    }
+
     function updateActionButtons(jobStateRaw, connected) {
       const pauseBtn = document.getElementById("pauseBtn");
       const resumeBtn = document.getElementById("resumeBtn");
@@ -3181,10 +3204,14 @@
             <div class="youtube-actions">
               ${item.video_url ? `<a href="${escapeHtml(item.video_url)}" target="_blank" rel="noopener noreferrer">Watch on YouTube</a>` : ""}
               ${item.video_id ? `<span class="youtube-subline">Video ID: ${escapeHtml(item.video_id)}</span>` : ""}
+              ${item.record_id ? `<button class="text-btn youtube-retry" type="button" data-record-id="${escapeHtml(item.record_id)}">${item.status === "uploaded" ? "Re-upload" : "Retry Upload"}</button>` : ""}
             </div>
           </div>
         </article>
       `).join("");
+      list.querySelectorAll(".youtube-retry").forEach((button) => {
+        button.addEventListener("click", () => retryYoutubeUpload(button.dataset.recordId || ""));
+      });
     }
 
     async function loadYoutubeVideos(force = false) {
