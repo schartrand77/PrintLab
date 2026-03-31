@@ -1,0 +1,11 @@
+[
+  {
+    "id": "6e5ae446037748dc8bb67da4e47880db",
+    "event": "connected",
+    "message": "Printer connected.",
+    "severity": "info",
+    "actor": "system",
+    "details": {},
+    "at": "2026-03-31T21:53:31.262905+00:00"
+  }
+]

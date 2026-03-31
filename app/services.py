@@ -1411,6 +1411,9 @@ class PrinterService:
                     "video_url": youtube.get("video_url"),
                     "title": youtube.get("title"),
                     "path": youtube.get("path"),
+                    "progress_percent": youtube.get("progress_percent"),
+                    "progress_label": youtube.get("progress_label"),
+                    "progress_stage": youtube.get("progress_stage"),
                     "thumbnail_url": self._job_thumbnail_url(record.get("file_path"), record.get("subtask_name")),
                 }
             )
@@ -1684,6 +1687,9 @@ class PrinterService:
                 "video_url": None,
                 "path": None,
                 "title": None,
+                "progress_stage": "pending",
+                "progress_percent": 0,
+                "progress_label": "Queued",
             },
         }
         return record
@@ -1733,6 +1739,8 @@ class PrinterService:
             "public_stats_viewable": parse_bool("YOUTUBE_PUBLIC_STATS_VIEWABLE", True),
             "wait_seconds": max(0, int(get_env("YOUTUBE_TIMELAPSE_WAIT_SECONDS", "180") or "180")),
             "poll_interval_seconds": max(1, int(get_env("YOUTUBE_TIMELAPSE_POLL_INTERVAL_SECONDS", "5") or "5")),
+            "stable_seconds": max(0, int(get_env("YOUTUBE_TIMELAPSE_STABLE_SECONDS", "20") or "20")),
+            "chunk_bytes": max(256 * 1024, int(float(get_env("YOUTUBE_UPLOAD_CHUNK_MB", "8") or "8") * 1024 * 1024)),
             "timeout_seconds": max(30, int(get_env("YOUTUBE_UPLOAD_TIMEOUT_SECONDS", "900") or "900")),
         }
 
@@ -1892,6 +1900,72 @@ class PrinterService:
         candidates.sort(key=lambda item: item[0], reverse=True)
         return candidates[0][1]
 
+    async def _wait_for_stable_timelapse_file(self, path: Path, *, cfg: dict[str, Any]) -> Path:
+        stable_seconds = max(0, int(cfg.get("stable_seconds") or 0))
+        poll_interval = max(1, int(cfg.get("poll_interval_seconds") or 1))
+        deadline = time.monotonic() + max(1, int(cfg.get("wait_seconds") or 1))
+        last_signature: tuple[int, int] | None = None
+        stable_since: float | None = None
+
+        while True:
+            try:
+                stat = path.stat()
+                size = int(stat.st_size)
+                mtime_ns = int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000)))
+            except OSError:
+                size = 0
+                mtime_ns = 0
+
+            if size > 0:
+                age_seconds = max(0.0, time.time() - float(path.stat().st_mtime))
+                signature = (size, mtime_ns)
+                if stable_seconds == 0 or age_seconds >= stable_seconds:
+                    return path
+                if signature == last_signature:
+                    if stable_since is None:
+                        stable_since = time.monotonic()
+                    if (time.monotonic() - stable_since) >= stable_seconds:
+                        return path
+                else:
+                    last_signature = signature
+                    stable_since = time.monotonic()
+            else:
+                last_signature = None
+                stable_since = None
+
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"Timelapse file did not stabilize before upload timeout: {path}")
+            await asyncio.sleep(poll_interval)
+
+    def _set_youtube_progress(
+        self,
+        record: dict[str, Any],
+        *,
+        stage: str,
+        percent: int,
+        label: str,
+        save: bool = False,
+    ) -> None:
+        youtube = record.setdefault("youtube", {})
+        youtube["progress_stage"] = str(stage or "pending")
+        youtube["progress_percent"] = max(0, min(100, int(percent)))
+        youtube["progress_label"] = str(label or "").strip()
+        if save:
+            self._save_successful_gcodes()
+
+    def _schedule_pending_youtube_uploads(self) -> None:
+        cfg = self._youtube_upload_config()
+        if not cfg["enabled"]:
+            return
+        for record in self._successful_gcodes[:20]:
+            youtube = record.get("youtube") or {}
+            if youtube.get("uploaded") or youtube.get("last_error"):
+                continue
+            record_id = str(record.get("id") or "").strip()
+            if not record_id:
+                continue
+            self._schedule_youtube_upload(record_id)
+
     def _youtube_access_token(self, cfg: dict[str, Any]) -> str:
         response = requests.post(
             "https://oauth2.googleapis.com/token",
@@ -1946,6 +2020,7 @@ class PrinterService:
         if not video_path.exists():
             raise RuntimeError(f"Timelapse file does not exist: {video_path}")
 
+        self._set_youtube_progress(record, stage="preparing", percent=20, label="Preparing upload")
         context = self._youtube_template_context(record)
         title = self._render_template(str(cfg["title_template"]), context) or (record.get("file_name") or "Print")
         description = self._render_template(str(cfg["description_template"]), context)
@@ -1995,22 +2070,43 @@ class PrinterService:
             raise RuntimeError("YouTube resumable upload returned no session URL.")
 
         file_size = video_path.stat().st_size
+        chunk_bytes = max(256 * 1024, int(cfg.get("chunk_bytes") or 0))
+        bytes_sent = 0
+        upload_response = None
         with video_path.open("rb") as handle:
-            payload = handle.read()
-        upload_headers = {
-            "Content-Type": mime_type,
-            "Content-Length": str(file_size),
-        }
-        if file_size > 0:
-            upload_headers["Content-Range"] = f"bytes 0-{file_size - 1}/{file_size}"
-        upload_response = session.put(
-            upload_url,
-            data=payload,
-            headers=upload_headers,
-            timeout=cfg["timeout_seconds"],
-        )
-        if not bool(getattr(upload_response, "ok", int(getattr(upload_response, "status_code", 500)) < 400)):
-            raise RuntimeError(self._youtube_error_message(upload_response, "YouTube rejected the video upload"))
+            while True:
+                chunk = handle.read(chunk_bytes)
+                if not chunk:
+                    break
+                start = bytes_sent
+                end = start + len(chunk) - 1
+                upload_response = session.put(
+                    upload_url,
+                    data=chunk,
+                    headers={
+                        "Content-Type": mime_type,
+                        "Content-Length": str(len(chunk)),
+                        "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    },
+                    timeout=min(int(cfg["timeout_seconds"]), 300),
+                )
+                status_code = int(getattr(upload_response, "status_code", 500) or 500)
+                if not (status_code == 308 or bool(getattr(upload_response, "ok", status_code < 400))):
+                    raise RuntimeError(self._youtube_error_message(upload_response, "YouTube rejected the video upload"))
+                bytes_sent = end + 1
+                total_mb = max(1, (file_size + (1024 * 1024) - 1) // (1024 * 1024))
+                sent_mb = min(total_mb, bytes_sent // (1024 * 1024))
+                upload_percent = 25 if file_size <= 0 else int((bytes_sent / file_size) * 70)
+                self._set_youtube_progress(
+                    record,
+                    stage="uploading",
+                    percent=min(95, 25 + upload_percent),
+                    label=f"Uploading {sent_mb} / {total_mb} MB",
+                )
+        if upload_response is None:
+            raise RuntimeError("YouTube upload did not send any video content.")
+        if int(getattr(upload_response, "status_code", 500) or 500) == 308:
+            raise RuntimeError("YouTube upload session did not finalize.")
         body = upload_response.json()
         video_id = str(body.get("id") or "").strip()
         if not video_id:
@@ -2267,6 +2363,7 @@ class PrinterService:
 
         youtube = record.setdefault("youtube", {})
         youtube["last_attempt_at"] = datetime.now(timezone.utc).isoformat()
+        self._set_youtube_progress(record, stage="waiting", percent=5, label="Waiting for timelapse")
 
         selected_path = video_path
         if selected_path is None:
@@ -2287,6 +2384,8 @@ class PrinterService:
                 if time.monotonic() >= deadline:
                     raise RuntimeError("No timelapse video became available before the YouTube upload timeout.")
                 await asyncio.sleep(int(cfg["poll_interval_seconds"]))
+        selected_path = await self._wait_for_stable_timelapse_file(selected_path, cfg=cfg)
+        self._set_youtube_progress(record, stage="ready", percent=15, label="Timelapse ready")
         youtube["path"] = str(selected_path.resolve())
         try:
             result = await asyncio.get_running_loop().run_in_executor(
@@ -2306,6 +2405,9 @@ class PrinterService:
                     "video_url": result["video_url"],
                     "title": result["title"],
                     "path": result["path"],
+                    "progress_stage": "uploaded",
+                    "progress_percent": 100,
+                    "progress_label": "Uploaded",
                 }
             )
             self._save_successful_gcodes()
@@ -2326,6 +2428,8 @@ class PrinterService:
                 {
                     "uploaded": False,
                     "last_error": str(exc),
+                    "progress_stage": "failed",
+                    "progress_label": "Upload failed",
                 }
             )
             self._save_successful_gcodes()
@@ -2742,6 +2846,7 @@ class PrinterService:
                 self._queue_task = asyncio.create_task(self._queue_worker())
             if self._job_monitor_task is None or self._job_monitor_task.done():
                 self._job_monitor_task = asyncio.create_task(self._monitor_print_jobs())
+            self._schedule_pending_youtube_uploads()
             LOGGER.info("Connected to printer %s", cfg["serial"])
         except Exception as exc:
             self.last_error = str(exc)

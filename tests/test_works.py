@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from zipfile import ZipFile
@@ -878,6 +880,91 @@ def test_successful_gcode_can_download_sd_timelapse_before_youtube_upload(monkey
     assert result["youtube"]["video_id"] == "video-ftp-123"
     assert captured["upload_bytes"] == b"fake-video-from-ftp"
     assert Path(str(result["youtube"]["path"])).exists()
+
+
+def test_wait_for_stable_timelapse_file_accepts_aged_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = Path("tests/.tmp/youtube-stable-file")
+    cache_dir = tmp_path / "cache" / "timelapse"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    video_path = cache_dir / "stable.mp4"
+    video_path.write_bytes(b"stable-video")
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE", "file_cache_path": str(tmp_path / "cache")},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    original_stat = video_path.stat()
+    old_mtime = original_stat.st_mtime - 30
+    video_path.touch()
+    os.utime(video_path, (old_mtime, old_mtime))
+
+    result = asyncio.run(
+        service._wait_for_stable_timelapse_file(
+            video_path,
+            cfg={"stable_seconds": 10, "poll_interval_seconds": 1, "wait_seconds": 10},
+        )
+    )
+
+    assert result == video_path
+
+
+def test_start_reschedules_pending_youtube_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = Path("tests/.tmp/youtube-pending-recovery")
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    record_id = "pending-record"
+    successful_gcodes_path = tmp_path / "successful_gcodes_printer-1.json"
+    successful_gcodes_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": record_id,
+                    "file_name": "widget.3mf",
+                    "completed_at": "2026-03-13T12:00:00+00:00",
+                    "youtube": {
+                        "uploaded": False,
+                        "uploaded_at": None,
+                        "last_attempt_at": "2026-03-13T12:01:00+00:00",
+                        "last_error": None,
+                        "path": "/data/cache/timelapse/widget.mp4",
+                    },
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PRINTLAB_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("YOUTUBE_UPLOAD_ENABLED", "true")
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE", "file_cache_path": str(cache_dir)},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    scheduled: list[str] = []
+
+    def fake_schedule(target_record_id: str, *, force: bool = False) -> None:
+        assert force is False
+        scheduled.append(target_record_id)
+
+    class FakeClient:
+        connected = True
+
+        async def connect(self, _callback) -> None:
+            return None
+
+        async def refresh(self) -> None:
+            return None
+
+    monkeypatch.setattr(service, "_schedule_youtube_upload", fake_schedule)
+    monkeypatch.setattr("app.services.BambuClient", lambda cfg: FakeClient())
+
+    asyncio.run(service.start())
+
+    assert scheduled == [record_id]
 
 
 def test_successful_gcode_surfaces_youtube_api_message_without_upload_url(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,0 +1,13 @@
+[
+  {
+    "id": "4bfd6679da304d958ae6fa0630a7796a",
+    "printer_id": "printer-1",
+    "printer_name": "Printer 1",
+    "event": "connected",
+    "message": "Printer connected.",
+    "severity": "info",
+    "actor": "system",
+    "details": {},
+    "at": "2026-03-31T21:53:31.263923+00:00"
+  }
+]
