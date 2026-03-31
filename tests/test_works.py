@@ -1091,9 +1091,41 @@ def test_youtube_video_snapshot_is_paginated() -> None:
     assert page_one["pages"] == 2
     assert page_one["count"] == 5
     assert page_one["items"][0]["video_id"] == "video-7"
+    assert page_one["items"][0]["thumbnail_url"] == "/api/printers/printer-1/sd/thumbnail?path=%2Fcache%2Fmodel-7.3mf"
     assert page_two["page"] == 2
     assert page_two["count"] == 2
     assert page_two["items"][0]["video_id"] == "video-2"
+
+
+def test_youtube_video_snapshot_does_not_fall_back_to_active_job_thumbnail() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    service._active_job_context = {"file_path": "/cache/current-print.3mf", "plate_gcode": "/cache/current-print.gcode.3mf"}
+    service._successful_gcodes = [
+        {
+            "id": "record-1",
+            "model_name": "Historic Model",
+            "file_name": "historic.3mf",
+            "file_path": "",
+            "plate_gcode": "",
+            "subtask_name": None,
+            "completed_at": "2026-03-14T01:00:00+00:00",
+            "youtube": {
+                "uploaded": False,
+                "last_attempt_at": "2026-03-14T01:10:00+00:00",
+                "progress_percent": 5,
+                "progress_label": "Waiting for timelapse",
+                "progress_stage": "waiting",
+            },
+        }
+    ]
+
+    snapshot = service.youtube_videos_snapshot(page=1, page_size=5)
+
+    assert snapshot["items"][0]["thumbnail_url"] is None
 
 
 def test_filament_snapshot_includes_loaded_filament_name() -> None:

@@ -1414,7 +1414,7 @@ class PrinterService:
                     "progress_percent": youtube.get("progress_percent"),
                     "progress_label": youtube.get("progress_label"),
                     "progress_stage": youtube.get("progress_stage"),
-                    "thumbnail_url": self._job_thumbnail_url(record.get("file_path"), record.get("subtask_name")),
+                    "thumbnail_url": self._record_thumbnail_url(record),
                 }
             )
         return {
@@ -1587,6 +1587,26 @@ class PrinterService:
         quoted = quote(resolved_path, safe="")
         return f"/api/printers/{quote(self.printer_id, safe='')}/sd/thumbnail?path={quoted}"
 
+    def _historical_thumbnail_url(self, file_path: str | None) -> str | None:
+        resolved_path = str(file_path or "").strip()
+        lowered = resolved_path.lower()
+        if not resolved_path or lowered.startswith("/usr/"):
+            return None
+        if not resolved_path.startswith("/"):
+            return None
+        quoted = quote(resolved_path, safe="")
+        return f"/api/printers/{quote(self.printer_id, safe='')}/sd/thumbnail?path={quoted}"
+
+    def _record_thumbnail_url(self, record: dict[str, Any]) -> str | None:
+        stored = str(record.get("thumbnail_url") or "").strip()
+        if stored:
+            return stored
+        for candidate in (record.get("file_path"), record.get("plate_gcode")):
+            url = self._historical_thumbnail_url(candidate)
+            if url:
+                return url
+        return None
+
     def _is_alias_thumbnail_path(self, path: str) -> bool:
         normalized = str(path or "").strip().replace("\\", "/")
         if not normalized:
@@ -1691,6 +1711,7 @@ class PrinterService:
                 "progress_percent": 0,
                 "progress_label": "Queued",
             },
+            "thumbnail_url": self._historical_thumbnail_url(file_path) or self._historical_thumbnail_url(context.get("plate_gcode")),
         }
         return record
 
