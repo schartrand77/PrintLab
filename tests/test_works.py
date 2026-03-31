@@ -755,7 +755,7 @@ def test_successful_gcode_can_upload_timelapse_to_youtube(monkeypatch: pytest.Mo
         def put(self, url: str, *, data=None, headers=None, timeout=None):
             captured["upload_url"] = url
             captured["upload_headers"] = headers
-            captured["upload_bytes"] = data.read()
+            captured["upload_bytes"] = data
             return UploadResponse()
 
     monkeypatch.setattr("app.services.requests.post", lambda *args, **kwargs: TokenResponse())
@@ -770,6 +770,8 @@ def test_successful_gcode_can_upload_timelapse_to_youtube(monkeypatch: pytest.Mo
     assert captured["auth_header"] == "Bearer access-token"
     assert captured["upload_url"] == "https://upload.youtube.test/session"
     assert captured["upload_bytes"] == b"fake-video"
+    assert captured["upload_headers"]["Content-Length"] == str(len(b"fake-video"))
+    assert captured["upload_headers"]["Content-Range"] == f"bytes 0-{len(b'fake-video') - 1}/{len(b'fake-video')}"
 
 
 def test_successful_gcode_can_download_sd_timelapse_before_youtube_upload(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -864,7 +866,7 @@ def test_successful_gcode_can_download_sd_timelapse_before_youtube_upload(monkey
             return InitResponse()
 
         def put(self, url: str, *, data=None, headers=None, timeout=None):
-            captured["upload_bytes"] = data.read()
+            captured["upload_bytes"] = data
             return UploadResponse()
 
     monkeypatch.setattr("app.services.requests.post", lambda *args, **kwargs: TokenResponse())

@@ -1994,13 +1994,21 @@ class PrinterService:
         if not upload_url:
             raise RuntimeError("YouTube resumable upload returned no session URL.")
 
+        file_size = video_path.stat().st_size
         with video_path.open("rb") as handle:
-            upload_response = session.put(
-                upload_url,
-                data=handle,
-                headers={"Content-Type": mime_type},
-                timeout=cfg["timeout_seconds"],
-            )
+            payload = handle.read()
+        upload_headers = {
+            "Content-Type": mime_type,
+            "Content-Length": str(file_size),
+        }
+        if file_size > 0:
+            upload_headers["Content-Range"] = f"bytes 0-{file_size - 1}/{file_size}"
+        upload_response = session.put(
+            upload_url,
+            data=payload,
+            headers=upload_headers,
+            timeout=cfg["timeout_seconds"],
+        )
         if not bool(getattr(upload_response, "ok", int(getattr(upload_response, "status_code", 500)) < 400)):
             raise RuntimeError(self._youtube_error_message(upload_response, "YouTube rejected the video upload"))
         body = upload_response.json()
