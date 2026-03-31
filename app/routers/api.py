@@ -963,7 +963,7 @@ async def sd_thumbnail_by_printer(printer_id: str, path: str) -> Response:
         return Response(
             content=content,
             media_type=mime,
-            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+            headers={"Cache-Control": "public, max-age=300"},
         )
     except HTTPException:
         raise

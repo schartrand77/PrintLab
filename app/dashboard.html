@@ -1917,10 +1917,13 @@
     }
 
     function updatePhotoPreview(state) {
-      currentPhotoSrc = buildCurrentJobThumbnailUrl(state);
+      const nextPhotoSrc = buildCurrentJobThumbnailUrl(state);
+      const hasChanged = nextPhotoSrc !== currentPhotoSrc;
+      currentPhotoSrc = nextPhotoSrc;
       if (viewMode !== "photo") return;
       const img = document.getElementById("previewImage");
       if (!img) return;
+      if (!hasChanged && img.getAttribute("src") === currentPhotoSrc) return;
       img.onerror = () => { img.src = placeholderThumb; };
       img.src = currentPhotoSrc;
     }
@@ -2283,7 +2286,9 @@
         setLiveBadge("", "");
         const img = document.getElementById("previewImage");
         img.onerror = () => { img.src = placeholderThumb; };
-        img.src = currentPhotoSrc;
+        if (img.getAttribute("src") !== currentPhotoSrc) {
+          img.src = currentPhotoSrc;
+        }
       }
     }
 
