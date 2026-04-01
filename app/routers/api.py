@@ -30,6 +30,7 @@ from app.services import (
     QueueUpdateRequest,
     SuccessfulGcodeSyncRequest,
     TemperatureRequest,
+    TimelapseActionRequest,
     UpdatePrinterRequest,
     WebhookSubscriptionRequest,
     WebhookSubscriptionUpdateRequest,
@@ -681,6 +682,66 @@ async def sync_successful_gcode_to_youtube_by_printer(
     try:
         record = await service_or_404(printer_id).sync_successful_gcode_to_youtube(record_id, force=bool(payload and payload.force))
         return {"ok": True, "item": record}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.post("/api/timelapses/upload-youtube")
+async def sync_timelapse_to_youtube(request: Request, payload: TimelapseActionRequest) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        record = await service_or_404().sync_timelapse_to_youtube(payload.path, force=bool(payload.force))
+        return {"ok": True, "item": record}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.post("/api/printers/{printer_id}/timelapses/upload-youtube")
+async def sync_timelapse_to_youtube_by_printer(printer_id: str, request: Request, payload: TimelapseActionRequest) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        record = await service_or_404(printer_id).sync_timelapse_to_youtube(payload.path, force=bool(payload.force))
+        return {"ok": True, "item": record}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.delete("/api/timelapses")
+async def delete_timelapse(request: Request, path: str) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        result = await service_or_404().delete_timelapse(path)
+        return {"ok": True, **result}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.delete("/api/printers/{printer_id}/timelapses")
+async def delete_timelapse_by_printer(printer_id: str, request: Request, path: str) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        result = await service_or_404(printer_id).delete_timelapse(path)
+        return {"ok": True, **result}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.delete("/api/timelapses/all")
+async def delete_all_timelapses(request: Request) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        result = await service_or_404().delete_all_timelapses()
+        return {"ok": True, **result}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.delete("/api/printers/{printer_id}/timelapses/all")
+async def delete_all_timelapses_by_printer(printer_id: str, request: Request) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        result = await service_or_404(printer_id).delete_all_timelapses()
+        return {"ok": True, **result}
     except Exception as exc:
         _raise_api_error(exc)
 

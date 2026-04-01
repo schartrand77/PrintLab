@@ -1569,7 +1569,10 @@
                   <h3 id="youtubeTitle">YouTube Uploads</h3>
                   <div id="youtubeSummary" class="status-line">Most recent YouTube upload attempts for this printer.</div>
                 </div>
-                <div id="youtubeConnection" class="youtube-connection">Checking status</div>
+                <div class="youtube-actions">
+                  <button id="youtubeDeleteAllBtn" class="btn" type="button" onclick="deleteAllTimelapses()">Delete All</button>
+                  <div id="youtubeConnection" class="youtube-connection">Checking status</div>
+                </div>
               </div>
               <div id="youtubeList" class="youtube-list">
                 <div class="youtube-empty">No YouTube upload attempts yet.</div>
@@ -2258,13 +2261,13 @@
       }
     }
 
-    async function retryYoutubeUpload(recordId) {
+    async function uploadTimelapseToYoutube(path) {
       if (!ensureRole("operator")) return;
       try {
-        const res = await fetch(apiPath(`/api/successful-gcodes/${encodeURIComponent(recordId)}/sync-youtube`), {
+        const res = await fetch(apiPath("/api/timelapses/upload-youtube"), {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ force: true })
+          body: JSON.stringify({ path, force: true })
         });
         if (!res.ok) {
           const payload = await res.json().catch(() => ({}));
@@ -2276,7 +2279,47 @@
       } catch (err) {
         const errors = document.getElementById("errors");
         if (errors) {
-          errors.textContent = `YouTube re-upload failed: ${String(err?.message || err)}`;
+          errors.textContent = `YouTube upload failed: ${String(err?.message || err)}`;
+        }
+      }
+    }
+
+    async function deleteTimelapse(path) {
+      if (!ensureRole("operator")) return;
+      if (!window.confirm("Delete this timelapse video?")) return;
+      try {
+        const res = await fetch(apiPath(`/api/timelapses?path=${encodeURIComponent(path)}`), { method: "DELETE" });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(extractErrorMessage(payload, `HTTP ${res.status}`));
+        }
+        lastYoutubePayloadSignature = null;
+        lastYoutubeFetchAt = 0;
+        await load();
+      } catch (err) {
+        const errors = document.getElementById("errors");
+        if (errors) {
+          errors.textContent = `Timelapse delete failed: ${String(err?.message || err)}`;
+        }
+      }
+    }
+
+    async function deleteAllTimelapses() {
+      if (!ensureRole("operator")) return;
+      if (!window.confirm("Delete all timelapse videos for this printer?")) return;
+      try {
+        const res = await fetch(apiPath("/api/timelapses/all"), { method: "DELETE" });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(extractErrorMessage(payload, `HTTP ${res.status}`));
+        }
+        lastYoutubePayloadSignature = null;
+        lastYoutubeFetchAt = 0;
+        await load();
+      } catch (err) {
+        const errors = document.getElementById("errors");
+        if (errors) {
+          errors.textContent = `Delete all timelapses failed: ${String(err?.message || err)}`;
         }
       }
     }
@@ -3242,13 +3285,17 @@
             <div class="youtube-actions">
               ${item.video_url ? `<a href="${escapeHtml(item.video_url)}" target="_blank" rel="noopener noreferrer">Watch on YouTube</a>` : ""}
               ${item.video_id ? `<span class="youtube-subline">Video ID: ${escapeHtml(item.video_id)}</span>` : ""}
-              ${item.record_id ? `<button class="text-btn youtube-retry" type="button" data-record-id="${escapeHtml(item.record_id)}">${item.status === "uploaded" ? "Re-upload" : "Retry Upload"}</button>` : ""}
+              ${item.path ? `<button class="text-btn youtube-upload" type="button" data-path="${escapeHtml(item.path)}">${item.status === "uploaded" ? "Re-upload" : "Upload"}</button>` : ""}
+              ${item.path ? `<button class="text-btn youtube-delete" type="button" data-path="${escapeHtml(item.path)}">Delete</button>` : ""}
             </div>
           </div>
         </article>
       `).join("");
-      list.querySelectorAll(".youtube-retry").forEach((button) => {
-        button.addEventListener("click", () => retryYoutubeUpload(button.dataset.recordId || ""));
+      list.querySelectorAll(".youtube-upload").forEach((button) => {
+        button.addEventListener("click", () => uploadTimelapseToYoutube(button.dataset.path || ""));
+      });
+      list.querySelectorAll(".youtube-delete").forEach((button) => {
+        button.addEventListener("click", () => deleteTimelapse(button.dataset.path || ""));
       });
     }
 

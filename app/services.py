@@ -280,6 +280,11 @@ class SuccessfulGcodeSyncRequest(BaseModel):
     force: bool = False
 
 
+class TimelapseActionRequest(BaseModel):
+    path: str = Field(min_length=1)
+    force: bool = False
+
+
 class WebhookSubscriptionRequest(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
     description: str | None = Field(default=None, max_length=200)
@@ -1959,6 +1964,150 @@ class PrinterService:
             except Exception:
                 pass
 
+    def _download_timelapse_from_printer_sync(self, remote_path: str) -> Path:
+        normalized = str(remote_path or "").strip().replace("\\", "/")
+        if not normalized.startswith("/timelapse/"):
+            raise ValueError(f"Not a printer timelapse path: {remote_path}")
+        if self.client is None:
+            raise RuntimeError("Client not initialized.")
+
+        ftp = self.client.ftp_connection()
+        try:
+            local_dir = self._timelapse_cache_dir()
+            local_dir.mkdir(parents=True, exist_ok=True)
+            local_path = local_dir / Path(normalized).name
+            with local_path.open("wb") as handle:
+                ftp.retrbinary(f"RETR {normalized}", handle.write)
+            return local_path
+        finally:
+            try:
+                ftp.quit()
+            except Exception:
+                pass
+
+    def _resolve_timelapse_path_sync(self, raw_path: str) -> Path:
+        normalized = str(raw_path or "").strip()
+        if not normalized:
+            raise ValueError("Timelapse path is required.")
+        if normalized.startswith("/timelapse/"):
+            return self._download_timelapse_from_printer_sync(normalized)
+        path = Path(normalized)
+        if not path.is_absolute():
+            path = self._timelapse_cache_dir() / path
+        path = path.resolve()
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"Timelapse file not found: {raw_path}")
+        return path
+
+    def _timelapse_thumbnail_url(self, raw_path: str | None) -> str | None:
+        normalized = str(raw_path or "").strip().replace("\\", "/")
+        if normalized.startswith("/timelapse/"):
+            quoted = quote(normalized, safe="")
+            return f"/api/printers/{quote(self.printer_id, safe='')}/sd/thumbnail?path={quoted}"
+        return None
+
+    def _ensure_timelapse_record(self, source_path: str, local_path: Path) -> dict[str, Any]:
+        source_name = Path(str(source_path or local_path.name)).name.lower()
+        local_name = local_path.name.lower()
+        for record in self._successful_gcodes:
+            if not isinstance(record, dict):
+                continue
+            youtube = record.get("youtube") or {}
+            youtube_name = Path(str(youtube.get("path") or "")).name.lower()
+            if youtube_name and youtube_name in {source_name, local_name}:
+                return record
+
+        completed_at = datetime.fromtimestamp(local_path.stat().st_mtime, tz=timezone.utc).isoformat()
+        record = {
+            "id": uuid4().hex,
+            "printer_id": self.printer_id,
+            "printer_name": self.display_name,
+            "completed_at": completed_at,
+            "state": "TIMELAPSE",
+            "file_path": str(source_path or local_path),
+            "file_name": local_path.name,
+            "model_key": self._normalize_model_key(local_path.stem),
+            "model_id": None,
+            "model_name": local_path.stem,
+            "plate_index": None,
+            "plate_gcode": None,
+            "subtask_name": None,
+            "use_ams": None,
+            "ams_mapping": None,
+            "progress_percent": 100,
+            "makerworks": {
+                "attached": False,
+                "attached_at": None,
+                "last_attempt_at": None,
+                "last_error": None,
+                "status_code": None,
+                "path": None,
+            },
+            "youtube": {
+                "uploaded": False,
+                "uploaded_at": None,
+                "last_attempt_at": None,
+                "last_error": None,
+                "status_code": None,
+                "video_id": None,
+                "video_url": None,
+                "path": None,
+                "title": None,
+                "progress_stage": "pending",
+                "progress_percent": 0,
+                "progress_label": "Queued",
+            },
+            "thumbnail_url": self._timelapse_thumbnail_url(source_path),
+        }
+        self._successful_gcodes = [record, *self._successful_gcodes[:499]]
+        self._save_successful_gcodes()
+        return record
+
+    def _delete_timelapse_file_sync(self, raw_path: str) -> str:
+        normalized = str(raw_path or "").strip().replace("\\", "/")
+        if not normalized:
+            raise ValueError("Timelapse path is required.")
+        if normalized.startswith("/timelapse/"):
+            if self.client is None:
+                raise RuntimeError("Client not initialized.")
+            ftp = self.client.ftp_connection()
+            try:
+                ftp.delete(normalized)
+            finally:
+                try:
+                    ftp.quit()
+                except Exception:
+                    pass
+            local_copy = self._timelapse_cache_dir() / Path(normalized).name
+            if local_copy.exists():
+                try:
+                    local_copy.unlink()
+                except OSError:
+                    pass
+            return normalized
+
+        path = Path(normalized)
+        if not path.is_absolute():
+            path = (self._timelapse_cache_dir() / path).resolve()
+        else:
+            path = path.resolve()
+        cache_root = self._timelapse_cache_dir().resolve()
+        if cache_root not in path.parents and path != cache_root:
+            raise ValueError(f"Refusing to delete non-timelapse path: {raw_path}")
+        if path.exists():
+            path.unlink()
+        return str(path)
+
+    def _delete_all_timelapses_sync(self) -> list[str]:
+        deleted: list[str] = []
+        inventory = self._list_timelapse_inventory()
+        for item in inventory:
+            try:
+                deleted.append(self._delete_timelapse_file_sync(str(item.get("path") or "")))
+            except Exception:
+                continue
+        return deleted
+
     def _find_latest_timelapse_file(self, record: dict[str, Any]) -> Path | None:
         cache_dir = self._timelapse_cache_dir()
         if not cache_dir.exists():
@@ -2438,6 +2587,60 @@ class PrinterService:
             if record.get("id") == record_id:
                 return await self._sync_successful_gcode_to_makerworks(record, force=force)
         raise ValueError(f"Unknown successful G-code record: {record_id}")
+
+    async def sync_timelapse_to_youtube(self, timelapse_path: str, *, force: bool = False) -> dict[str, Any]:
+        selected_path = await asyncio.get_running_loop().run_in_executor(None, self._resolve_timelapse_path_sync, timelapse_path)
+        record = self._ensure_timelapse_record(timelapse_path, selected_path)
+        return await self._sync_successful_gcode_to_youtube(record, force=force, video_path=selected_path)
+
+    async def delete_timelapse(self, timelapse_path: str) -> dict[str, Any]:
+        deleted_path = await asyncio.get_running_loop().run_in_executor(None, self._delete_timelapse_file_sync, timelapse_path)
+        deleted_name = Path(str(timelapse_path or deleted_path)).name.lower()
+        changed = False
+        for record in self._successful_gcodes:
+            if not isinstance(record, dict):
+                continue
+            youtube = record.get("youtube") or {}
+            youtube_name = Path(str(youtube.get("path") or "")).name.lower()
+            file_name = Path(str(record.get("file_name") or "")).name.lower()
+            if deleted_name and deleted_name in {youtube_name, file_name}:
+                youtube.update(
+                    {
+                        "path": None,
+                        "progress_stage": "deleted",
+                        "progress_percent": 0,
+                        "progress_label": "Deleted",
+                    }
+                )
+                changed = True
+        if changed:
+            self._save_successful_gcodes()
+        return {"deleted": True, "path": deleted_path}
+
+    async def delete_all_timelapses(self) -> dict[str, Any]:
+        deleted = await asyncio.get_running_loop().run_in_executor(None, self._delete_all_timelapses_sync)
+        changed = False
+        if deleted:
+            deleted_names = {Path(item).name.lower() for item in deleted if item}
+            for record in self._successful_gcodes:
+                if not isinstance(record, dict):
+                    continue
+                youtube = record.get("youtube") or {}
+                youtube_name = Path(str(youtube.get("path") or "")).name.lower()
+                file_name = Path(str(record.get("file_name") or "")).name.lower()
+                if deleted_names.intersection({youtube_name, file_name}):
+                    youtube.update(
+                        {
+                            "path": None,
+                            "progress_stage": "deleted",
+                            "progress_percent": 0,
+                            "progress_label": "Deleted",
+                        }
+                    )
+                    changed = True
+        if changed:
+            self._save_successful_gcodes()
+        return {"deleted": len(deleted), "items": deleted}
 
     async def sync_successful_gcode_to_youtube(self, record_id: str, *, force: bool = False) -> dict[str, Any]:
         for record in self._successful_gcodes:
