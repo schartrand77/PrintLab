@@ -3177,7 +3177,11 @@
       const items = Array.isArray(payload?.items) ? payload.items : [];
       const compactItems = items.map((item) => ({
         record_id: item?.record_id || "",
+        file_name: item?.file_name || "",
+        model_name: item?.model_name || "",
         status: item?.status || "",
+        completed_at: item?.completed_at || "",
+        captured_at: item?.captured_at || "",
         uploaded_at: item?.uploaded_at || "",
         last_attempt_at: item?.last_attempt_at || "",
         last_error: item?.last_error || "",
@@ -3220,7 +3224,7 @@
       prev.disabled = youtubePage <= 1;
       next.disabled = youtubePage >= youtubePageCount;
       if (!items.length) {
-        list.innerHTML = "<div class='youtube-empty'>No YouTube upload attempts yet for this printer.</div>";
+        list.innerHTML = "<div class='youtube-empty'>No timelapse videos found for this printer.</div>";
         return;
       }
       list.innerHTML = items.map((item) => `
@@ -3229,10 +3233,10 @@
           <div class="youtube-meta">
             <div class="youtube-title">${escapeHtml(item.title || item.model_name || item.file_name || "Untitled video")}</div>
             <div class="youtube-subline">${escapeHtml(item.model_name || item.file_name || "-")}</div>
-            <div class="youtube-subline">${escapeHtml((item.status || "pending").toString().replace(/^./, (c) => c.toUpperCase()))}${item.uploaded_at ? ` ${escapeHtml(formatDateTime(item.uploaded_at))}` : (item.last_attempt_at ? ` ${escapeHtml(formatDateTime(item.last_attempt_at))}` : "")}${item.completed_at ? ` - Print completed ${escapeHtml(formatDateTime(item.completed_at))}` : ""}</div>
+            <div class="youtube-subline">${escapeHtml((item.status || "new").toString().replace(/^./, (c) => c.toUpperCase()))}${item.uploaded_at ? ` ${escapeHtml(formatDateTime(item.uploaded_at))}` : (item.last_attempt_at ? ` ${escapeHtml(formatDateTime(item.last_attempt_at))}` : "")}${item.captured_at ? ` - Captured ${escapeHtml(formatDateTime(item.captured_at))}` : ""}${item.completed_at ? ` - Print completed ${escapeHtml(formatDateTime(item.completed_at))}` : ""}</div>
             <div class="youtube-progress">
               <div class="youtube-progress-track"><div class="youtube-progress-fill" style="width:${Math.max(0, Math.min(100, Number(item.progress_percent || 0)))}%"></div></div>
-              <div class="youtube-progress-label">${escapeHtml(item.progress_label || (item.status === "uploaded" ? "Uploaded" : (item.status === "failed" ? "Upload failed" : "Queued")))}</div>
+              <div class="youtube-progress-label">${escapeHtml(item.progress_label || (item.status === "uploaded" ? "Uploaded" : (item.status === "failed" ? "Upload failed" : "Not uploaded")))}</div>
             </div>
             <div class="youtube-subline">${escapeHtml(item.last_error || item.path || "-")}</div>
             <div class="youtube-actions">

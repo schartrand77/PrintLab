@@ -1364,57 +1364,121 @@ class PrinterService:
             "last_error": (latest_error or {}).get("youtube", {}).get("last_error"),
         }
 
+    def _list_timelapse_inventory(self) -> list[dict[str, Any]]:
+        pattern_time = re.compile(r"^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\S+\s+\d+\s+\d+:\d+)\s+(.+)$")
+        pattern_year = re.compile(r"^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\S+\s+\d+\s+\d+)\s+(.+)$")
+        items: list[dict[str, Any]] = []
+        seen_names: set[str] = set()
+
+        if self.client is not None and getattr(self.client, "connected", False):
+            ftp = self.client.ftp_connection()
+
+            def parse_line(line: str) -> None:
+                match = pattern_time.match(line) or pattern_year.match(line)
+                if not match:
+                    return
+                size_raw, ts_raw, name = match.groups()
+                lowered = name.lower()
+                if not lowered.endswith((".mp4", ".avi", ".mov")):
+                    return
+                try:
+                    size_value = int(size_raw)
+                except ValueError:
+                    size_value = 0
+                path = f"/timelapse/{name}"
+                timestamp = self._parse_ftp_list_timestamp(ts_raw)
+                items.append(
+                    {
+                        "name": name,
+                        "path": path,
+                        "size": size_value,
+                        "mtime": timestamp,
+                        "thumbnail_url": f"/api/printers/{quote(self.printer_id, safe='')}/sd/thumbnail?path={quote(path, safe='')}",
+                    }
+                )
+                seen_names.add(name.lower())
+
+            try:
+                ftp.retrlines("LIST /timelapse", parse_line)
+            except Exception:
+                items = []
+            finally:
+                try:
+                    ftp.quit()
+                except Exception:
+                    pass
+
+        cache_dir = self._timelapse_cache_dir()
+        if cache_dir.exists():
+            for ext in ("*.mp4", "*.avi", "*.mov"):
+                for path in cache_dir.glob(ext):
+                    name = path.name
+                    if name.lower() in seen_names:
+                        continue
+                    try:
+                        stat = path.stat()
+                    except OSError:
+                        continue
+                    items.append(
+                        {
+                            "name": name,
+                            "path": str(path.resolve()),
+                            "size": int(stat.st_size),
+                            "mtime": float(stat.st_mtime),
+                            "thumbnail_url": None,
+                        }
+                    )
+        items.sort(key=lambda item: (float(item.get("mtime") or 0), str(item.get("name") or "")), reverse=True)
+        return items
+
     def youtube_videos_snapshot(self, *, page: int = 1, page_size: int = 5) -> dict[str, Any]:
         page_value = max(1, int(page))
         size_value = max(1, min(50, int(page_size)))
-        attempted = [
-            item
-            for item in self._successful_gcodes
-            if isinstance(item, dict)
-            and (
-                (item.get("youtube") or {}).get("uploaded")
-                or (item.get("youtube") or {}).get("last_attempt_at")
-                or (item.get("youtube") or {}).get("last_error")
-                or (item.get("youtube") or {}).get("path")
-            )
-        ]
-        attempted.sort(
-            key=lambda item: str(
-                (item.get("youtube") or {}).get("uploaded_at")
-                or (item.get("youtube") or {}).get("last_attempt_at")
-                or item.get("completed_at")
-                or ""
-            ),
-            reverse=True,
-        )
-        total = len(attempted)
+        timelapses = self._list_timelapse_inventory()
+        record_by_timelapse_name: dict[str, dict[str, Any]] = {}
+        for record in self._successful_gcodes:
+            if not isinstance(record, dict):
+                continue
+            youtube = record.get("youtube") or {}
+            video_path = str(youtube.get("path") or "").strip()
+            if not video_path:
+                continue
+            record_by_timelapse_name[Path(video_path).name.lower()] = record
+
+        total = len(timelapses)
         start = (page_value - 1) * size_value
         end = start + size_value
         items = []
-        for record in attempted[start:end]:
-            youtube = record.get("youtube") or {}
-            status = "uploaded" if youtube.get("uploaded") else ("failed" if youtube.get("last_error") else "pending")
+        for timelapse in timelapses[start:end]:
+            name = str(timelapse.get("name") or "")
+            record = record_by_timelapse_name.get(name.lower())
+            youtube = (record or {}).get("youtube") or {}
+            status = "uploaded" if youtube.get("uploaded") else ("failed" if youtube.get("last_error") else "new")
             items.append(
                 {
-                    "record_id": record.get("id"),
+                    "record_id": (record or {}).get("id"),
                     "printer_id": self.printer_id,
                     "printer_name": self.display_name,
-                    "model_id": record.get("model_id"),
-                    "model_name": record.get("model_name"),
-                    "file_name": record.get("file_name"),
-                    "completed_at": record.get("completed_at"),
+                    "model_id": (record or {}).get("model_id"),
+                    "model_name": (record or {}).get("model_name"),
+                    "file_name": name,
+                    "completed_at": (record or {}).get("completed_at"),
                     "status": status,
                     "last_attempt_at": youtube.get("last_attempt_at"),
                     "last_error": youtube.get("last_error"),
                     "uploaded_at": youtube.get("uploaded_at"),
                     "video_id": youtube.get("video_id"),
                     "video_url": youtube.get("video_url"),
-                    "title": youtube.get("title"),
-                    "path": youtube.get("path"),
-                    "progress_percent": youtube.get("progress_percent"),
-                    "progress_label": youtube.get("progress_label"),
-                    "progress_stage": youtube.get("progress_stage"),
-                    "thumbnail_url": self._record_thumbnail_url(record),
+                    "title": youtube.get("title") or Path(name).stem,
+                    "path": timelapse.get("path"),
+                    "progress_percent": youtube.get("progress_percent") if record else (100 if youtube.get("uploaded") else 0),
+                    "progress_label": youtube.get("progress_label") if record else ("Uploaded" if youtube.get("uploaded") else "Not uploaded"),
+                    "progress_stage": youtube.get("progress_stage") if record else ("uploaded" if youtube.get("uploaded") else "new"),
+                    "thumbnail_url": timelapse.get("thumbnail_url") or (self._record_thumbnail_url(record) if record else None),
+                    "captured_at": datetime.fromtimestamp(float(timelapse.get("mtime") or 0), tz=timezone.utc).isoformat()
+                    if timelapse.get("mtime")
+                    else None,
+                    "size_bytes": timelapse.get("size"),
                 }
             )
         return {
