@@ -1441,25 +1441,24 @@ class PrinterService:
         size_value = max(1, min(50, int(page_size)))
         timelapses = self._list_timelapse_inventory()
         record_by_timelapse_name: dict[str, dict[str, Any]] = {}
+        orphan_records: list[dict[str, Any]] = []
         for record in self._successful_gcodes:
             if not isinstance(record, dict):
                 continue
             youtube = record.get("youtube") or {}
             video_path = str(youtube.get("path") or "").strip()
             if not video_path:
+                orphan_records.append(record)
                 continue
             record_by_timelapse_name[Path(video_path).name.lower()] = record
 
-        total = len(timelapses)
-        start = (page_value - 1) * size_value
-        end = start + size_value
-        items = []
-        for timelapse in timelapses[start:end]:
+        merged_items: list[dict[str, Any]] = []
+        for timelapse in timelapses:
             name = str(timelapse.get("name") or "")
             record = record_by_timelapse_name.get(name.lower())
             youtube = (record or {}).get("youtube") or {}
             status = "uploaded" if youtube.get("uploaded") else ("failed" if youtube.get("last_error") else "new")
-            items.append(
+            merged_items.append(
                 {
                     "record_id": (record or {}).get("id"),
                     "printer_id": self.printer_id,
@@ -1486,6 +1485,58 @@ class PrinterService:
                     "size_bytes": timelapse.get("size"),
                 }
             )
+
+        orphan_timelapse_names = {str(item.get("name") or "").lower() for item in timelapses}
+        unmatched_records = list(orphan_records)
+        for path_name, record in record_by_timelapse_name.items():
+            if path_name not in orphan_timelapse_names:
+                unmatched_records.append(record)
+        for record in unmatched_records:
+            youtube = record.get("youtube") or {}
+            path_name = Path(str(youtube.get("path") or "")).name.lower()
+            if path_name and path_name in orphan_timelapse_names:
+                continue
+            file_name = str(record.get("file_name") or path_name or "")
+            status = "uploaded" if youtube.get("uploaded") else ("failed" if youtube.get("last_error") else "new")
+            merged_items.append(
+                {
+                    "record_id": record.get("id"),
+                    "printer_id": self.printer_id,
+                    "printer_name": self.display_name,
+                    "model_id": record.get("model_id"),
+                    "model_name": record.get("model_name"),
+                    "file_name": file_name,
+                    "completed_at": record.get("completed_at"),
+                    "status": status,
+                    "last_attempt_at": youtube.get("last_attempt_at"),
+                    "last_error": youtube.get("last_error"),
+                    "uploaded_at": youtube.get("uploaded_at"),
+                    "video_id": youtube.get("video_id"),
+                    "video_url": youtube.get("video_url"),
+                    "title": youtube.get("title") or Path(file_name).stem,
+                    "path": youtube.get("path"),
+                    "progress_percent": youtube.get("progress_percent") if youtube.get("progress_percent") is not None else (100 if youtube.get("uploaded") else 0),
+                    "progress_label": youtube.get("progress_label") or ("Uploaded" if youtube.get("uploaded") else "Not uploaded"),
+                    "progress_stage": youtube.get("progress_stage") or ("uploaded" if youtube.get("uploaded") else "new"),
+                    "thumbnail_url": self._record_thumbnail_url(record),
+                    "captured_at": record.get("completed_at"),
+                    "size_bytes": None,
+                }
+            )
+
+        merged_items.sort(
+            key=lambda item: (
+                str(item.get("captured_at") or ""),
+                str(item.get("uploaded_at") or ""),
+                str(item.get("record_id") or ""),
+                str(item.get("file_name") or ""),
+            ),
+            reverse=True,
+        )
+        total = len(merged_items)
+        start = (page_value - 1) * size_value
+        end = start + size_value
+        items = merged_items[start:end]
         return {
             "items": items,
             "count": len(items),
@@ -4996,5 +5047,3 @@ class PrintJobManager:
                 continue
             return await service._sync_submitted_job_to_makerworks(job, force=force)
         raise ValueError(f"Unknown submitted job: {job_id}")
-
-
