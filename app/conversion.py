@@ -173,7 +173,7 @@ def infer_source_format(filename: str, source_format: str | None = None) -> str:
         return requested
 
     lowered_name = str(filename or "").lower()
-    if lowered_name.endswith(".gcode.3mf") and "3mf" in source_formats:
+    if lowered_name.endswith(".gcode.3mf"):
         return "3mf"
 
     suffix = Path(lowered_name).suffix.lower().lstrip(".")
