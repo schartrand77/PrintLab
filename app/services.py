@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qs, quote, urlencode, urlparse, urlsplit, urlunsplit
 from uuid import uuid4
 from zipfile import ZipFile
 
@@ -1600,11 +1600,20 @@ class PrinterService:
     def _record_thumbnail_url(self, record: dict[str, Any]) -> str | None:
         stored = str(record.get("thumbnail_url") or "").strip()
         if stored:
-            return stored
+            parsed = urlparse(stored)
+            stored_path = parse_qs(parsed.query).get("path", [""])[0].strip() if parsed.query else ""
+            if stored_path and not self._is_alias_thumbnail_path(stored_path):
+                return stored
+            if stored and not stored_path:
+                return stored
         for candidate in (record.get("file_path"), record.get("plate_gcode")):
+            if self._is_alias_thumbnail_path(str(candidate or "")):
+                continue
             url = self._historical_thumbnail_url(candidate)
             if url:
                 return url
+        if stored:
+            return stored
         return None
 
     def _is_alias_thumbnail_path(self, path: str) -> bool:
@@ -1670,7 +1679,11 @@ class PrinterService:
 
     def _build_completion_record(self, snapshot: dict[str, Any], completed_at: str) -> dict[str, Any]:
         context = self._active_job_context or {}
-        file_path = str(snapshot.get("file_path") or context.get("file_path") or "").strip()
+        snapshot_file_path = str(snapshot.get("file_path") or "").strip()
+        context_file_path = str(context.get("file_path") or "").strip()
+        file_path = snapshot_file_path or context_file_path
+        if self._is_alias_thumbnail_path(file_path) and context_file_path:
+            file_path = context_file_path
         metadata = self._extract_model_metadata(file_path, snapshot.get("subtask_name") or context.get("subtask_name"))
         record = {
             "id": uuid4().hex,
@@ -2095,8 +2108,9 @@ class PrinterService:
         bytes_sent = 0
         upload_response = None
         with video_path.open("rb") as handle:
-            while True:
-                chunk = handle.read(chunk_bytes)
+            while bytes_sent < file_size:
+                remaining = file_size - bytes_sent
+                chunk = handle.read(min(chunk_bytes, remaining))
                 if not chunk:
                     break
                 start = bytes_sent
