@@ -1455,7 +1455,16 @@ class PrinterService:
         merged_items: list[dict[str, Any]] = []
         for timelapse in timelapses:
             name = str(timelapse.get("name") or "")
-            record = record_by_timelapse_name.get(name.lower())
+            captured_at = (
+                datetime.fromtimestamp(float(timelapse.get("mtime") or 0), tz=timezone.utc)
+                if timelapse.get("mtime")
+                else None
+            )
+            record = record_by_timelapse_name.get(name.lower()) or self._match_timelapse_record(
+                source_path=str(timelapse.get("path") or ""),
+                local_name=name,
+                captured_at=captured_at,
+            )
             youtube = (record or {}).get("youtube") or {}
             status = "uploaded" if youtube.get("uploaded") else ("failed" if youtube.get("last_error") else "new")
             merged_items.append(
@@ -1479,9 +1488,7 @@ class PrinterService:
                     "progress_label": youtube.get("progress_label") if record else ("Uploaded" if youtube.get("uploaded") else "Not uploaded"),
                     "progress_stage": youtube.get("progress_stage") if record else ("uploaded" if youtube.get("uploaded") else "new"),
                     "thumbnail_url": timelapse.get("thumbnail_url") or (self._record_thumbnail_url(record) if record else None),
-                    "captured_at": datetime.fromtimestamp(float(timelapse.get("mtime") or 0), tz=timezone.utc).isoformat()
-                    if timelapse.get("mtime")
-                    else None,
+                    "captured_at": captured_at.isoformat() if captured_at else None,
                     "size_bytes": timelapse.get("size"),
                 }
             )
@@ -2057,18 +2064,91 @@ class PrinterService:
             return f"/api/printers/{quote(self.printer_id, safe='')}/sd/thumbnail?path={quoted}"
         return None
 
-    def _ensure_timelapse_record(self, source_path: str, local_path: Path) -> dict[str, Any]:
-        source_name = Path(str(source_path or local_path.name)).name.lower()
-        local_name = local_path.name.lower()
+    def _parse_iso_timestamp(self, raw: Any) -> datetime | None:
+        value = str(raw or "").strip()
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _match_timelapse_record(
+        self,
+        *,
+        source_path: str | None = None,
+        local_name: str | None = None,
+        captured_at: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        source_name = Path(str(source_path or "")).name.lower()
+        local_file_name = Path(str(local_name or "")).name.lower()
+        timelapse_name = local_file_name or source_name
+        timelapse_stem = Path(timelapse_name).stem
+        timelapse_key = self._normalize_model_key(timelapse_stem)
+        timelapse_plate_index = self._plate_index_from_path(timelapse_name)
+        generic_plate_name = bool(re.fullmatch(r"plate[-_ ]?\d+", timelapse_stem, re.IGNORECASE))
+
+        best_match: dict[str, Any] | None = None
+        best_score: tuple[int, int, float] | None = None
+        fallback_window_seconds = 12 * 60 * 60
         for record in self._successful_gcodes:
             if not isinstance(record, dict):
                 continue
             youtube = record.get("youtube") or {}
             youtube_name = Path(str(youtube.get("path") or "")).name.lower()
-            if youtube_name and youtube_name in {source_name, local_name}:
+            record_file_name = Path(str(record.get("file_name") or "")).name.lower()
+            if source_name and source_name in {youtube_name, record_file_name}:
+                return record
+            if local_file_name and local_file_name in {youtube_name, record_file_name}:
                 return record
 
-        completed_at = datetime.fromtimestamp(local_path.stat().st_mtime, tz=timezone.utc).isoformat()
+            score = 0
+            record_plate_index = record.get("plate_index")
+            if timelapse_plate_index and record_plate_index == timelapse_plate_index:
+                score += 3
+
+            record_model_key = str(record.get("model_key") or "").strip()
+            record_model_name_key = self._normalize_model_key(str(record.get("model_name") or ""))
+            record_file_key = self._normalize_model_key(Path(record_file_name).stem)
+            if timelapse_key and timelapse_key in {record_model_key, record_model_name_key, record_file_key}:
+                score += 6
+
+            completed_at = self._parse_iso_timestamp(record.get("completed_at"))
+            time_delta_seconds = float("inf")
+            if captured_at and completed_at:
+                time_delta_seconds = abs((captured_at - completed_at).total_seconds())
+                if time_delta_seconds <= fallback_window_seconds:
+                    score += 2
+                elif generic_plate_name:
+                    continue
+
+            if generic_plate_name and not timelapse_key and score <= 0:
+                continue
+
+            pending_upload = 1 if not str(youtube.get("path") or "").strip() else 0
+            candidate_score = (score, pending_upload, -time_delta_seconds)
+            if best_score is None or candidate_score > best_score:
+                best_match = record
+                best_score = candidate_score
+
+        if best_score and best_score[0] > 0:
+            return best_match
+        return None
+
+    def _ensure_timelapse_record(self, source_path: str, local_path: Path) -> dict[str, Any]:
+        captured_at = datetime.fromtimestamp(local_path.stat().st_mtime, tz=timezone.utc)
+        matched_record = self._match_timelapse_record(
+            source_path=source_path,
+            local_name=local_path.name,
+            captured_at=captured_at,
+        )
+        if matched_record is not None:
+            return matched_record
+
+        completed_at = captured_at.isoformat()
         record = {
             "id": uuid4().hex,
             "printer_id": self.printer_id,
