@@ -1088,13 +1088,13 @@ async def chamber_stream_by_printer(printer_id: str) -> StreamingResponse:
                         rtsp_url,
                         "-an",
                         "-vf",
-                        "fps=12",
+                        "fps=18",
                         "-f",
                         "image2pipe",
                         "-vcodec",
                         "mjpeg",
                         "-q:v",
-                        "6",
+                        "4",
                         "pipe:1",
                     ]
                     proc = await asyncio.create_subprocess_exec(
@@ -1108,12 +1108,12 @@ async def chamber_stream_by_printer(printer_id: str) -> StreamingResponse:
                     started = False
                     last_frame_at = asyncio.get_running_loop().time()
                     while True:
-                        chunk = await asyncio.wait_for(proc.stdout.read(65536), timeout=3.0)
+                        chunk = await asyncio.wait_for(proc.stdout.read(65536), timeout=5.0)
                         if not chunk:
                             if proc.returncode is not None:
                                 break
                             await asyncio.sleep(0.01)
-                            if started and (asyncio.get_running_loop().time() - last_frame_at) > 3.0:
+                            if started and (asyncio.get_running_loop().time() - last_frame_at) > 5.0:
                                 raise RuntimeError("ffmpeg stream stalled")
                             continue
                         started = True
