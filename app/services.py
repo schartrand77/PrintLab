@@ -1398,7 +1398,7 @@ class PrinterService:
                         "path": path,
                         "size": size_value,
                         "mtime": timestamp,
-                        "thumbnail_url": f"/api/printers/{quote(self.printer_id, safe='')}/sd/thumbnail?path={quote(path, safe='')}",
+                        "thumbnail_url": None,
                     }
                 )
                 seen_names.add(name.lower())
@@ -2397,6 +2397,9 @@ class PrinterService:
     def _youtube_upload_video(self, record: dict[str, Any], video_path: Path, cfg: dict[str, Any]) -> dict[str, Any]:
         if not video_path.exists():
             raise RuntimeError(f"Timelapse file does not exist: {video_path}")
+        file_size = int(video_path.stat().st_size)
+        if file_size <= 0:
+            raise RuntimeError(f"Timelapse file is empty: {video_path}")
 
         self._set_youtube_progress(record, stage="preparing", percent=20, label="Preparing upload")
         context = self._youtube_template_context(record)
@@ -2436,7 +2439,7 @@ class PrinterService:
             },
             json=metadata,
             headers={
-                "X-Upload-Content-Length": str(video_path.stat().st_size),
+                "X-Upload-Content-Length": str(file_size),
                 "X-Upload-Content-Type": mime_type,
             },
             timeout=30,
@@ -2447,7 +2450,6 @@ class PrinterService:
         if not upload_url:
             raise RuntimeError("YouTube resumable upload returned no session URL.")
 
-        file_size = video_path.stat().st_size
         chunk_bytes = max(256 * 1024, int(cfg.get("chunk_bytes") or 0))
         bytes_sent = 0
         upload_response = None

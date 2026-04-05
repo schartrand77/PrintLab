@@ -776,6 +776,87 @@ def test_successful_gcode_can_upload_timelapse_to_youtube(monkeypatch: pytest.Mo
     assert captured["upload_headers"]["Content-Range"] == f"bytes 0-{len(b'fake-video') - 1}/{len(b'fake-video')}"
 
 
+def test_youtube_upload_uses_consistent_file_size_for_resumable_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = Path("tests/.tmp/youtube-upload-stable-size")
+    cache_dir = tmp_path / "cache" / "timelapse"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    video_path = cache_dir / "video_2026-03-13_12-12-18.mp4"
+    payload = b"fake-video"
+    video_path.write_bytes(payload)
+
+    monkeypatch.setenv("YOUTUBE_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("YOUTUBE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("YOUTUBE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("YOUTUBE_REFRESH_TOKEN", "refresh-token")
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE", "file_cache_path": str(tmp_path / "cache")},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    record = {
+        "id": "record-1",
+        "file_name": "widget.3mf",
+        "model_name": "Widget",
+        "completed_at": "2026-03-13T12:00:00+00:00",
+        "youtube": {"uploaded": False},
+    }
+
+    class TokenResponse:
+        ok = True
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {"access_token": "access-token"}
+
+    class InitResponse:
+        status_code = 200
+        headers = {"Location": "https://upload.youtube.test/session"}
+
+    class UploadResponse:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {"id": "video-123"}
+
+    captured: dict[str, object] = {}
+    original_stat = Path.stat
+    stat_calls = {"target": 0}
+
+    def fake_stat(self: Path):
+        result = original_stat(self)
+        if self == video_path:
+            stat_calls["target"] += 1
+            if stat_calls["target"] == 2:
+                return SimpleNamespace(st_size=result.st_size + 1024, st_mtime=result.st_mtime, st_mtime_ns=result.st_mtime_ns)
+        return result
+
+    class FakeSession:
+        headers: dict[str, str]
+
+        def __init__(self) -> None:
+            self.headers = {}
+
+        def post(self, url: str, *, params=None, json=None, headers=None, timeout=None):
+            captured["init_headers"] = headers
+            return InitResponse()
+
+        def put(self, url: str, *, data=None, headers=None, timeout=None):
+            captured["upload_headers"] = headers
+            captured["upload_bytes"] = data
+            return UploadResponse()
+
+    monkeypatch.setattr("app.services.requests.post", lambda *args, **kwargs: TokenResponse())
+    monkeypatch.setattr("app.services.requests.Session", FakeSession)
+    monkeypatch.setattr(Path, "stat", fake_stat, raising=False)
+
+    asyncio.run(service._sync_successful_gcode_to_youtube(record, force=True, video_path=video_path))
+
+    assert captured["init_headers"]["X-Upload-Content-Length"] == str(len(payload))
+    assert captured["upload_headers"]["Content-Range"] == f"bytes 0-{len(payload) - 1}/{len(payload)}"
+    assert captured["upload_bytes"] == payload
+
+
 def test_successful_gcode_can_download_sd_timelapse_before_youtube_upload(monkeypatch: pytest.MonkeyPatch) -> None:
     tmp_path = Path("tests/.tmp/youtube-upload-from-ftp")
     cache_dir = tmp_path / "cache" / "timelapse"
@@ -1126,6 +1207,29 @@ def test_youtube_video_snapshot_does_not_fall_back_to_active_job_thumbnail() -> 
     snapshot = service.youtube_videos_snapshot(page=1, page_size=5)
 
     assert snapshot["items"][0]["thumbnail_url"] is None
+
+
+def test_list_timelapse_inventory_does_not_expose_mp4_thumbnail_endpoint() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    class FakeFtp:
+        def retrlines(self, command: str, callback) -> None:
+            assert command == "LIST /timelapse"
+            callback("-rw-r--r-- 1 user group 10 Apr 02 14:30 video_2026-04-02_14-30-24.mp4")
+
+        def quit(self) -> None:
+            return None
+
+    service.client = SimpleNamespace(ftp_connection=lambda: FakeFtp(), connected=True)
+
+    items = service._list_timelapse_inventory()
+
+    assert items[0]["path"] == "/timelapse/video_2026-04-02_14-30-24.mp4"
+    assert items[0]["thumbnail_url"] is None
 
 
 def test_filament_snapshot_includes_loaded_filament_name() -> None:
