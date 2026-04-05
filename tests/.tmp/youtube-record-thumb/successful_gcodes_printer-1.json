@@ -1,0 +1,43 @@
+[
+  {
+    "id": "eb468cb92e96404dad3237f63452dbe1",
+    "printer_id": "printer-1",
+    "printer_name": "Printer 1",
+    "completed_at": "2026-04-05T15:55:28.284542+00:00",
+    "state": "TIMELAPSE",
+    "file_path": "/timelapse/video_2026-04-02_14-30-24.mp4",
+    "file_name": "video_2026-04-02_14-30-24.mp4",
+    "model_key": "video-2026-04-02-14-30-24",
+    "model_id": null,
+    "model_name": "video_2026-04-02_14-30-24",
+    "plate_index": null,
+    "plate_gcode": null,
+    "subtask_name": null,
+    "use_ams": null,
+    "ams_mapping": null,
+    "progress_percent": 100,
+    "makerworks": {
+      "attached": false,
+      "attached_at": null,
+      "last_attempt_at": null,
+      "last_error": null,
+      "status_code": null,
+      "path": null
+    },
+    "youtube": {
+      "uploaded": false,
+      "uploaded_at": null,
+      "last_attempt_at": null,
+      "last_error": null,
+      "status_code": null,
+      "video_id": null,
+      "video_url": null,
+      "path": null,
+      "title": null,
+      "progress_stage": "pending",
+      "progress_percent": 0,
+      "progress_label": "Queued"
+    },
+    "thumbnail_url": null
+  }
+]

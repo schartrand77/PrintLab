@@ -2058,10 +2058,6 @@ class PrinterService:
         return path
 
     def _timelapse_thumbnail_url(self, raw_path: str | None) -> str | None:
-        normalized = str(raw_path or "").strip().replace("\\", "/")
-        if normalized.startswith("/timelapse/"):
-            quoted = quote(normalized, safe="")
-            return f"/api/printers/{quote(self.printer_id, safe='')}/sd/thumbnail?path={quoted}"
         return None
 
     def _parse_iso_timestamp(self, raw: Any) -> datetime | None:

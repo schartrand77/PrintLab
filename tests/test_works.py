@@ -1232,6 +1232,29 @@ def test_list_timelapse_inventory_does_not_expose_mp4_thumbnail_endpoint() -> No
     assert items[0]["thumbnail_url"] is None
 
 
+def test_ensure_timelapse_record_does_not_store_remote_mp4_thumbnail() -> None:
+    tmp_path = Path("tests/.tmp/youtube-record-thumb")
+    cache_dir = tmp_path / "cache" / "timelapse"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    local_path = cache_dir / "video_2026-04-02_14-30-24.mp4"
+    local_path.write_bytes(b"video")
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setenv("PRINTLAB_DATA_DIR", str(tmp_path))
+    try:
+        service = PrinterService(
+            config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE", "file_cache_path": str(tmp_path / "cache")},
+            printer_id="printer-1",
+            display_name="Printer 1",
+        )
+
+        record = service._ensure_timelapse_record("/timelapse/video_2026-04-02_14-30-24.mp4", local_path)
+
+        assert record["thumbnail_url"] is None
+    finally:
+        monkeypatch.undo()
+
+
 def test_filament_snapshot_includes_loaded_filament_name() -> None:
     service = PrinterService(
         config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
