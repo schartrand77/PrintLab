@@ -963,6 +963,45 @@ def test_successful_gcode_can_download_sd_timelapse_before_youtube_upload(monkey
     assert Path(str(result["youtube"]["path"])).exists()
 
 
+def test_download_latest_timelapse_from_printer_ignores_stale_remote_video() -> None:
+    tmp_path = Path("tests/.tmp/youtube-stale-remote")
+    cache_dir = tmp_path / "cache" / "timelapse"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    service = PrinterService(
+        config={
+            "host": "127.0.0.1",
+            "serial": "SERIAL",
+            "access_code": "CODE",
+            "file_cache_path": str(tmp_path / "cache"),
+            "timelapse_cache_count": 1,
+        },
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    record = {
+        "id": "record-ftp-1",
+        "file_name": "widget.3mf",
+        "model_name": "Widget",
+        "completed_at": "2026-04-02T23:50:05+00:00",
+        "youtube": {"uploaded": False},
+    }
+
+    class FakeFtp:
+        def retrlines(self, command: str, callback) -> None:
+            assert command == "LIST /timelapse"
+            callback("-rw-r--r-- 1 user group 10 Apr 02 14:30 video_2026-04-02_14-30-24.mp4")
+
+        def quit(self) -> None:
+            return None
+
+    service.client = SimpleNamespace(ftp_connection=lambda: FakeFtp(), connected=True)
+
+    result = service._download_latest_timelapse_from_printer_sync(record)
+
+    assert result is None
+
+
 def test_wait_for_stable_timelapse_file_accepts_aged_file(monkeypatch: pytest.MonkeyPatch) -> None:
     tmp_path = Path("tests/.tmp/youtube-stable-file")
     cache_dir = tmp_path / "cache" / "timelapse"
@@ -1046,6 +1085,48 @@ def test_start_reschedules_pending_youtube_uploads(monkeypatch: pytest.MonkeyPat
     asyncio.run(service.start())
 
     assert scheduled == [record_id]
+
+
+def test_youtube_auto_upload_retries_when_timelapse_is_not_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YOUTUBE_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("YOUTUBE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("YOUTUBE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("YOUTUBE_REFRESH_TOKEN", "refresh-token")
+    monkeypatch.setenv("YOUTUBE_TIMELAPSE_WAIT_SECONDS", "1")
+    monkeypatch.setenv("YOUTUBE_TIMELAPSE_POLL_INTERVAL_SECONDS", "1")
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    record = {
+        "id": "record-retry-1",
+        "file_name": "widget.3mf",
+        "model_name": "Widget",
+        "completed_at": "2026-03-13T12:00:00+00:00",
+        "youtube": {"uploaded": False},
+    }
+
+    scheduled: list[tuple[str, int]] = []
+
+    async def fake_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(service, "_find_latest_timelapse_file", lambda _record: None)
+    monkeypatch.setattr(service, "_download_latest_timelapse_from_printer_sync", lambda _record: None)
+    monkeypatch.setattr("app.services.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr(service, "_save_successful_gcodes", lambda: None)
+    monkeypatch.setattr(service, "_schedule_youtube_retry", lambda record_id, delay_seconds: scheduled.append((record_id, delay_seconds)))
+
+    result = asyncio.run(service._sync_successful_gcode_to_youtube(record, force=False))
+
+    assert result is record
+    assert record["youtube"]["uploaded"] is False
+    assert record["youtube"]["last_error"] is None
+    assert record["youtube"]["progress_stage"] == "waiting"
+    assert record["youtube"]["progress_label"] == "Waiting for timelapse"
+    assert scheduled == [("record-retry-1", 60)]
 
 
 def test_successful_gcode_surfaces_youtube_api_message_without_upload_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1145,6 +1226,7 @@ def test_youtube_video_snapshot_is_paginated() -> None:
         printer_id="printer-1",
         display_name="Printer 1",
     )
+    service._list_timelapse_inventory = lambda: []
     service._successful_gcodes = [
         {
             "id": f"record-{index}",
@@ -1207,6 +1289,46 @@ def test_youtube_video_snapshot_does_not_fall_back_to_active_job_thumbnail() -> 
     snapshot = service.youtube_videos_snapshot(page=1, page_size=5)
 
     assert snapshot["items"][0]["thumbnail_url"] is None
+
+
+def test_youtube_video_snapshot_does_not_match_stale_timelapse_to_new_print() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    service._successful_gcodes = [
+        {
+            "id": "record-1",
+            "model_name": "plate_1",
+            "file_name": "plate_1.gcode",
+            "file_path": "/data/Metadata/plate_1.gcode",
+            "completed_at": "2026-04-02T23:50:05+00:00",
+            "plate_index": 1,
+            "model_key": "plate-1",
+            "youtube": {
+                "uploaded": False,
+                "last_attempt_at": "2026-04-02T23:50:10+00:00",
+                "progress_percent": 5,
+                "progress_label": "Waiting for timelapse",
+                "progress_stage": "waiting",
+            },
+        }
+    ]
+    service._list_timelapse_inventory = lambda: [
+        {
+            "name": "video_2026-04-02_14-30-24.mp4",
+            "path": "/timelapse/video_2026-04-02_14-30-24.mp4",
+            "size": 123,
+            "mtime": service._parse_iso_timestamp("2026-04-02T19:31:00+00:00").timestamp(),
+            "thumbnail_url": None,
+        }
+    ]
+
+    snapshot = service.youtube_videos_snapshot(page=1, page_size=5)
+
+    assert snapshot["items"][0]["file_name"] == "plate_1.gcode"
+    assert snapshot["items"][0]["path"] is None
 
 
 def test_list_timelapse_inventory_does_not_expose_mp4_thumbnail_endpoint() -> None:

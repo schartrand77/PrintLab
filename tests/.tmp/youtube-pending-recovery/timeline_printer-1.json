@@ -1,5 +1,23 @@
 [
   {
+    "id": "450a0957d75a4a93abeb5b69be7f1418",
+    "event": "connected",
+    "message": "Printer connected.",
+    "severity": "info",
+    "actor": "system",
+    "details": {},
+    "at": "2026-04-05T16:22:04.510721+00:00"
+  },
+  {
+    "id": "5a4df7c00df84ffa97597741a7b4f420",
+    "event": "connected",
+    "message": "Printer connected.",
+    "severity": "info",
+    "actor": "system",
+    "details": {},
+    "at": "2026-04-05T16:20:30.090426+00:00"
+  },
+  {
     "id": "6e5ae446037748dc8bb67da4e47880db",
     "event": "connected",
     "message": "Printer connected.",

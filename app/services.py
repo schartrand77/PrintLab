@@ -1967,6 +1967,11 @@ class PrinterService:
         pattern_time = re.compile(r"^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\S+\s+\d+\s+\d+:\d+)\s+(.+)$")
         pattern_year = re.compile(r"^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\S+\s+\d+\s+\d+)\s+(.+)$")
         candidates: list[tuple[float, int, str]] = []
+        used_names = {
+            Path(str(item.get("youtube", {}).get("path") or "")).name.lower()
+            for item in self._successful_gcodes
+            if isinstance(item, dict)
+        }
 
         def parse_line(line: str) -> None:
             match = pattern_time.match(line) or pattern_year.match(line)
@@ -1976,6 +1981,10 @@ class PrinterService:
             lowered = name.lower()
             if lowered.endswith((".mp4", ".avi", ".mov")):
                 parsed_ts = self._parse_ftp_list_timestamp(ts_raw) or 0.0
+                if lowered in used_names:
+                    return
+                if not self._timelapse_matches_completion_window(record=record, candidate_ts=parsed_ts or None):
+                    return
                 try:
                     size_value = int(size_raw)
                 except ValueError:
@@ -2072,6 +2081,29 @@ class PrinterService:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc)
 
+    def _record_completed_timestamp(self, record: dict[str, Any]) -> float | None:
+        parsed = self._parse_iso_timestamp(record.get("completed_at"))
+        return parsed.timestamp() if parsed is not None else None
+
+    def _timelapse_matches_completion_window(
+        self,
+        *,
+        record: dict[str, Any],
+        candidate_ts: float | None,
+        max_seconds_before: int = 3600,
+        max_seconds_after: int = 6 * 3600,
+    ) -> bool:
+        if candidate_ts is None:
+            return True
+        completed_ts = self._record_completed_timestamp(record)
+        if completed_ts is None:
+            return True
+        if candidate_ts < (completed_ts - max_seconds_before):
+            return False
+        if candidate_ts > (completed_ts + max_seconds_after):
+            return False
+        return True
+
     def _match_timelapse_record(
         self,
         *,
@@ -2089,7 +2121,7 @@ class PrinterService:
 
         best_match: dict[str, Any] | None = None
         best_score: tuple[int, int, float] | None = None
-        fallback_window_seconds = 12 * 60 * 60
+        fallback_window_seconds = 60 * 60
         for record in self._successful_gcodes:
             if not isinstance(record, dict):
                 continue
@@ -2245,17 +2277,6 @@ class PrinterService:
             for item in self._successful_gcodes
             if isinstance(item, dict)
         }
-        completed_at = str(record.get("completed_at") or "").strip()
-        completed_ts = None
-        if completed_at:
-            try:
-                dt = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                completed_ts = dt.timestamp()
-            except ValueError:
-                completed_ts = None
-
         candidates: list[tuple[float, Path]] = []
         for ext in ("*.mp4", "*.avi", "*.mov"):
             for path in cache_dir.glob(ext):
@@ -2266,7 +2287,7 @@ class PrinterService:
                 path_str = str(path.resolve())
                 if path_str in used_paths:
                     continue
-                if completed_ts is not None and stat.st_mtime < (completed_ts - 3600):
+                if not self._timelapse_matches_completion_window(record=record, candidate_ts=stat.st_mtime):
                     continue
                 candidates.append((stat.st_mtime, path))
         if not candidates:
@@ -2326,6 +2347,21 @@ class PrinterService:
         youtube["progress_label"] = str(label or "").strip()
         if save:
             self._save_successful_gcodes()
+
+    def _is_retryable_timelapse_wait_error(self, exc: Exception) -> bool:
+        message = str(exc or "").lower()
+        return (
+            "no timelapse video became available before the youtube upload timeout" in message
+            or "timelapse file did not stabilize before upload timeout" in message
+        )
+
+    def _schedule_youtube_retry(self, record_id: str, *, delay_seconds: int) -> None:
+        if not self._main_loop or not self._main_loop.is_running():
+            return
+        delay = max(1, int(delay_seconds))
+        self._main_loop.call_soon_threadsafe(
+            lambda: self._main_loop.call_later(delay, lambda: self._schedule_youtube_upload(record_id))
+        )
 
     def _schedule_pending_youtube_uploads(self) -> None:
         cfg = self._youtube_upload_config()
@@ -2813,9 +2849,26 @@ class PrinterService:
                 if selected_path is not None:
                     break
                 if time.monotonic() >= deadline:
-                    raise RuntimeError("No timelapse video became available before the YouTube upload timeout.")
+                    youtube["last_error"] = None
+                    self._save_successful_gcodes()
+                    self._schedule_youtube_retry(
+                        str(record.get("id") or ""),
+                        delay_seconds=max(60, int(cfg.get("poll_interval_seconds") or 5) * 12),
+                    )
+                    return record
                 await asyncio.sleep(int(cfg["poll_interval_seconds"]))
-        selected_path = await self._wait_for_stable_timelapse_file(selected_path, cfg=cfg)
+        try:
+            selected_path = await self._wait_for_stable_timelapse_file(selected_path, cfg=cfg)
+        except Exception as exc:
+            if video_path is None and not force and self._is_retryable_timelapse_wait_error(exc):
+                youtube["last_error"] = None
+                self._save_successful_gcodes()
+                self._schedule_youtube_retry(
+                    str(record.get("id") or ""),
+                    delay_seconds=max(60, int(cfg.get("poll_interval_seconds") or 5) * 12),
+                )
+                return record
+            raise
         self._set_youtube_progress(record, stage="ready", percent=15, label="Timelapse ready")
         youtube["path"] = str(selected_path.resolve())
         try:
@@ -2855,6 +2908,21 @@ class PrinterService:
             )
             return record
         except Exception as exc:
+            if video_path is None and not force and self._is_retryable_timelapse_wait_error(exc):
+                youtube.update(
+                    {
+                        "uploaded": False,
+                        "last_error": None,
+                        "progress_stage": "waiting",
+                        "progress_label": "Waiting for timelapse",
+                    }
+                )
+                self._save_successful_gcodes()
+                self._schedule_youtube_retry(
+                    str(record.get("id") or ""),
+                    delay_seconds=max(60, int(cfg.get("poll_interval_seconds") or 5) * 12),
+                )
+                return record
             youtube.update(
                 {
                     "uploaded": False,
