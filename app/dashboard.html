@@ -3083,7 +3083,7 @@
           </div>
           <div class="queue-edit-row">
             <label class="label">Reschedule
-              <input class="field queue-start-edit" type="datetime-local" data-queue-id="${escapeHtml(item.id || "")}" value="${escapeHtml(isoToLocalInputValue(item.start_at))}" aria-label="Reschedule queued job">
+              <input class="field queue-start-edit" name="queue-start-edit" type="datetime-local" data-queue-id="${escapeHtml(item.id || "")}" value="${escapeHtml(isoToLocalInputValue(item.start_at))}" aria-label="Reschedule queued job">
             </label>
             <button class="text-btn queue-save" type="button" data-queue-id="${escapeHtml(item.id || "")}">Save Time</button>
             <button class="text-btn queue-clear" type="button" data-queue-id="${escapeHtml(item.id || "")}">Run Next</button>
@@ -3380,10 +3380,10 @@
           </div>
           <div class="mini-form-grid">
             <label class="label">Name
-              <input class="field rule-edit-name" type="text" data-rule-id="${escapeHtml(rule.id || "")}" value="${escapeHtml(rule.name || "")}">
+              <input class="field rule-edit-name" name="rule-edit-name" type="text" data-rule-id="${escapeHtml(rule.id || "")}" value="${escapeHtml(rule.name || "")}">
             </label>
             <label class="label">Type
-              <select class="field rule-edit-type" data-rule-id="${escapeHtml(rule.id || "")}">
+              <select class="field rule-edit-type" name="rule-edit-type" data-rule-id="${escapeHtml(rule.id || "")}">
                 <option value="disconnect_duration"${rule.type === "disconnect_duration" ? " selected" : ""}>Disconnected Duration</option>
                 <option value="chamber_temp_above"${rule.type === "chamber_temp_above" ? " selected" : ""}>Chamber Temp Above</option>
                 <option value="print_error"${rule.type === "print_error" ? " selected" : ""}>Print Error</option>
@@ -3393,17 +3393,17 @@
           </div>
           <div class="mini-form-grid">
             <label class="label">Severity
-              <select class="field rule-edit-severity" data-rule-id="${escapeHtml(rule.id || "")}">
+              <select class="field rule-edit-severity" name="rule-edit-severity" data-rule-id="${escapeHtml(rule.id || "")}">
                 <option value="info"${rule.severity === "info" ? " selected" : ""}>Info</option>
                 <option value="warning"${(rule.severity || "warning") === "warning" ? " selected" : ""}>Warning</option>
                 <option value="error"${rule.severity === "error" ? " selected" : ""}>Error</option>
               </select>
             </label>
-            <label class="check"><input class="rule-edit-notify" type="checkbox" data-rule-id="${escapeHtml(rule.id || "")}" ${rule.notify !== false ? "checked" : ""}> Send Notification</label>
+            <label class="check"><input class="rule-edit-notify" name="rule-edit-notify" type="checkbox" data-rule-id="${escapeHtml(rule.id || "")}" ${rule.notify !== false ? "checked" : ""}> Send Notification</label>
           </div>
           <div class="queue-edit-row">
             <label class="label">Threshold
-              <input class="field rule-edit-threshold" type="number" min="0" step="0.1" data-rule-id="${escapeHtml(rule.id || "")}" value="${rule.threshold ?? ""}" ${rule.type === "print_error" ? "disabled" : ""}>
+              <input class="field rule-edit-threshold" name="rule-edit-threshold" type="number" min="0" step="0.1" data-rule-id="${escapeHtml(rule.id || "")}" value="${rule.threshold ?? ""}" ${rule.type === "print_error" ? "disabled" : ""}>
             </label>
             <button class="text-btn rule-save" type="button" data-rule-id="${escapeHtml(rule.id || "")}">Save Rule</button>
             <div></div>
