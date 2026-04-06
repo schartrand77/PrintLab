@@ -1,5 +1,27 @@
 [
   {
+    "id": "13788efa7f7341dba34b095879c81837",
+    "printer_id": "printer-1",
+    "printer_name": "Printer 1",
+    "event": "connected",
+    "message": "Printer connected.",
+    "severity": "info",
+    "actor": "system",
+    "details": {},
+    "at": "2026-04-06T10:57:38.676924+00:00"
+  },
+  {
+    "id": "5c028b4381804f9db997fb7ce74e7942",
+    "printer_id": "printer-1",
+    "printer_name": "Printer 1",
+    "event": "connected",
+    "message": "Printer connected.",
+    "severity": "info",
+    "actor": "system",
+    "details": {},
+    "at": "2026-04-06T10:55:45.847137+00:00"
+  },
+  {
     "id": "6a2d0e379f054aedb245a98d9d2b045e",
     "printer_id": "printer-1",
     "printer_name": "Printer 1",

@@ -1442,6 +1442,7 @@ class PrinterService:
         timelapses = self._list_timelapse_inventory()
         record_by_timelapse_name: dict[str, dict[str, Any]] = {}
         orphan_records: list[dict[str, Any]] = []
+        matched_record_ids: set[str] = set()
         for record in self._successful_gcodes:
             if not isinstance(record, dict):
                 continue
@@ -1465,6 +1466,8 @@ class PrinterService:
                 local_name=name,
                 captured_at=captured_at,
             )
+            if record and record.get("id"):
+                matched_record_ids.add(str(record.get("id")))
             youtube = (record or {}).get("youtube") or {}
             status = "uploaded" if youtube.get("uploaded") else ("failed" if youtube.get("last_error") else "new")
             merged_items.append(
@@ -1494,7 +1497,9 @@ class PrinterService:
             )
 
         orphan_timelapse_names = {str(item.get("name") or "").lower() for item in timelapses}
-        unmatched_records = list(orphan_records)
+        unmatched_records = [
+            record for record in orphan_records if str(record.get("id") or "") not in matched_record_ids
+        ]
         for path_name, record in record_by_timelapse_name.items():
             if path_name not in orphan_timelapse_names:
                 unmatched_records.append(record)
@@ -2090,7 +2095,7 @@ class PrinterService:
         *,
         record: dict[str, Any],
         candidate_ts: float | None,
-        max_seconds_before: int = 3600,
+        max_seconds_before: int = 12 * 3600,
         max_seconds_after: int = 6 * 3600,
     ) -> bool:
         if candidate_ts is None:
@@ -2121,7 +2126,7 @@ class PrinterService:
 
         best_match: dict[str, Any] | None = None
         best_score: tuple[int, int, float] | None = None
-        fallback_window_seconds = 60 * 60
+        fallback_window_seconds = 12 * 60 * 60
         for record in self._successful_gcodes:
             if not isinstance(record, dict):
                 continue
