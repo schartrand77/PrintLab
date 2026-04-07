@@ -1030,6 +1030,133 @@ def test_wait_for_stable_timelapse_file_accepts_aged_file(monkeypatch: pytest.Mo
     assert result == video_path
 
 
+def test_youtube_upload_stages_local_timelapse_before_upload(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = Path("tests/.tmp/youtube-staging-local")
+    cache_dir = tmp_path / "cache" / "timelapse"
+    stage_dir = tmp_path / "stage"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    video_path = cache_dir / "video_2026-03-13_12-12-18.mp4"
+    payload = b"fake-video"
+    video_path.write_bytes(payload)
+
+    monkeypatch.setenv("YOUTUBE_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("YOUTUBE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("YOUTUBE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("YOUTUBE_REFRESH_TOKEN", "refresh-token")
+    monkeypatch.setenv("YOUTUBE_UPLOAD_STAGING_DIR", str(stage_dir))
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE", "file_cache_path": str(tmp_path / "cache")},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    record = {
+        "id": "record-stage-1",
+        "file_name": "widget.3mf",
+        "model_name": "Widget",
+        "completed_at": "2026-03-13T12:00:00+00:00",
+        "youtube": {"uploaded": False},
+    }
+
+    captured: dict[str, object] = {}
+
+    def fake_upload(_record: dict[str, object], staged_path: Path, _cfg: dict[str, object]) -> dict[str, object]:
+        captured["upload_path"] = staged_path
+        captured["upload_bytes"] = staged_path.read_bytes()
+        captured["upload_exists_during_call"] = staged_path.exists()
+        return {
+            "video_id": "video-stage-123",
+            "video_url": "https://www.youtube.com/watch?v=video-stage-123",
+            "status_code": 200,
+            "title": "Widget",
+            "path": str(staged_path),
+        }
+
+    monkeypatch.setattr(service, "_youtube_upload_video", fake_upload)
+
+    result = asyncio.run(service._sync_successful_gcode_to_youtube(record, force=True, video_path=video_path))
+
+    upload_path = captured["upload_path"]
+    assert isinstance(upload_path, Path)
+    assert upload_path.parent == stage_dir
+    assert upload_path != video_path
+    assert captured["upload_bytes"] == payload
+    assert captured["upload_exists_during_call"] is True
+    assert not upload_path.exists()
+    assert result["youtube"]["uploaded"] is True
+    assert result["youtube"]["path"] == str(video_path.resolve())
+
+
+def test_youtube_upload_stages_ftp_timelapse_before_upload(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = Path("tests/.tmp/youtube-staging-ftp")
+    cache_dir = tmp_path / "cache" / "timelapse"
+    stage_dir = tmp_path / "stage"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("YOUTUBE_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("YOUTUBE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("YOUTUBE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("YOUTUBE_REFRESH_TOKEN", "refresh-token")
+    monkeypatch.setenv("YOUTUBE_UPLOAD_STAGING_DIR", str(stage_dir))
+
+    service = PrinterService(
+        config={
+            "host": "127.0.0.1",
+            "serial": "SERIAL",
+            "access_code": "CODE",
+            "file_cache_path": str(tmp_path / "cache"),
+            "timelapse_cache_count": 1,
+        },
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    record = {
+        "id": "record-stage-ftp-1",
+        "file_name": "widget.3mf",
+        "model_name": "Widget",
+        "completed_at": "2026-03-13T12:00:00+00:00",
+        "youtube": {"uploaded": False},
+    }
+
+    class FakeFtp:
+        def retrlines(self, command: str, callback) -> None:
+            assert command == "LIST /timelapse"
+            callback("-rw-r--r-- 1 user group 19 Mar 13 12:12 video_2026-03-13_12-12-18.mp4")
+
+        def retrbinary(self, command: str, callback) -> None:
+            assert command == "RETR /timelapse/video_2026-03-13_12-12-18.mp4"
+            callback(b"fake-video-from-ftp")
+
+        def quit(self) -> None:
+            return None
+
+    service.client = SimpleNamespace(ftp_connection=lambda: FakeFtp(), connected=True)
+    captured: dict[str, object] = {}
+
+    def fake_upload(_record: dict[str, object], staged_path: Path, _cfg: dict[str, object]) -> dict[str, object]:
+        captured["upload_path"] = staged_path
+        captured["upload_bytes"] = staged_path.read_bytes()
+        return {
+            "video_id": "video-stage-ftp-123",
+            "video_url": "https://www.youtube.com/watch?v=video-stage-ftp-123",
+            "status_code": 200,
+            "title": "Widget",
+            "path": str(staged_path),
+        }
+
+    monkeypatch.setattr(service, "_youtube_upload_video", fake_upload)
+
+    result = asyncio.run(service._sync_successful_gcode_to_youtube(record, force=True))
+
+    upload_path = captured["upload_path"]
+    assert isinstance(upload_path, Path)
+    assert upload_path.parent == stage_dir
+    assert captured["upload_bytes"] == b"fake-video-from-ftp"
+    assert not upload_path.exists()
+    assert result["youtube"]["uploaded"] is True
+    assert Path(str(result["youtube"]["path"])).parent == cache_dir.resolve()
+
+
 def test_start_reschedules_pending_youtube_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
     tmp_path = Path("tests/.tmp/youtube-pending-recovery")
     cache_dir = tmp_path / "cache"

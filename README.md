@@ -160,10 +160,11 @@ Successful G-code tracking:
   - `YOUTUBE_CLIENT_ID=...`
   - `YOUTUBE_CLIENT_SECRET=...`
   - `YOUTUBE_REFRESH_TOKEN=...`
+  - Optional: `YOUTUBE_UPLOAD_STAGING_DIR=/tmp/printlab-youtube` to force uploads to use local container storage before sending to YouTube
 - To generate a YouTube refresh token locally, run:
   - `python scripts/get_youtube_refresh_token.py --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET`
   - Add `http://127.0.0.1:8080/callback` as an authorized redirect URI in your Google OAuth client before running it.
-- The YouTube uploader waits for the newest cached timelapse in `{FILE_CACHE_PATH}/timelapse`, uploads it with the configured title/description templates, and stores status back into each successful G-code record under the `youtube` key.
+- The YouTube uploader waits for the newest cached timelapse in `{FILE_CACHE_PATH}/timelapse`, stages a verified local copy in temporary storage, uploads that staged file with the configured title/description templates, and stores status back into each successful G-code record under the `youtube` key.
 
 Stockworks enrichment:
 - Responses from `GET /api/works/stockworks/health` and `POST /api/works/stockworks/request`

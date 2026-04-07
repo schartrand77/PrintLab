@@ -11,7 +11,9 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1937,6 +1939,13 @@ class PrinterService:
         base = Path(configured) if configured else data_root() / "cache"
         return base / "timelapse"
 
+    def _youtube_upload_staging_dir(self) -> Path:
+        configured = str(get_env("YOUTUBE_UPLOAD_STAGING_DIR", "") or "").strip()
+        if configured:
+            return Path(configured)
+        printer_key = re.sub(r"[^a-zA-Z0-9._-]+", "-", str(self.printer_id or "default")).strip("-") or "default"
+        return Path(tempfile.gettempdir()) / "printlab-youtube" / printer_key
+
     def _timelapse_cache_count(self) -> int:
         try:
             return max(-1, int(self._configured_settings.get("timelapse_cache_count", 0)))
@@ -2337,6 +2346,58 @@ class PrinterService:
                 raise RuntimeError(f"Timelapse file did not stabilize before upload timeout: {path}")
             await asyncio.sleep(poll_interval)
 
+    def _stage_timelapse_for_youtube_sync(self, source_path: Path, record: dict[str, Any], cfg: dict[str, Any]) -> Path:
+        if not source_path.exists():
+            raise RuntimeError(f"Timelapse file does not exist: {source_path}")
+
+        try:
+            source_stat_before = source_path.stat()
+        except OSError as exc:
+            raise RuntimeError(f"Failed to read timelapse file before staging: {source_path}") from exc
+
+        source_size = int(source_stat_before.st_size)
+        if source_size <= 0:
+            raise RuntimeError(f"Timelapse file is empty: {source_path}")
+
+        stage_root = self._youtube_upload_staging_dir()
+        stage_root.mkdir(parents=True, exist_ok=True)
+        record_id = re.sub(r"[^a-zA-Z0-9._-]+", "-", str(record.get("id") or "record")).strip("-") or "record"
+        suffix = source_path.suffix or ".mp4"
+        staged_path = stage_root / f"{record_id}-{uuid4().hex}{suffix}"
+        partial_path = staged_path.with_suffix(f"{staged_path.suffix}.part")
+
+        try:
+            with source_path.open("rb") as source_handle, partial_path.open("wb") as stage_handle:
+                shutil.copyfileobj(source_handle, stage_handle, length=max(256 * 1024, int(cfg.get("chunk_bytes") or 0)))
+
+            staged_size = int(partial_path.stat().st_size)
+            if staged_size != source_size:
+                raise RuntimeError(
+                    f"Timelapse staging size mismatch: expected {source_size} bytes, copied {staged_size} bytes."
+                )
+
+            try:
+                source_stat_after = source_path.stat()
+            except OSError as exc:
+                raise RuntimeError(f"Failed to re-read timelapse file after staging: {source_path}") from exc
+            if (
+                int(source_stat_after.st_size) != source_size
+                or int(getattr(source_stat_after, "st_mtime_ns", int(source_stat_after.st_mtime * 1_000_000_000)))
+                != int(getattr(source_stat_before, "st_mtime_ns", int(source_stat_before.st_mtime * 1_000_000_000)))
+            ):
+                raise RuntimeError(f"Timelapse file changed while staging for YouTube upload: {source_path}")
+
+            partial_path.replace(staged_path)
+            return staged_path
+        except Exception:
+            for cleanup_path in (partial_path, staged_path):
+                try:
+                    if cleanup_path.exists():
+                        cleanup_path.unlink()
+                except OSError:
+                    pass
+            raise
+
     def _set_youtube_progress(
         self,
         record: dict[str, Any],
@@ -2358,6 +2419,8 @@ class PrinterService:
         return (
             "no timelapse video became available before the youtube upload timeout" in message
             or "timelapse file did not stabilize before upload timeout" in message
+            or "timelapse file changed while staging for youtube upload" in message
+            or "timelapse staging size mismatch" in message
         )
 
     def _schedule_youtube_retry(self, record_id: str, *, delay_seconds: int) -> None:
@@ -2876,12 +2939,21 @@ class PrinterService:
             raise
         self._set_youtube_progress(record, stage="ready", percent=15, label="Timelapse ready")
         youtube["path"] = str(selected_path.resolve())
+        staged_path: Path | None = None
         try:
+            self._set_youtube_progress(record, stage="staging", percent=18, label="Staging upload")
+            staged_path = await asyncio.get_running_loop().run_in_executor(
+                None,
+                self._stage_timelapse_for_youtube_sync,
+                selected_path,
+                record,
+                cfg,
+            )
             result = await asyncio.get_running_loop().run_in_executor(
                 None,
                 self._youtube_upload_video,
                 record,
-                selected_path,
+                staged_path,
                 cfg,
             )
             youtube.update(
@@ -2893,7 +2965,7 @@ class PrinterService:
                     "video_id": result["video_id"],
                     "video_url": result["video_url"],
                     "title": result["title"],
-                    "path": result["path"],
+                    "path": str(selected_path.resolve()),
                     "progress_stage": "uploaded",
                     "progress_percent": 100,
                     "progress_label": "Uploaded",
@@ -2908,7 +2980,7 @@ class PrinterService:
                     "record_id": record.get("id"),
                     "video_id": result["video_id"],
                     "video_url": result["video_url"],
-                    "path": result["path"],
+                    "path": youtube.get("path"),
                 },
             )
             return record
@@ -2945,6 +3017,13 @@ class PrinterService:
                 details={"record_id": record.get("id"), "error": str(exc), "path": youtube.get("path")},
             )
             raise
+        finally:
+            if staged_path is not None:
+                try:
+                    if staged_path.exists():
+                        staged_path.unlink()
+                except OSError:
+                    pass
 
     def _schedule_youtube_upload(self, record_id: str, *, force: bool = False) -> None:
         cfg = self._youtube_upload_config()

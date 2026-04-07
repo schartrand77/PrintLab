@@ -112,6 +112,7 @@
   <Config Name="YouTube Public Stats Viewable" Target="YOUTUBE_PUBLIC_STATS_VIEWABLE" Default="true" Mode="" Description="Expose public stats on uploaded videos" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
   <Config Name="YouTube Timelapse Wait Seconds" Target="YOUTUBE_TIMELAPSE_WAIT_SECONDS" Default="180" Mode="" Description="How long to wait for a timelapse file before upload" Type="Variable" Display="advanced" Required="false" Mask="false">180</Config>
   <Config Name="YouTube Timelapse Poll Interval Seconds" Target="YOUTUBE_TIMELAPSE_POLL_INTERVAL_SECONDS" Default="5" Mode="" Description="Polling interval while waiting for timelapse output" Type="Variable" Display="advanced" Required="false" Mask="false">5</Config>
+  <Config Name="YouTube Upload Staging Dir" Target="YOUTUBE_UPLOAD_STAGING_DIR" Default="" Mode="" Description="Optional local temp directory used to stage timelapses before upload. Leave blank to use the container temp directory." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="YouTube Upload Timeout Seconds" Target="YOUTUBE_UPLOAD_TIMEOUT_SECONDS" Default="900" Mode="" Description="Timeout for YouTube upload requests" Type="Variable" Display="advanced" Required="false" Mask="false">900</Config>
 
   <Config Name="BambuLab Git Ref" Target="HA_BAMBULAB_REF" Default="main" Mode="" Description="Build arg: branch/tag for pybambu source" Type="Variable" Display="advanced" Required="false" Mask="false">main</Config>
