@@ -2286,10 +2286,12 @@ class PrinterService:
         if not cache_dir.exists():
             return None
 
+        current_record_id = str(record.get("id") or "").strip()
         used_paths = {
             str(item.get("youtube", {}).get("path") or "")
             for item in self._successful_gcodes
             if isinstance(item, dict)
+            and str(item.get("id") or "").strip() != current_record_id
         }
         candidates: list[tuple[float, Path]] = []
         for ext in ("*.mp4", "*.avi", "*.mov"):

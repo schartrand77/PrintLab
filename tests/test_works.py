@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from zipfile import ZipFile
@@ -1254,6 +1255,86 @@ def test_youtube_auto_upload_retries_when_timelapse_is_not_ready(monkeypatch: py
     assert record["youtube"]["progress_stage"] == "waiting"
     assert record["youtube"]["progress_label"] == "Waiting for timelapse"
     assert scheduled == [("record-retry-1", 60)]
+
+
+def test_youtube_auto_upload_retry_can_reuse_same_timelapse_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = Path("tests/.tmp/youtube-retry-same-path")
+    cache_dir = tmp_path / "cache" / "timelapse"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    video_path = cache_dir / "video_2026-03-13_12-12-18.mp4"
+    video_path.write_bytes(b"stable-video")
+    matched_ts = datetime(2026, 3, 13, 12, 12, 18, tzinfo=timezone.utc).timestamp()
+    os.utime(video_path, (matched_ts, matched_ts))
+
+    monkeypatch.setenv("YOUTUBE_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("YOUTUBE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("YOUTUBE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("YOUTUBE_REFRESH_TOKEN", "refresh-token")
+    monkeypatch.setenv("YOUTUBE_TIMELAPSE_WAIT_SECONDS", "1")
+    monkeypatch.setenv("YOUTUBE_TIMELAPSE_POLL_INTERVAL_SECONDS", "1")
+    monkeypatch.setenv("YOUTUBE_TIMELAPSE_STABLE_SECONDS", "0")
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE", "file_cache_path": str(tmp_path / "cache")},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    record = {
+        "id": "record-retry-path-1",
+        "file_name": "widget.3mf",
+        "model_name": "Widget",
+        "completed_at": "2026-03-13T12:00:00+00:00",
+        "youtube": {"uploaded": False},
+    }
+    service._successful_gcodes = [record]
+
+    scheduled: list[tuple[str, int]] = []
+    stage_calls = {"count": 0}
+
+    async def fake_sleep(_seconds: float) -> None:
+        return None
+
+    def fake_stage(_source_path: Path, _record: dict[str, object], _cfg: dict[str, object]) -> Path:
+        stage_calls["count"] += 1
+        if stage_calls["count"] == 1:
+            raise RuntimeError(f"Timelapse file changed while staging for YouTube upload: {video_path}")
+        staged_path = tmp_path / "stage" / "upload.mp4"
+        staged_path.parent.mkdir(parents=True, exist_ok=True)
+        staged_path.write_bytes(b"staged-video")
+        return staged_path
+
+    def fake_upload(_record: dict[str, object], staged_path: Path, _cfg: dict[str, object]) -> dict[str, object]:
+        assert staged_path.exists()
+        return {
+            "video_id": "video-retry-123",
+            "video_url": "https://www.youtube.com/watch?v=video-retry-123",
+            "status_code": 200,
+            "title": "Widget",
+            "path": str(staged_path),
+        }
+
+    monkeypatch.setattr(service, "_download_latest_timelapse_from_printer_sync", lambda _record: None)
+    monkeypatch.setattr(service, "_stage_timelapse_for_youtube_sync", fake_stage)
+    monkeypatch.setattr(service, "_youtube_upload_video", fake_upload)
+    monkeypatch.setattr("app.services.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr(service, "_save_successful_gcodes", lambda: None)
+    monkeypatch.setattr(service, "_schedule_youtube_retry", lambda record_id, delay_seconds: scheduled.append((record_id, delay_seconds)))
+
+    first_result = asyncio.run(service._sync_successful_gcode_to_youtube(record, force=False))
+
+    assert first_result is record
+    assert record["youtube"]["uploaded"] is False
+    assert record["youtube"]["path"] == str(video_path.resolve())
+    assert scheduled == [("record-retry-path-1", 60)]
+
+    scheduled.clear()
+
+    second_result = asyncio.run(service._sync_successful_gcode_to_youtube(record, force=False))
+
+    assert second_result is record
+    assert record["youtube"]["uploaded"] is True
+    assert record["youtube"]["video_id"] == "video-retry-123"
+    assert scheduled == []
 
 
 def test_successful_gcode_surfaces_youtube_api_message_without_upload_url(monkeypatch: pytest.MonkeyPatch) -> None:
