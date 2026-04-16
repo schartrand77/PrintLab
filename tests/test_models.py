@@ -26,6 +26,7 @@ def test_works_request_rejects_invalid_method() -> None:
 def test_queue_request_accepts_iso_schedule() -> None:
     payload = QueuePrintJobRequest(file_path="/cache/model.3mf", start_at="2026-03-10T12:00:00Z")
     assert payload.start_at == "2026-03-10T12:00:00Z"
+    assert payload.timelapse is True
 
 
 def test_makerworks_submit_job_request_accepts_metadata() -> None:
@@ -37,6 +38,7 @@ def test_makerworks_submit_job_request_accepts_metadata() -> None:
         metadata={"priority": "rush"},
     )
     assert payload.metadata == {"priority": "rush"}
+    assert payload.timelapse is True
 
 
 def test_makerworks_preflight_request_accepts_optional_printer() -> None:

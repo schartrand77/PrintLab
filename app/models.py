@@ -52,7 +52,7 @@ class OrderworksPrintJobRequest(BaseModel):
     use_ams: bool = True
     ams_mapping: list[int] | None = None
     bed_type: str = "auto"
-    timelapse: bool = False
+    timelapse: bool = True
     bed_leveling: bool = True
     flow_cali: bool = True
     vibration_cali: bool = True
@@ -70,7 +70,7 @@ class MakerworksQueueJobRequest(BaseModel):
     use_ams: bool = True
     ams_mapping: list[int] | None = None
     bed_type: str = "auto"
-    timelapse: bool = False
+    timelapse: bool = True
     bed_leveling: bool = True
     flow_cali: bool = True
     vibration_cali: bool = True
@@ -93,7 +93,7 @@ class MakerworksSubmitJobRequest(BaseModel):
     use_ams: bool = True
     ams_mapping: list[int] | None = None
     bed_type: str = "auto"
-    timelapse: bool = False
+    timelapse: bool = True
     bed_leveling: bool = True
     flow_cali: bool = True
     vibration_cali: bool = True

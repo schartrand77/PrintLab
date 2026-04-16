@@ -625,6 +625,47 @@ def test_sd_thumbnail_uses_active_plate_context_for_3mf_thumbnail(monkeypatch: p
     assert mime == "image/png"
 
 
+def test_sd_thumbnail_cache_is_scoped_to_requested_3mf_plate(monkeypatch: pytest.MonkeyPatch) -> None:
+    data_dir = Path("tests/.tmp/thumb-cache-multiplate-key")
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("PRINTLAB_DATA_DIR", str(data_dir.resolve()))
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    archive = io.BytesIO()
+    with ZipFile(archive, "w") as zf:
+        zf.writestr("Metadata/plate_1.png", b"plate-one")
+        zf.writestr("Metadata/plate_2.png", b"plate-two")
+
+    class FakeFtp:
+        def retrbinary(self, command: str, callback) -> None:
+            if command == "RETR /cache/widget.gcode.3mf":
+                callback(archive.getvalue())
+                return
+            raise AssertionError(f"unexpected RETR command: {command}")
+
+        def quit(self) -> None:
+            return None
+
+    class FakeClient:
+        def ftp_connection(self) -> FakeFtp:
+            return FakeFtp()
+
+    service.client = FakeClient()
+    service._resolve_sd_path_sync = lambda ftp, raw_path: "/cache/widget.gcode.3mf"  # type: ignore[method-assign]
+
+    plate_one, _ = service._get_sd_thumbnail_sync("/data/Metadata/plate_1.gcode")
+    plate_two, mime = service._get_sd_thumbnail_sync("/data/Metadata/plate_2.gcode")
+
+    assert plate_one == b"plate-one"
+    assert plate_two == b"plate-two"
+    assert mime == "image/png"
+
+
 def test_openapi_contains_makerworks_library_paths() -> None:
     schema = create_app().openapi()
     assert "/api/works/makerworks/library" in schema["paths"]

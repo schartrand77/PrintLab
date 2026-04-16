@@ -194,7 +194,7 @@ class OrderworksPrintJobRequest(BaseModel):
     use_ams: bool = True
     ams_mapping: list[int] | None = None
     bed_type: str = "auto"
-    timelapse: bool = False
+    timelapse: bool = True
     bed_leveling: bool = True
     flow_cali: bool = True
     vibration_cali: bool = True
@@ -212,7 +212,7 @@ class MakerworksQueueJobRequest(BaseModel):
     use_ams: bool = True
     ams_mapping: list[int] | None = None
     bed_type: str = "auto"
-    timelapse: bool = False
+    timelapse: bool = True
     bed_leveling: bool = True
     flow_cali: bool = True
     vibration_cali: bool = True
@@ -235,7 +235,7 @@ class MakerworksSubmitJobRequest(BaseModel):
     use_ams: bool = True
     ams_mapping: list[int] | None = None
     bed_type: str = "auto"
-    timelapse: bool = False
+    timelapse: bool = True
     bed_leveling: bool = True
     flow_cali: bool = True
     vibration_cali: bool = True
@@ -3038,7 +3038,13 @@ class PrinterService:
         async def _runner() -> None:
             try:
                 await self._sync_successful_gcode_to_youtube(record, force=force)
-            except Exception:
+            except Exception as exc:
+                LOGGER.warning(
+                    "Background YouTube upload failed for printer %s record %s: %s",
+                    self.printer_id,
+                    record_id,
+                    exc,
+                )
                 return
 
         if self._main_loop and self._main_loop.is_running():
@@ -3726,7 +3732,10 @@ class PrinterService:
         ftp = self.client.ftp_connection()
         resolved_path = self._resolve_sd_path_sync(ftp, raw_path)
         preferred_plate = self._preferred_thumbnail_plate_index(raw_path, resolved_path)
-        resolved_key = hashlib.sha1(resolved_path.encode("utf-8")).hexdigest() if resolved_path else raw_key
+        resolved_cache_path = resolved_path
+        if preferred_plate and resolved_path.lower().endswith(".3mf"):
+            resolved_cache_path = f"{resolved_path}#plate={preferred_plate}"
+        resolved_key = hashlib.sha1(resolved_cache_path.encode("utf-8")).hexdigest() if resolved_cache_path else raw_key
         if resolved_key:
             for ext, mime in ((".png", "image/png"), (".jpg", "image/jpeg"), (".jpeg", "image/jpeg"), (".webp", "image/webp")):
                 p = thumb_dir / f"{resolved_key}{ext}"
