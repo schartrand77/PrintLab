@@ -5,6 +5,14 @@ import json
 from pathlib import Path
 
 
+def test_default_printer_config_caches_timelapses(monkeypatch) -> None:
+    monkeypatch.delenv("TIMELAPSE_CACHE_COUNT", raising=False)
+
+    import app.services as services_module
+
+    assert services_module.build_default_printer_config()["timelapse_cache_count"] == 1
+
+
 def test_get_env_reads_from_config_json_section(monkeypatch) -> None:
     tmp_dir = Path("tests/.tmp/config-json")
     tmp_dir.mkdir(parents=True, exist_ok=True)

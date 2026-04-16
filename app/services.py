@@ -98,7 +98,7 @@ def build_default_printer_config() -> dict[str, Any]:
         "user_language": get_env("USER_LANGUAGE", "en"),
         "file_cache_path": get_env("FILE_CACHE_PATH", "/data/cache"),
         "print_cache_count": int(get_env("PRINT_CACHE_COUNT", "1")),
-        "timelapse_cache_count": int(get_env("TIMELAPSE_CACHE_COUNT", "0")),
+        "timelapse_cache_count": int(get_env("TIMELAPSE_CACHE_COUNT", "1")),
         "usage_hours": float(get_env("USAGE_HOURS", "0")),
         "force_ip": parse_bool("FORCE_IP", False),
         "region": get_env("BAMBU_REGION", ""),

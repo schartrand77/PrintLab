@@ -40,7 +40,7 @@
   <Config Name="User Language" Target="USER_LANGUAGE" Default="en" Mode="" Description="Language for errors/labels" Type="Variable" Display="advanced" Required="false" Mask="false">en</Config>
   <Config Name="File Cache Path" Target="FILE_CACHE_PATH" Default="/data/cache" Mode="" Description="Internal cache path" Type="Variable" Display="advanced" Required="false" Mask="false">/data/cache</Config>
   <Config Name="Print Cache Count" Target="PRINT_CACHE_COUNT" Default="1" Mode="" Description="Cached print records count" Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
-  <Config Name="Timelapse Cache Count" Target="TIMELAPSE_CACHE_COUNT" Default="1" Mode="" Description="Cached timelapse records count. Set to 1 or higher for automatic YouTube uploads." Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+  <Config Name="Timelapse Cache Count" Target="TIMELAPSE_CACHE_COUNT" Default="1" Mode="" Description="Cached timelapse records count. Set to 1 or higher for automatic YouTube uploads." Type="Variable" Display="always" Required="false" Mask="false">1</Config>
   <Config Name="Usage Hours" Target="USAGE_HOURS" Default="0" Mode="" Description="Usage hours override" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
   <Config Name="Force IP" Target="FORCE_IP" Default="false" Mode="" Description="Force configured IP over discovered IP" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
 
