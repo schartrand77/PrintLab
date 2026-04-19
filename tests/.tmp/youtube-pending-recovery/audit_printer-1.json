@@ -1,5 +1,49 @@
 [
   {
+    "id": "a5f900fd29074ed9a6180fc33dbdd9f5",
+    "printer_id": "printer-1",
+    "printer_name": "Printer 1",
+    "event": "connected",
+    "message": "Printer connected.",
+    "severity": "info",
+    "actor": "system",
+    "details": {},
+    "at": "2026-04-18T16:32:28.133223+00:00"
+  },
+  {
+    "id": "9c1df8508ed84bf7a2eb275ba59a3822",
+    "printer_id": "printer-1",
+    "printer_name": "Printer 1",
+    "event": "connected",
+    "message": "Printer connected.",
+    "severity": "info",
+    "actor": "system",
+    "details": {},
+    "at": "2026-04-18T16:30:29.912061+00:00"
+  },
+  {
+    "id": "d31f1a4999744c3d8d06b66684fb9d36",
+    "printer_id": "printer-1",
+    "printer_name": "Printer 1",
+    "event": "connected",
+    "message": "Printer connected.",
+    "severity": "info",
+    "actor": "system",
+    "details": {},
+    "at": "2026-04-18T16:28:12.138498+00:00"
+  },
+  {
+    "id": "90701f46f63b462d8f0ac29fef0b8fe8",
+    "printer_id": "printer-1",
+    "printer_name": "Printer 1",
+    "event": "connected",
+    "message": "Printer connected.",
+    "severity": "info",
+    "actor": "system",
+    "details": {},
+    "at": "2026-04-18T16:25:08.977279+00:00"
+  },
+  {
     "id": "47bae41d78d64530b58845e9e2ddd378",
     "printer_id": "printer-1",
     "printer_name": "Printer 1",

@@ -156,6 +156,21 @@ class _FakePrinter:
         self.created_jobs.append(payload)
         return payload
 
+    def submitted_job_record(self, job_id: str) -> dict[str, object]:
+        for job in self.created_jobs:
+            if job.get("id") == job_id:
+                return dict(job)
+        raise ValueError(f"Unknown submitted job: {job_id}")
+
+    def update_submitted_job(self, job_id: str, *, status: str, message: str, details=None, extra=None) -> dict[str, object]:
+        for job in self.created_jobs:
+            if job.get("id") == job_id:
+                job.update(extra or {})
+                job["status"] = status
+                job["history"] = [{"message": message, "details": details or {}}, *list(job.get("history") or [])]
+                return dict(job)
+        raise ValueError(f"Unknown submitted job: {job_id}")
+
     def _record_timeline(self, *_args, **_kwargs) -> None:
         return None
 
@@ -216,6 +231,57 @@ def test_print_job_manager_auto_selects_idle_connected_printer() -> None:
     assert idle.created_jobs[0]["idempotency_key"] == "mw-123"
 
 
+def test_print_job_manager_route_only_submission_waits_for_routing() -> None:
+    printer = _FakePrinter("printer-1", connected=True, busy=False, queue_count=0)
+    manager = PrintJobManager(_FakePrinterManager([printer]), _FakeWorksService())
+
+    result = asyncio.run(
+        manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(
+                model_id="widget-1",
+                idempotency_key="mw-route-only",
+                source_job_id="source-job-1",
+                source_order_id="source-order-1",
+                route_only=True,
+            ),
+            actor="makerworks",
+        )
+    )
+
+    assert result["status"] == "queued"
+    assert result["printer_id"] is None
+    assert result["queue_item_id"] is None
+    assert result["file_path"] is None
+    assert result["routing_hold"] is True
+    assert printer._queue_count == 0
+
+
+def test_print_job_manager_queues_route_only_submission_after_assignment() -> None:
+    printer = _FakePrinter("printer-1", connected=True, busy=False, queue_count=0)
+    manager = PrintJobManager(_FakePrinterManager([printer]), _FakeWorksService())
+    held = asyncio.run(
+        manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(
+                model_id="widget-1",
+                idempotency_key="mw-route-only",
+                source_job_id="source-job-1",
+                source_order_id="source-order-1",
+                route_only=True,
+            ),
+            actor="makerworks",
+        )
+    )
+
+    result = asyncio.run(manager.queue_submitted_job(str(held["id"]), printer_id="printer-1", actor="operator"))
+
+    assert result["status"] == "queued"
+    assert result["printer_id"] == "printer-1"
+    assert result["queue_item_id"] == "queue-1"
+    assert result["file_path"] == "/cache/makerworks-widget-1-Widget.3mf"
+    assert result["routing_hold"] is False
+    assert printer._queue_count == 1
+
+
 def test_print_job_manager_reuses_existing_idempotent_job_across_printers() -> None:
     first = _FakePrinter("first-printer", connected=True, busy=False, queue_count=0)
     second = _FakePrinter("second-printer", connected=True, busy=False, queue_count=0)
@@ -243,6 +309,113 @@ def test_print_job_manager_reuses_existing_idempotent_job_across_printers() -> N
 
     assert result["id"] == "job-existing"
     assert len(second.created_jobs) == 0
+
+
+def test_print_job_manager_uses_order_material_override_for_preflight() -> None:
+    printer = _FakePrinter(
+        "printer-1",
+        connected=True,
+        busy=False,
+        queue_count=0,
+        loaded_filament={"type": "PETG", "name": "PETG Charcoal", "color_name": "Charcoal", "color_hex": "#000000"},
+    )
+
+    class _PlaLibraryWorks(_FakeWorksService):
+        async def makerworks_library_item(self, model_id: str, *, include_raw: bool = False) -> dict[str, object]:
+            result = await super().makerworks_library_item(model_id, include_raw=include_raw)
+            result["item"]["materials"] = ["PLA"]
+            return result
+
+    manager = PrintJobManager(_FakePrinterManager([printer]), _PlaLibraryWorks())
+
+    result = asyncio.run(
+        manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(
+                model_id="widget-1",
+                printer_id="printer-1",
+                idempotency_key="mw-123",
+                source_job_id="source-job-1",
+                source_order_id="source-order-1",
+                metadata={"material": "PETG"},
+            ),
+            actor="makerworks",
+        )
+    )
+
+    assert result["status"] == "queued"
+    assert result["preflight"]["selected_printer_id"] == "printer-1"
+
+
+def test_print_job_manager_uses_order_storage_path_for_asset_download() -> None:
+    printer = _FakePrinter(
+        "printer-1",
+        connected=True,
+        busy=False,
+        queue_count=0,
+        loaded_filament={"type": "PETG", "name": "PETG Black", "color_name": "Black", "color_hex": "#000000"},
+    )
+
+    class _StoragePathWorks(_FakeWorksService):
+        async def download_asset(self, service: str, asset_url: str) -> dict[str, object]:
+            assert service == "makerworks"
+            assert asset_url == "/files/orders/model.3mf"
+            return {"content": b"3mf", "filename": "model.3mf"}
+
+    manager = PrintJobManager(_FakePrinterManager([printer]), _StoragePathWorks())
+
+    result = asyncio.run(
+        manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(
+                model_id="widget-1",
+                printer_id="printer-1",
+                idempotency_key="mw-storage-path",
+                source_job_id="source-job-1",
+                source_order_id="source-order-1",
+                metadata={
+                    "material": "PETG",
+                    "colors": ["Black #000000"],
+                    "storage_path": "/orders/model.3mf",
+                },
+            ),
+            actor="makerworks",
+        )
+    )
+
+    assert result["status"] == "queued"
+
+
+def test_print_job_manager_routes_when_filament_telemetry_is_unavailable() -> None:
+    printer = _FakePrinter(
+        "printer-1",
+        connected=True,
+        busy=False,
+        queue_count=0,
+        loaded_filament=None,
+    )
+
+    class _MaterialWorks(_FakeWorksService):
+        async def makerworks_library_item(self, model_id: str, *, include_raw: bool = False) -> dict[str, object]:
+            result = await super().makerworks_library_item(model_id, include_raw=include_raw)
+            result["item"]["materials"] = ["PETG"]
+            return result
+
+    manager = PrintJobManager(_FakePrinterManager([printer]), _MaterialWorks())
+
+    result = asyncio.run(
+        manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(
+                model_id="widget-1",
+                printer_id="printer-1",
+                idempotency_key="mw-telemetry",
+                source_job_id="source-job-1",
+                source_order_id="source-order-1",
+            ),
+            actor="makerworks",
+        )
+    )
+
+    assert result["status"] == "queued"
+    assert result["preflight"]["selected_printer_id"] == "printer-1"
 
 
 def test_print_job_manager_preflight_requires_approval_when_multiple_printers_qualify() -> None:

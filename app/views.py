@@ -1914,6 +1914,28 @@ def render_makerworks_routing_html() -> str:
         showNotice(`Failed to resend callback: ${String(error?.message || error)}`);
       }
     }
+    async function queueSubmittedJob(nodeId, jobId) {
+      const printerId = draftAssignments[nodeId];
+      if (!printerId) {
+        showNotice('Connect the job to a printer first.');
+        return;
+      }
+      try {
+        const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/queue`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ printer_id: printerId }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.detail || data?.error?.message || `HTTP ${response.status}`);
+        delete draftAssignments[nodeId];
+        saveDraftAssignments();
+        await refreshBoard();
+        showNotice(`${data.item?.model_name || 'Queued job'} queued to ${printers.find((printer) => printer.id === printerId)?.name || printerId}.`);
+      } catch (error) {
+        showNotice(`Failed to queue routed job: ${String(error?.message || error)}`);
+      }
+    }
     function decodeRoutingItem(encoded) {
       try {
         return JSON.parse(decodeURIComponent(String(encoded || '')));
@@ -2043,6 +2065,8 @@ def render_makerworks_routing_html() -> str:
             ? (isFreshQueuedJob ? 'queue-fresh' : (assignedPrinter ? 'queue-connected' : ''))
             : '';
           const encodedItem = encodeURIComponent(JSON.stringify(item));
+          const hasQueueItem = !isChosen && !!item.queue_item_id;
+          const canQueueSubmitted = !isChosen && !!assignedPrinter && !item.queue_item_id;
           return `
             <article id="${escapeHtml(entry.id)}" class="node routeable ${activeLeft === entry.id ? 'selected' : ''} ${assignedPrinter ? 'connected' : ''} ${queuedJobStateClass}" onclick="selectLeftNode('${escapeHtml(entry.id)}')">
               <span class="drag-handle right" title="Drag to printer" onpointerdown="startWireDrag('${escapeHtml(entry.id)}', event)">
@@ -2061,8 +2085,8 @@ def render_makerworks_routing_html() -> str:
                 </div>
               ` : ''}
               <div class="node-actions">
-                ${assignedPrinter ? `<button class="btn secondary" type="button" onclick="event.stopPropagation(); disconnectPrinter('${escapeHtml(entry.id)}')">Disconnect Printer</button>` : (isChosen ? `<button class="btn secondary" type="button" disabled>No Printer Connected</button>` : `<a class="link-btn" href="/printer/${encodeURIComponent(item.printer_id || '')}" onclick="event.stopPropagation();">Open</a>`)}
-                ${isChosen ? `<button class="btn" type="button" onclick="event.stopPropagation(); submitChosenModel('${escapeHtml(entry.id)}')" ${assignedPrinter ? '' : 'disabled'}>Queue Now</button>` : `<button class="btn secondary" type="button" onclick="event.stopPropagation(); deleteQueuedJob('${escapeHtml(entry.id)}', '${escapeHtml(String(item.queue_item_id || ''))}', '${escapeHtml(String(item.model_name || item.file_name || item.id || 'Queued job'))}')">Delete Queue</button>`}
+                ${assignedPrinter ? `<button class="btn secondary" type="button" onclick="event.stopPropagation(); disconnectPrinter('${escapeHtml(entry.id)}')">Disconnect Printer</button>` : (isChosen || !item.printer_id ? `<button class="btn secondary" type="button" disabled>No Printer Connected</button>` : `<a class="link-btn" href="/printer/${encodeURIComponent(item.printer_id || '')}" onclick="event.stopPropagation();">Open</a>`)}
+                ${isChosen ? `<button class="btn" type="button" onclick="event.stopPropagation(); submitChosenModel('${escapeHtml(entry.id)}')" ${assignedPrinter ? '' : 'disabled'}>Queue Now</button>` : (canQueueSubmitted ? `<button class="btn" type="button" onclick="event.stopPropagation(); queueSubmittedJob('${escapeHtml(entry.id)}', '${escapeHtml(String(item.id || ''))}')">Queue Now</button>` : (hasQueueItem ? `<button class="btn secondary" type="button" onclick="event.stopPropagation(); deleteQueuedJob('${escapeHtml(entry.id)}', '${escapeHtml(String(item.queue_item_id || ''))}', '${escapeHtml(String(item.model_name || item.file_name || item.id || 'Queued job'))}')">Delete Queue</button>` : `<button class="btn secondary" type="button" disabled>Connect Printer</button>`))}
               </div>
               ${isChosen ? '' : `<div class="node-actions queued-routing-row"><button class="btn secondary" type="button" onclick="event.stopPropagation(); sendQueuedJobToSlicer('${escapeHtml(encodedItem)}')">Send to slicer</button><button class="btn secondary" type="button" onclick="event.stopPropagation(); importQueuedRevision('${escapeHtml(encodedItem)}')">Import revision</button></div>`}
               ${isChosen ? '' : `<div class="node-actions queued-meta-row"><button class="btn secondary" type="button" onclick="event.stopPropagation(); syncSubmittedJob('${escapeHtml(String(item.id || ''))}')">Resend Callback</button><span class="node-meta path">${escapeHtml(String(item.file_path || ''))}</span></div>`}

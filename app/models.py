@@ -98,7 +98,22 @@ class MakerworksSubmitJobRequest(BaseModel):
     flow_cali: bool = True
     vibration_cali: bool = True
     layer_inspect: bool = True
+    route_only: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SubmittedJobQueueRequest(BaseModel):
+    printer_id: str = Field(min_length=1, max_length=64)
+    start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
+    plate_gcode: str | None = None
+    use_ams: bool | None = None
+    ams_mapping: list[int] | None = None
+    bed_type: str | None = None
+    timelapse: bool | None = None
+    bed_leveling: bool | None = None
+    flow_cali: bool | None = None
+    vibration_cali: bool | None = None
+    layer_inspect: bool | None = None
 
 
 class QueueUpdateRequest(BaseModel):

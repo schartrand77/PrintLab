@@ -1,5 +1,41 @@
 [
   {
+    "id": "9a22ee5e40874f05a3ab0066be62ec2e",
+    "event": "connected",
+    "message": "Printer connected.",
+    "severity": "info",
+    "actor": "system",
+    "details": {},
+    "at": "2026-04-18T16:32:28.132400+00:00"
+  },
+  {
+    "id": "90a8ba15bd314ab59a90909771c3bd94",
+    "event": "connected",
+    "message": "Printer connected.",
+    "severity": "info",
+    "actor": "system",
+    "details": {},
+    "at": "2026-04-18T16:30:29.911372+00:00"
+  },
+  {
+    "id": "427afc303f5547729f177892437dbcc4",
+    "event": "connected",
+    "message": "Printer connected.",
+    "severity": "info",
+    "actor": "system",
+    "details": {},
+    "at": "2026-04-18T16:28:12.137768+00:00"
+  },
+  {
+    "id": "9d253d5da39646659b607363f57f84b2",
+    "event": "connected",
+    "message": "Printer connected.",
+    "severity": "info",
+    "actor": "system",
+    "details": {},
+    "at": "2026-04-18T16:25:08.976490+00:00"
+  },
+  {
     "id": "b548c2f471044c7c84980eaf19957fcc",
     "event": "connected",
     "message": "Printer connected.",

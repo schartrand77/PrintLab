@@ -28,6 +28,7 @@ from app.services import (
     QueuePrintJobRequest,
     QueueReorderRequest,
     QueueUpdateRequest,
+    SubmittedJobQueueRequest,
     SuccessfulGcodeSyncRequest,
     TemperatureRequest,
     TimelapseActionRequest,
@@ -452,6 +453,16 @@ async def sync_job(job_id: str, request: Request, payload: SuccessfulGcodeSyncRe
     try:
         job = await job_manager.sync_job_to_makerworks(job_id, force=bool(payload and payload.force))
         return {"ok": True, "item": job}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.post("/api/jobs/{job_id}/queue")
+async def queue_submitted_job(job_id: str, request: Request, payload: SubmittedJobQueueRequest) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        item = await job_manager.queue_submitted_job(job_id, printer_id=payload.printer_id, actor=actor_from_request(request), request=payload)
+        return {"ok": True, "item": item}
     except Exception as exc:
         _raise_api_error(exc)
 

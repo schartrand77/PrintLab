@@ -240,7 +240,22 @@ class MakerworksSubmitJobRequest(BaseModel):
     flow_cali: bool = True
     vibration_cali: bool = True
     layer_inspect: bool = True
+    route_only: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SubmittedJobQueueRequest(BaseModel):
+    printer_id: str = Field(min_length=1, max_length=64)
+    start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
+    plate_gcode: str | None = None
+    use_ams: bool | None = None
+    ams_mapping: list[int] | None = None
+    bed_type: str | None = None
+    timelapse: bool | None = None
+    bed_leveling: bool | None = None
+    flow_cali: bool | None = None
+    vibration_cali: bool | None = None
+    layer_inspect: bool | None = None
 
 
 class QueueUpdateRequest(BaseModel):
@@ -690,7 +705,10 @@ class WorksService:
                     return token
         return None
 
-    def _service_session(self, cfg: dict[str, Any]) -> requests.Session | None:
+    def _service_session(self, cfg: dict[str, Any], *, force_login: bool = False) -> requests.Session | None:
+        if not force_login and (cfg.get("api_key") or cfg.get("bearer_token")):
+            return None
+
         username = str(cfg.get("admin_username") or "").strip()
         password = str(cfg.get("admin_password") or "").strip()
         if not username or not password:
@@ -706,16 +724,25 @@ class WorksService:
         )
         login_page.raise_for_status()
         csrf_token = self._extract_csrf_token(login_page.text)
-        if not csrf_token:
-            raise RuntimeError(f"Unable to find CSRF token on {cfg['service']} login page.")
-
-        login_response = session.post(
-            login_url,
-            data={"username": username, "password": password, "csrf_token": csrf_token},
-            headers=self._service_request_headers(cfg, {"Accept": "application/json"}),
-            timeout=8.0,
-            verify=cfg["verify_ssl"],
-        )
+        if cfg.get("service") == "makerworks":
+            login_response = session.post(
+                self._build_url(cfg["base_url"], "/api/login"),
+                json={"email": username, "password": password},
+                headers=self._service_request_headers(cfg, {"Accept": "application/json"}),
+                timeout=8.0,
+                verify=cfg["verify_ssl"],
+            )
+        else:
+            data = {"username": username, "password": password}
+            if csrf_token:
+                data["csrf_token"] = csrf_token
+            login_response = session.post(
+                login_url,
+                data=data,
+                headers=self._service_request_headers(cfg, {"Accept": "application/json"}),
+                timeout=8.0,
+                verify=cfg["verify_ssl"],
+            )
         login_response.raise_for_status()
         return session
 
@@ -737,6 +764,21 @@ class WorksService:
         )
         redirected_path = urlsplit(str(response.url or "")).path.lower()
         if redirected_path.endswith("/login") or "text/html" in str(response.headers.get("content-type") or "").lower():
+            if session is None and (cfg.get("admin_username") and cfg.get("admin_password")):
+                session = self._service_session(cfg, force_login=True)
+                if session is not None:
+                    response = session.get(
+                        url,
+                        headers=self._service_request_headers(cfg),
+                        timeout=timeout_seconds,
+                        verify=cfg["verify_ssl"],
+                    )
+                    redirected_path = urlsplit(str(response.url or "")).path.lower()
+                    if not redirected_path.endswith("/login") and "text/html" not in str(response.headers.get("content-type") or "").lower():
+                        if response.ok:
+                            path = urlsplit(response.url or url).path
+                            filename = Path(path).name or Path(urlsplit(url).path).name or "asset.bin"
+                            return {"url": response.url or url, "filename": filename, "content": response.content, "content_type": response.headers.get("content-type")}
             raise RuntimeError(
                 f"{service} asset download requires login. Set {str(service).upper()}_ADMIN_USERNAME and {str(service).upper()}_ADMIN_PASSWORD."
             )
@@ -1823,6 +1865,7 @@ class PrinterService:
             "id": uuid4().hex,
             "printer_id": self.printer_id,
             "printer_name": self.display_name,
+            "started_at": context.get("started_at"),
             "completed_at": completed_at,
             "state": snapshot.get("state") or self._last_job_state,
             "file_path": file_path,
@@ -1910,6 +1953,8 @@ class PrinterService:
             "stable_seconds": max(0, int(get_env("YOUTUBE_TIMELAPSE_STABLE_SECONDS", "20") or "20")),
             "chunk_bytes": max(256 * 1024, int(float(get_env("YOUTUBE_UPLOAD_CHUNK_MB", "8") or "8") * 1024 * 1024)),
             "timeout_seconds": max(30, int(get_env("YOUTUBE_UPLOAD_TIMEOUT_SECONDS", "900") or "900")),
+            "verify_video": parse_bool("YOUTUBE_VERIFY_VIDEO", True),
+            "normalize_video": parse_bool("YOUTUBE_NORMALIZE_VIDEO", True),
         }
 
     def _youtube_template_context(self, record: dict[str, Any]) -> dict[str, str]:
@@ -1924,6 +1969,7 @@ class PrinterService:
             "file_name": str(record.get("file_name") or ""),
             "plate_index": str(record.get("plate_index") or ""),
             "subtask_name": str(record.get("subtask_name") or ""),
+            "started_at": str(record.get("started_at") or ""),
             "completed_at": str(record.get("completed_at") or ""),
         }
 
@@ -2099,6 +2145,10 @@ class PrinterService:
         parsed = self._parse_iso_timestamp(record.get("completed_at"))
         return parsed.timestamp() if parsed is not None else None
 
+    def _record_started_timestamp(self, record: dict[str, Any]) -> float | None:
+        parsed = self._parse_iso_timestamp(record.get("started_at"))
+        return parsed.timestamp() if parsed is not None else None
+
     def _timelapse_matches_completion_window(
         self,
         *,
@@ -2112,7 +2162,9 @@ class PrinterService:
         completed_ts = self._record_completed_timestamp(record)
         if completed_ts is None:
             return True
-        if candidate_ts < (completed_ts - max_seconds_before):
+        started_ts = self._record_started_timestamp(record)
+        earliest_ts = (started_ts - 30 * 60) if started_ts is not None else (completed_ts - max_seconds_before)
+        if candidate_ts < earliest_ts:
             return False
         if candidate_ts > (completed_ts + max_seconds_after):
             return False
@@ -2159,9 +2211,14 @@ class PrinterService:
                 score += 6
 
             completed_at = self._parse_iso_timestamp(record.get("completed_at"))
+            started_at = self._parse_iso_timestamp(record.get("started_at"))
             time_delta_seconds = float("inf")
             if captured_at and completed_at:
-                time_delta_seconds = abs((captured_at - completed_at).total_seconds())
+                if started_at and (started_at - timedelta(minutes=30)) <= captured_at <= (completed_at + timedelta(hours=6)):
+                    time_delta_seconds = abs((captured_at - started_at).total_seconds())
+                    score += 2
+                else:
+                    time_delta_seconds = abs((captured_at - completed_at).total_seconds())
                 if time_delta_seconds <= fallback_window_seconds:
                     score += 2
                 elif generic_plate_name:
@@ -2191,10 +2248,12 @@ class PrinterService:
             return matched_record
 
         completed_at = captured_at.isoformat()
+        context = self._active_job_context or {}
         record = {
             "id": uuid4().hex,
             "printer_id": self.printer_id,
             "printer_name": self.display_name,
+            "started_at": context.get("started_at"),
             "completed_at": completed_at,
             "state": "TIMELAPSE",
             "file_path": str(source_path or local_path),
@@ -2399,6 +2458,104 @@ class PrinterService:
                 except OSError:
                     pass
             raise
+
+    def _probe_youtube_video_sync(self, video_path: Path) -> dict[str, Any]:
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            str(video_path),
+        ]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
+        except FileNotFoundError as exc:
+            raise RuntimeError("ffprobe is required to verify YouTube timelapse videos.") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"Timed out while verifying timelapse video: {video_path}") from exc
+
+        if proc.returncode != 0:
+            detail = re.sub(r"\s+", " ", (proc.stderr or proc.stdout or "")).strip()[:240]
+            suffix = f": {detail}" if detail else ""
+            raise RuntimeError(f"Timelapse file is not a valid video container: {video_path}{suffix}")
+
+        try:
+            payload = json.loads(proc.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"ffprobe returned invalid metadata for timelapse video: {video_path}") from exc
+
+        streams = payload.get("streams") if isinstance(payload, dict) else None
+        video_stream = next(
+            (stream for stream in streams or [] if isinstance(stream, dict) and stream.get("codec_type") == "video"),
+            None,
+        )
+        if not video_stream:
+            raise RuntimeError(f"Timelapse file contains no video stream: {video_path}")
+
+        duration_raw = str((payload.get("format") or {}).get("duration") or video_stream.get("duration") or "").strip()
+        if duration_raw and duration_raw.upper() != "N/A":
+            try:
+                if float(duration_raw) <= 0:
+                    raise RuntimeError(f"Timelapse video duration is zero: {video_path}")
+            except ValueError:
+                pass
+        return payload
+
+    def _normalize_staged_timelapse_for_youtube_sync(
+        self,
+        staged_path: Path,
+        record: dict[str, Any],
+        cfg: dict[str, Any],
+    ) -> Path:
+        if not bool(cfg.get("verify_video", True)):
+            return staged_path
+
+        self._set_youtube_progress(record, stage="checking", percent=22, label="Checking video")
+        self._probe_youtube_video_sync(staged_path)
+        if not bool(cfg.get("normalize_video", True)):
+            return staged_path
+
+        normalized_path = staged_path.with_name(f"{staged_path.stem}.normalized.mp4")
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-i",
+            str(staged_path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
+            str(normalized_path),
+        ]
+        self._set_youtube_progress(record, stage="normalizing", percent=24, label="Preparing video")
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180, check=False)
+        except FileNotFoundError as exc:
+            raise RuntimeError("ffmpeg is required to prepare YouTube timelapse videos.") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"Timed out while preparing timelapse video for YouTube: {staged_path}") from exc
+
+        if proc.returncode != 0:
+            try:
+                normalized_path.unlink()
+            except OSError:
+                pass
+            detail = re.sub(r"\s+", " ", (proc.stderr or proc.stdout or "")).strip()[:240]
+            suffix = f": {detail}" if detail else ""
+            raise RuntimeError(f"Failed to prepare timelapse video for YouTube: {staged_path}{suffix}")
+
+        self._probe_youtube_video_sync(normalized_path)
+        return normalized_path
 
     def _set_youtube_progress(
         self,
@@ -2942,6 +3099,7 @@ class PrinterService:
         self._set_youtube_progress(record, stage="ready", percent=15, label="Timelapse ready")
         youtube["path"] = str(selected_path.resolve())
         staged_path: Path | None = None
+        upload_path: Path | None = None
         try:
             self._set_youtube_progress(record, stage="staging", percent=18, label="Staging upload")
             staged_path = await asyncio.get_running_loop().run_in_executor(
@@ -2951,11 +3109,18 @@ class PrinterService:
                 record,
                 cfg,
             )
+            upload_path = await asyncio.get_running_loop().run_in_executor(
+                None,
+                self._normalize_staged_timelapse_for_youtube_sync,
+                staged_path,
+                record,
+                cfg,
+            )
             result = await asyncio.get_running_loop().run_in_executor(
                 None,
                 self._youtube_upload_video,
                 record,
-                staged_path,
+                upload_path,
                 cfg,
             )
             youtube.update(
@@ -3020,12 +3185,13 @@ class PrinterService:
             )
             raise
         finally:
-            if staged_path is not None:
-                try:
-                    if staged_path.exists():
-                        staged_path.unlink()
-                except OSError:
-                    pass
+            for cleanup_path in {staged_path, upload_path}:
+                if cleanup_path is not None:
+                    try:
+                        if cleanup_path.exists():
+                            cleanup_path.unlink()
+                    except OSError:
+                        pass
 
     def _schedule_youtube_upload(self, record_id: str, *, force: bool = False) -> None:
         cfg = self._youtube_upload_config()
@@ -3105,6 +3271,8 @@ class PrinterService:
                 )
                 if busy:
                     context = self._active_job_context or {}
+                    if not previously_busy and not context.get("started_at"):
+                        context = {**context, "started_at": datetime.now(timezone.utc).isoformat()}
                     self._active_job_context = {
                         **context,
                         **{k: v for k, v in snapshot.items() if v not in (None, "")},
@@ -4921,6 +5089,15 @@ class PrintJobManager:
         loaded_tokens = self._tokenize([loaded.get("type"), loaded.get("name"), loaded.get("color_name"), loaded.get("color_hex")])
         material_tokens = self._tokenize(material)
         color_tokens = self._tokenize(color)
+        if not loaded and not slots:
+            return {
+                "status": "telemetry_unavailable",
+                "ok": True,
+                "message": "Filament telemetry is unavailable; routing with MakerWorks requirement noted.",
+                "loaded_match": False,
+                "available_match": False,
+                "loaded_filament": None,
+            }
         loaded_material_match = not material_tokens or self._contains_token_match(loaded_tokens, material_tokens)
         loaded_color_match = not color_tokens or self._contains_token_match(loaded_tokens, color_tokens)
         if loaded and loaded_material_match and loaded_color_match:
@@ -4981,9 +5158,46 @@ class PrintJobManager:
             ),
         }
 
-    async def makerworks_preflight(self, model_id: str, *, printer_id: str | None = None) -> dict[str, Any]:
+    def _apply_makerworks_submit_overrides(
+        self,
+        source_item: dict[str, Any],
+        metadata: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not metadata:
+            return source_item
+
+        item = copy.deepcopy(source_item)
+        material = metadata.get("material") or metadata.get("order_material")
+        if isinstance(material, str) and material.strip():
+            item["materials"] = [material.strip()]
+        elif isinstance(metadata.get("materials"), list):
+            materials = [str(value).strip() for value in metadata["materials"] if str(value or "").strip()]
+            if materials:
+                item["materials"] = materials
+
+        colors = metadata.get("colors") or metadata.get("order_colors")
+        if isinstance(colors, list):
+            cleaned = [str(value).strip() for value in colors if str(value or "").strip()]
+            if cleaned:
+                item["colors"] = cleaned
+        storage_path = metadata.get("storage_path")
+        if isinstance(storage_path, str) and storage_path.strip():
+            item["download_url"] = f"/files/{storage_path.strip().lstrip('/')}"
+        else:
+            storage_url = metadata.get("storage_url")
+            if isinstance(storage_url, str) and storage_url.strip():
+                item["download_url"] = storage_url.strip()
+        return item
+
+    async def makerworks_preflight(
+        self,
+        model_id: str,
+        *,
+        printer_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         detail = await self._works_service.makerworks_library_item(model_id, include_raw=False)
-        source_item = detail["item"]
+        source_item = self._apply_makerworks_submit_overrides(detail["item"], metadata)
         if not source_item.get("queue_supported"):
             raise ValueError(source_item.get("printer_handoff_note") or "This MakerWorks model cannot be queued yet.")
 
@@ -5005,6 +5219,7 @@ class PrintJobManager:
                 "loaded_match": 140,
                 "available_match": 80,
                 "not_required": 40,
+                "telemetry_unavailable": 10,
                 "unavailable": -400,
             }.get(str(filament.get("status") or ""), 0)
             score = (600 if qualifies else 0) + filament_bonus + health_score - busy_penalty - queue_penalty - wait_penalty
@@ -5147,6 +5362,15 @@ class PrintJobManager:
     def _job_response(self, job: dict[str, Any]) -> dict[str, Any]:
         return copy.deepcopy(job)
 
+    def _find_submitted_job_owner(self, job_id: str) -> tuple[PrinterService, dict[str, Any]]:
+        for entry in self._printer_manager.list_items():
+            service = self._printer_manager.get(entry["id"])
+            try:
+                return service, service.submitted_job_record(job_id)
+            except ValueError:
+                continue
+        raise ValueError(f"Unknown submitted job: {job_id}")
+
     async def submit_makerworks_job(self, payload: MakerworksSubmitJobRequest, actor: str = "dashboard") -> dict[str, Any]:
         existing = self._find_submitted_job_by_idempotency(payload.idempotency_key)
         if existing is not None:
@@ -5156,10 +5380,10 @@ class PrintJobManager:
         target_printer: PrinterService | None = None
         try:
             detail = await self._works_service.makerworks_library_item(payload.model_id, include_raw=False)
-            source_item = detail["item"]
+            source_item = self._apply_makerworks_submit_overrides(detail["item"], payload.metadata)
             if not source_item.get("queue_supported"):
                 raise ValueError(source_item.get("printer_handoff_note") or "This MakerWorks model cannot be queued yet.")
-            preflight = await self.makerworks_preflight(payload.model_id, printer_id=payload.printer_id)
+            preflight = await self.makerworks_preflight(payload.model_id, printer_id=payload.printer_id, metadata=payload.metadata)
             if payload.printer_id:
                 selected = next((item for item in preflight["candidates"] if item.get("printer_id") == payload.printer_id), None)
                 if not selected or not selected.get("qualifies"):
@@ -5173,6 +5397,52 @@ class PrintJobManager:
                 if not selected_printer_id:
                     raise ValueError("No connected printer passed MakerWorks preflight.")
                 target_printer = self._printer_manager.get(selected_printer_id)
+
+            if payload.route_only:
+                now = datetime.now(timezone.utc).isoformat()
+                storage_printer = target_printer or await self._select_best_printer()
+                submitted_job = storage_printer.create_submitted_job(
+                    {
+                        "id": job_id,
+                        "source": "makerworks",
+                        "status": "queued",
+                        "printer_id": target_printer.printer_id if payload.printer_id and target_printer else None,
+                        "printer_name": target_printer.display_name if payload.printer_id and target_printer else None,
+                        "queue_item_id": None,
+                        "idempotency_key": payload.idempotency_key,
+                        "source_job_id": payload.source_job_id,
+                        "source_order_id": payload.source_order_id,
+                        "model_id": source_item.get("id"),
+                        "model_name": source_item.get("name"),
+                        "model_url": source_item.get("model_url"),
+                        "download_url": source_item.get("download_url"),
+                        "file_type": source_item.get("file_type"),
+                        "file_path": None,
+                        "file_name": None,
+                        "preflight": {
+                            "selected_printer_id": preflight.get("selected_printer_id"),
+                            "qualified_printer_count": preflight.get("qualified_printer_count"),
+                            "approval_required": preflight.get("approval_required"),
+                        },
+                        "plate_gcode": payload.plate_gcode,
+                        "start_at": payload.start_at,
+                        "use_ams": payload.use_ams,
+                        "ams_mapping": payload.ams_mapping,
+                        "actor": actor,
+                        "metadata": payload.metadata or {},
+                        "routing_hold": True,
+                        "created_at": now,
+                        "updated_at": now,
+                    },
+                    message=f"Awaiting routing for MakerWorks model {source_item.get('name') or payload.model_id}.",
+                )
+                storage_printer._record_timeline(
+                    "job_accept",
+                    f"Accepted MakerWorks routing hold for {source_item.get('name') or payload.model_id}.",
+                    actor=actor,
+                    details={"job_id": job_id, "model_id": source_item.get("id")},
+                )
+                return self._job_response(submitted_job)
 
             asset = await self._works_service.download_asset("makerworks", str(source_item.get("download_url") or ""))
             preferred_name = self._build_preferred_name(source_item, payload, asset)
@@ -5251,6 +5521,114 @@ class PrintJobManager:
         except Exception as exc:
             failed_job = self._submit_failed_response(payload=payload, message=str(exc), printer=target_printer, job_id=job_id)
             raise MakerworksSubmitError(str(exc), job=failed_job) from exc
+
+    async def queue_submitted_job(
+        self,
+        job_id: str,
+        *,
+        printer_id: str,
+        actor: str = "dashboard",
+        request: SubmittedJobQueueRequest | None = None,
+    ) -> dict[str, Any]:
+        owner, job = self._find_submitted_job_owner(job_id)
+        if str(job.get("source") or "").lower() != "makerworks":
+            raise ValueError("Only MakerWorks submitted jobs can be queued from the routing board.")
+        if job.get("queue_item_id"):
+            return self._job_response(job)
+
+        target_printer = self._printer_manager.get(printer_id)
+        model_id = str(job.get("model_id") or "").strip()
+        if not model_id:
+            raise ValueError("Submitted job is missing a MakerWorks model id.")
+
+        metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
+        detail = await self._works_service.makerworks_library_item(model_id, include_raw=False)
+        source_item = self._apply_makerworks_submit_overrides(detail["item"], metadata)
+        preflight = await self.makerworks_preflight(model_id, printer_id=printer_id, metadata=metadata)
+        selected = next((item for item in preflight["candidates"] if item.get("printer_id") == printer_id), None)
+        if not selected or not selected.get("qualifies"):
+            raise ValueError((selected or {}).get("reason") or f"Printer {printer_id} did not pass preflight.")
+
+        payload = MakerworksSubmitJobRequest(
+            model_id=model_id,
+            printer_id=printer_id,
+            idempotency_key=str(job.get("idempotency_key") or job_id),
+            source_job_id=str(job.get("source_job_id") or job_id),
+            source_order_id=str(job.get("source_order_id") or job_id),
+            start_at=request.start_at if request and request.start_at is not None else job.get("start_at"),
+            plate_gcode=request.plate_gcode if request and request.plate_gcode is not None else str(job.get("plate_gcode") or "Metadata/plate_1.gcode"),
+            use_ams=request.use_ams if request and request.use_ams is not None else bool(job.get("use_ams", True)),
+            ams_mapping=request.ams_mapping if request and request.ams_mapping is not None else job.get("ams_mapping"),
+            bed_type=request.bed_type if request and request.bed_type is not None else "auto",
+            timelapse=request.timelapse if request and request.timelapse is not None else True,
+            bed_leveling=request.bed_leveling if request and request.bed_leveling is not None else True,
+            flow_cali=request.flow_cali if request and request.flow_cali is not None else True,
+            vibration_cali=request.vibration_cali if request and request.vibration_cali is not None else True,
+            layer_inspect=request.layer_inspect if request and request.layer_inspect is not None else True,
+            metadata=metadata,
+        )
+        asset = await self._works_service.download_asset("makerworks", str(source_item.get("download_url") or ""))
+        preferred_name = self._build_preferred_name(source_item, payload, asset)
+        staged = await target_printer.stage_project_bytes(bytes(asset["content"]), preferred_name)
+
+        queue_result = await target_printer.queue_print_job(
+            QueuePrintJobRequest(
+                file_path=str(staged["file_path"]),
+                plate_gcode=payload.plate_gcode,
+                use_ams=payload.use_ams,
+                ams_mapping=payload.ams_mapping,
+                bed_type=payload.bed_type,
+                timelapse=payload.timelapse,
+                bed_leveling=payload.bed_leveling,
+                flow_cali=payload.flow_cali,
+                vibration_cali=payload.vibration_cali,
+                layer_inspect=payload.layer_inspect,
+                start_at=payload.start_at,
+            ),
+            actor=actor,
+            metadata={
+                "job_id": job_id,
+                "display_name": source_item.get("name"),
+                "source": "makerworks",
+                "source_model_id": source_item.get("id"),
+                "source_model_url": source_item.get("model_url"),
+                "source_download_url": source_item.get("download_url"),
+                "source_file_type": source_item.get("file_type"),
+                "staged_file_name": staged.get("file_name"),
+            },
+        )
+        queue_item = queue_result["item"]
+        updated = owner.update_submitted_job(
+            job_id,
+            status="queued",
+            message=f"Queued MakerWorks model {source_item.get('name') or model_id}.",
+            details={"queue_item_id": queue_item.get("id"), "printer_id": printer_id},
+            extra={
+                "printer_id": target_printer.printer_id,
+                "printer_name": target_printer.display_name,
+                "queue_item_id": queue_item.get("id"),
+                "model_name": source_item.get("name"),
+                "model_url": source_item.get("model_url"),
+                "download_url": source_item.get("download_url"),
+                "file_type": source_item.get("file_type"),
+                "file_path": staged.get("file_path"),
+                "file_name": staged.get("file_name"),
+                "preflight": {
+                    "selected_printer_id": target_printer.printer_id,
+                    "qualified_printer_count": preflight.get("qualified_printer_count"),
+                    "approval_required": preflight.get("approval_required"),
+                },
+                "start_at": queue_item.get("start_at"),
+                "routing_hold": False,
+            },
+        )
+        target_printer._record_timeline(
+            "job_accept",
+            f"Queued routed MakerWorks job for {source_item.get('name') or model_id}.",
+            actor=actor,
+            details={"job_id": job_id, "queue_item_id": queue_item.get("id"), "model_id": source_item.get("id")},
+        )
+        return self._job_response(updated)
 
     def list_jobs(self, *, printer_id: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
         if printer_id:

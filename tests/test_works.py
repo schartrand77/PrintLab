@@ -319,8 +319,8 @@ def test_download_asset_supports_admin_session_login(monkeypatch: pytest.MonkeyP
                 )
             return FakeResponse(content=b"image-bytes", headers={"content-type": "image/png"})
 
-        def post(self, url: str, *, data: dict[str, str], headers: dict[str, str], timeout: float, verify: bool) -> FakeResponse:
-            events.append(("POST", url, data))
+        def post(self, url: str, *, json: dict[str, str] | None = None, data: dict[str, str] | None = None, headers: dict[str, str], timeout: float, verify: bool) -> FakeResponse:
+            events.append(("POST", url, json or data or {}))
             return FakeResponse()
 
     monkeypatch.setattr("app.services.requests.Session", lambda: FakeSession())
@@ -331,8 +331,105 @@ def test_download_asset_supports_admin_session_login(monkeypatch: pytest.MonkeyP
     assert result["content"] == b"image-bytes"
     assert result["content_type"] == "image/png"
     assert events[0][0:2] == ("GET", "https://makerworks.local/login")
-    assert events[1] == ("POST", "https://makerworks.local/login", {"username": "admin", "password": "secret", "csrf_token": "csrf-123"})
+    assert events[1] == ("POST", "https://makerworks.local/api/login", {"email": "admin", "password": "secret"})
     assert events[2][0:2] == ("GET", "https://makerworks.local/thumbs/42.png")
+
+
+def test_download_asset_uses_api_key_without_admin_session_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+    monkeypatch.setenv("MAKERWORKS_API_KEY", "service-key")
+    monkeypatch.setenv("MAKERWORKS_AUTH_HEADER", "X-MakerWorks-Key")
+    monkeypatch.setenv("MAKERWORKS_ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("MAKERWORKS_ADMIN_PASSWORD", "secret")
+
+    def forbidden_session() -> object:
+        raise AssertionError("API-key service requests should not attempt form login")
+
+    class FakeResponse:
+        ok = True
+        status_code = 200
+        text = ""
+        content = b"model-bytes"
+        url = "https://makerworks.local/files/model.3mf"
+        headers = {"content-type": "model/3mf"}
+
+    captured_headers: dict[str, str] = {}
+
+    def fake_get(_url: str, *, headers: dict[str, str], **_kwargs) -> FakeResponse:
+        captured_headers.update(headers)
+        return FakeResponse()
+
+    monkeypatch.setattr("app.services.requests.Session", forbidden_session)
+    monkeypatch.setattr("app.services.requests.get", fake_get)
+
+    service = WorksService()
+    result = service.download_asset_sync("makerworks", "https://makerworks.local/files/model.3mf")
+
+    assert result["content"] == b"model-bytes"
+    assert captured_headers["X-MakerWorks-Key"] == "service-key"
+
+
+def test_download_asset_falls_back_to_admin_session_when_api_key_hits_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+    monkeypatch.setenv("MAKERWORKS_API_KEY", "service-key")
+    monkeypatch.setenv("MAKERWORKS_AUTH_HEADER", "X-MakerWorks-Key")
+    monkeypatch.setenv("MAKERWORKS_ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("MAKERWORKS_ADMIN_PASSWORD", "secret")
+
+    class LoginResponse:
+        ok = True
+        status_code = 200
+        text = "<html>login</html>"
+        content = b"<html>login</html>"
+        url = "https://makerworks.local/login?next=%2Ffiles%2Fmodel.3mf"
+        headers = {"content-type": "text/html; charset=utf-8"}
+
+    class LoginPage:
+        ok = True
+        status_code = 200
+        text = '<input name="csrf_token" value="csrf-123">'
+        content = text.encode()
+        url = "https://makerworks.local/login"
+        headers = {"content-type": "text/html; charset=utf-8"}
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class LoginPostResponse:
+        ok = True
+        status_code = 200
+        text = "{}"
+        content = b"{}"
+        url = "https://makerworks.local/login"
+        headers = {"content-type": "application/json"}
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class AssetResponse:
+        ok = True
+        status_code = 200
+        text = ""
+        content = b"model-bytes"
+        url = "https://makerworks.local/files/model.3mf"
+        headers = {"content-type": "model/3mf"}
+
+    class FakeSession:
+        def get(self, url: str, **_kwargs):
+            if url.endswith("/login"):
+                return LoginPage()
+            return AssetResponse()
+
+        def post(self, *_args, **_kwargs):
+            return LoginPostResponse()
+
+    monkeypatch.setattr("app.services.requests.get", lambda *_args, **_kwargs: LoginResponse())
+    monkeypatch.setattr("app.services.requests.Session", lambda: FakeSession())
+
+    service = WorksService()
+    result = service.download_asset_sync("makerworks", "https://makerworks.local/files/model.3mf")
+
+    assert result["content"] == b"model-bytes"
 
 
 def test_download_asset_surfaces_login_requirement_without_service_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1044,6 +1141,41 @@ def test_download_latest_timelapse_from_printer_ignores_stale_remote_video() -> 
     assert result is None
 
 
+def test_timelapse_match_accepts_video_captured_during_long_print() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    record = {
+        "id": "record-long-print",
+        "started_at": "2026-04-17T09:30:00+00:00",
+        "completed_at": "2026-04-18T06:18:37+00:00",
+    }
+    captured_ts = datetime(2026, 4, 17, 9, 47, 0, tzinfo=timezone.utc).timestamp()
+
+    assert service._timelapse_matches_completion_window(record=record, candidate_ts=captured_ts) is True
+
+
+def test_completion_record_preserves_started_at_for_timelapse_matching() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    service._active_job_context = {
+        "file_path": "/cache/widget.3mf",
+        "started_at": "2026-04-17T09:30:00+00:00",
+    }
+
+    record = service._build_completion_record(
+        {"state": "FINISH", "file_path": "/cache/widget.3mf"},
+        "2026-04-18T06:18:37+00:00",
+    )
+
+    assert record["started_at"] == "2026-04-17T09:30:00+00:00"
+
+
 def test_wait_for_stable_timelapse_file_accepts_aged_file(monkeypatch: pytest.MonkeyPatch) -> None:
     tmp_path = Path("tests/.tmp/youtube-stable-file")
     cache_dir = tmp_path / "cache" / "timelapse"
@@ -1070,6 +1202,38 @@ def test_wait_for_stable_timelapse_file_accepts_aged_file(monkeypatch: pytest.Mo
     )
 
     assert result == video_path
+
+
+def test_youtube_video_verification_rejects_invalid_media(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = Path("tests/.tmp/youtube-invalid-video")
+    stage_dir = tmp_path / "stage"
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    video_path = stage_dir / "invalid.mp4"
+    video_path.write_bytes(b"not-a-video")
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    class ProbeFailure:
+        returncode = 1
+        stdout = ""
+        stderr = "moov atom not found"
+
+    def fake_run(command, **_kwargs):
+        assert command[0] == "ffprobe"
+        return ProbeFailure()
+
+    monkeypatch.setattr("app.services.subprocess.run", fake_run)
+
+    with pytest.raises(RuntimeError, match="not a valid video container"):
+        service._normalize_staged_timelapse_for_youtube_sync(
+            video_path,
+            {"id": "record-invalid"},
+            {"verify_video": True, "normalize_video": True},
+        )
 
 
 def test_youtube_upload_stages_local_timelapse_before_upload(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1622,8 +1786,14 @@ def test_youtube_video_snapshot_matches_same_day_timelapse_started_hours_before_
 
 
 def test_list_timelapse_inventory_does_not_expose_mp4_thumbnail_endpoint() -> None:
+    tmp_path = Path("tests/.tmp/list-timelapse-inventory")
     service = PrinterService(
-        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        config={
+            "host": "127.0.0.1",
+            "serial": "SERIAL",
+            "access_code": "CODE",
+            "file_cache_path": str(tmp_path / "cache"),
+        },
         printer_id="printer-1",
         display_name="Printer 1",
     )
