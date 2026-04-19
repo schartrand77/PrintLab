@@ -1117,6 +1117,55 @@ def test_successful_gcode_can_download_sd_timelapse_before_youtube_upload(monkey
     assert Path(str(result["youtube"]["path"])).exists()
 
 
+def test_youtube_upload_downloads_sd_timelapse_when_cache_count_is_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = Path("tests/.tmp/youtube-upload-from-ftp-cache-zero")
+    cache_dir = tmp_path / "cache" / "timelapse"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("YOUTUBE_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("YOUTUBE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("YOUTUBE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("YOUTUBE_REFRESH_TOKEN", "refresh-token")
+
+    service = PrinterService(
+        config={
+            "host": "127.0.0.1",
+            "serial": "SERIAL",
+            "access_code": "CODE",
+            "file_cache_path": str(tmp_path / "cache"),
+            "timelapse_cache_count": 0,
+        },
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    record = {
+        "id": "record-ftp-cache-zero",
+        "file_name": "widget.3mf",
+        "model_name": "Widget",
+        "completed_at": "2026-03-13T12:00:00+00:00",
+        "youtube": {"uploaded": False},
+    }
+
+    class FakeFtp:
+        def retrlines(self, command: str, callback) -> None:
+            assert command == "LIST /timelapse"
+            callback("-rw-r--r-- 1 user group 10 Mar 13 12:12 video_2026-03-13_12-12-18.mp4")
+
+        def retrbinary(self, command: str, callback) -> None:
+            assert command == "RETR /timelapse/video_2026-03-13_12-12-18.mp4"
+            callback(b"fake-video-from-ftp")
+
+        def quit(self) -> None:
+            return None
+
+    service.client = SimpleNamespace(ftp_connection=lambda: FakeFtp(), connected=True)
+
+    result = service._download_latest_timelapse_from_printer_sync(record)
+
+    assert result == cache_dir / "video_2026-03-13_12-12-18.mp4"
+    assert result.read_bytes() == b"fake-video-from-ftp"
+
+
 def test_download_latest_timelapse_from_printer_ignores_stale_remote_video() -> None:
     tmp_path = Path("tests/.tmp/youtube-stale-remote")
     cache_dir = tmp_path / "cache" / "timelapse"

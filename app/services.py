@@ -2027,7 +2027,9 @@ class PrinterService:
             return None
 
     def _download_latest_timelapse_from_printer_sync(self, record: dict[str, Any]) -> Path | None:
-        if self.client is None or self._timelapse_cache_count() == 0:
+        cache_count = self._timelapse_cache_count()
+        youtube_enabled = bool(self._youtube_upload_config()["enabled"])
+        if self.client is None or (cache_count == 0 and not youtube_enabled):
             return None
 
         ftp = self.client.ftp_connection()
@@ -2079,7 +2081,7 @@ class PrinterService:
             with local_path.open("wb") as handle:
                 ftp.retrbinary(f"RETR {remote_path}", handle.write)
 
-            keep = self._timelapse_cache_count()
+            keep = max(1, cache_count) if youtube_enabled else cache_count
             if keep >= 0:
                 cached = sorted(
                     [path for ext in ("*.mp4", "*.avi", "*.mov") for path in local_dir.glob(ext)],
