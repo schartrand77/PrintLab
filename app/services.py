@@ -1930,11 +1930,18 @@ class PrinterService:
 
     def _youtube_upload_config(self) -> dict[str, Any]:
         tags_raw = get_env("YOUTUBE_TAGS", "")
+        client_id = get_env("YOUTUBE_CLIENT_ID", "")
+        client_secret = get_env("YOUTUBE_CLIENT_SECRET", "")
+        refresh_token = get_env("YOUTUBE_REFRESH_TOKEN", "")
+        enabled_raw = (get_env("YOUTUBE_UPLOAD_ENABLED", "false") or "false").strip().lower()
+        enabled = parse_bool("YOUTUBE_UPLOAD_ENABLED", False)
+        if enabled_raw == "auto":
+            enabled = bool(client_id and client_secret and refresh_token)
         return {
-            "enabled": parse_bool("YOUTUBE_UPLOAD_ENABLED", False),
-            "client_id": get_env("YOUTUBE_CLIENT_ID", ""),
-            "client_secret": get_env("YOUTUBE_CLIENT_SECRET", ""),
-            "refresh_token": get_env("YOUTUBE_REFRESH_TOKEN", ""),
+            "enabled": enabled,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
             "privacy_status": (get_env("YOUTUBE_PRIVACY_STATUS", "private") or "private").strip().lower(),
             "category_id": (get_env("YOUTUBE_CATEGORY_ID", "28") or "28").strip(),
             "title_template": get_env("YOUTUBE_TITLE_TEMPLATE", "{model_name} - {printer_name}"),

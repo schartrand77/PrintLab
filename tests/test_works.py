@@ -915,6 +915,21 @@ def test_successful_gcode_can_upload_timelapse_to_youtube(monkeypatch: pytest.Mo
     assert captured["upload_headers"]["Content-Range"] == f"bytes 0-{len(b'fake-video') - 1}/{len(b'fake-video')}"
 
 
+def test_youtube_upload_auto_mode_enables_when_oauth_credentials_are_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YOUTUBE_UPLOAD_ENABLED", "auto")
+    monkeypatch.setenv("YOUTUBE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("YOUTUBE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("YOUTUBE_REFRESH_TOKEN", "refresh-token")
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    assert service._youtube_upload_config()["enabled"] is True
+
+
 def test_youtube_upload_uses_consistent_file_size_for_resumable_session(monkeypatch: pytest.MonkeyPatch) -> None:
     tmp_path = Path("tests/.tmp/youtube-upload-stable-size")
     cache_dir = tmp_path / "cache" / "timelapse"

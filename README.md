@@ -156,7 +156,7 @@ Successful G-code tracking:
 - The attachment payload includes printer, model, file, plate, AMS, and completion metadata. `model_id` is inferred from a leading numeric filename prefix such as `20906356-widget_plate_1.3mf`.
 - Optional automatic YouTube upload can be enabled with:
   - `TIMELAPSE_CACHE_COUNT=1` or higher so the printer timelapse is downloaded into cache
-  - `YOUTUBE_UPLOAD_ENABLED=true`
+  - `YOUTUBE_UPLOAD_ENABLED=true` or `YOUTUBE_UPLOAD_ENABLED=auto` to enable once OAuth credentials are configured
   - `YOUTUBE_CLIENT_ID=...`
   - `YOUTUBE_CLIENT_SECRET=...`
   - `YOUTUBE_REFRESH_TOKEN=...`
