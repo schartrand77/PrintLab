@@ -1950,7 +1950,7 @@ class PrinterService:
             "refresh_token": refresh_token,
             "privacy_status": (get_env("YOUTUBE_PRIVACY_STATUS", "private") or "private").strip().lower(),
             "category_id": (get_env("YOUTUBE_CATEGORY_ID", "28") or "28").strip(),
-            "title_template": get_env("YOUTUBE_TITLE_TEMPLATE", "{model_name} - {printer_name}"),
+            "title_template": get_env("YOUTUBE_TITLE_TEMPLATE", "{model_name}"),
             "description_template": get_env(
                 "YOUTUBE_DESCRIPTION_TEMPLATE",
                 "Printed on {printer_name}\nModel: {model_name}\nFile: {file_name}\nCompleted: {completed_at}",
@@ -3338,6 +3338,23 @@ class PrinterService:
                 extra={"completed_at": completed_at, "successful_gcode_id": record.get("id")},
             )
 
+    def _merge_active_job_snapshot(self, snapshot: dict[str, Any], *, previously_busy: bool) -> None:
+        context = self._active_job_context or {}
+        if not previously_busy and not context.get("started_at"):
+            context = {**context, "started_at": datetime.now(timezone.utc).isoformat()}
+
+        updates = {k: v for k, v in snapshot.items() if v not in (None, "")}
+        snapshot_path = str(updates.get("file_path") or "").strip()
+        context_path = str(context.get("file_path") or "").strip()
+        if snapshot_path and self._is_alias_thumbnail_path(snapshot_path) and context_path and not self._is_alias_thumbnail_path(context_path):
+            for key in ("file_path", "file_name", "model_id", "model_name", "model_key"):
+                updates.pop(key, None)
+
+        self._active_job_context = {
+            **context,
+            **updates,
+        }
+
     async def _monitor_print_jobs(self) -> None:
         while True:
             try:
@@ -3354,13 +3371,7 @@ class PrinterService:
                     marker in str(self._last_job_state or "").upper() for marker in ("IDLE", "FINISH", "COMPLETE", "FAILED", "STOP")
                 )
                 if busy:
-                    context = self._active_job_context or {}
-                    if not previously_busy and not context.get("started_at"):
-                        context = {**context, "started_at": datetime.now(timezone.utc).isoformat()}
-                    self._active_job_context = {
-                        **context,
-                        **{k: v for k, v in snapshot.items() if v not in (None, "")},
-                    }
+                    self._merge_active_job_snapshot(snapshot, previously_busy=previously_busy)
                 elif ("FINISH" in state or "COMPLETE" in state) and previously_busy:
                     await self._record_successful_completion(snapshot)
                     self._active_job_context = None

@@ -931,6 +931,23 @@ def test_youtube_upload_auto_mode_enables_when_oauth_credentials_are_present(mon
     assert service._youtube_upload_config()["enabled"] is True
 
 
+def test_youtube_default_title_template_uses_model_name_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("YOUTUBE_TITLE_TEMPLATE", raising=False)
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    cfg = service._youtube_upload_config()
+    title = service._render_template(
+        str(cfg["title_template"]),
+        service._youtube_template_context({"model_name": "Widget", "file_name": "plate_1.gcode"}),
+    )
+
+    assert title == "Widget"
+
+
 def test_youtube_upload_uses_consistent_file_size_for_resumable_session(monkeypatch: pytest.MonkeyPatch) -> None:
     tmp_path = Path("tests/.tmp/youtube-upload-stable-size")
     cache_dir = tmp_path / "cache" / "timelapse"
@@ -1239,6 +1256,44 @@ def test_completion_record_preserves_started_at_for_timelapse_matching() -> None
     )
 
     assert record["started_at"] == "2026-04-17T09:30:00+00:00"
+
+
+def test_active_job_context_keeps_model_metadata_when_snapshot_reports_internal_plate_path() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    service._active_job_context = {
+        "file_path": "/cache/makerworks-42-Widget.3mf",
+        "model_id": "42",
+        "model_name": "Widget",
+        "model_key": "makerworks-42-widget",
+        "plate_gcode": "Metadata/plate_1.gcode",
+        "started_at": "2026-04-17T09:30:00+00:00",
+    }
+
+    service._merge_active_job_snapshot(
+        {
+            "state": "RUNNING",
+            "file_path": "/data/Metadata/plate_1.gcode",
+            "file_name": "plate_1.gcode",
+            "model_name": "plate_1",
+            "model_key": "plate-1",
+            "plate_index": 1,
+        },
+        previously_busy=True,
+    )
+    record = service._build_completion_record(
+        {"state": "FINISH", "file_path": "/data/Metadata/plate_1.gcode"},
+        "2026-04-18T06:18:37+00:00",
+    )
+
+    assert record["file_path"] == "/cache/makerworks-42-Widget.3mf"
+    assert record["model_id"] == "42"
+    assert record["model_name"] == "Widget"
+    assert record["model_key"] == "makerworks-42-widget"
+    assert service._youtube_template_context(record)["model_name"] == "Widget"
 
 
 def test_wait_for_stable_timelapse_file_accepts_aged_file(monkeypatch: pytest.MonkeyPatch) -> None:
