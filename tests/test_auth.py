@@ -6,7 +6,15 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from app.auth import CSRF_COOKIE_NAME, SESSION_COOKIE_NAME, auth_router, hash_password, register_admin_auth, require_role, validate_auth_configuration
+from app.auth import (
+    CSRF_COOKIE_NAME,
+    SESSION_COOKIE_NAME,
+    auth_router,
+    hash_password,
+    register_admin_auth,
+    require_role,
+    validate_auth_configuration,
+)
 from app.routers.ui import router as ui_router
 
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.services import MakerworksSubmitJobRequest, PrinterService, PrintJobManager
 
 
@@ -100,6 +102,7 @@ class _FakePrinter:
         queue_count: int,
         device_type: str = "x1c",
         loaded_filament: dict[str, object] | None = None,
+        temperatures: dict[str, object] | None = None,
     ) -> None:
         self.printer_id = printer_id
         self.display_name = printer_id.upper()
@@ -108,6 +111,7 @@ class _FakePrinter:
         self._queue_count = queue_count
         self._device_type = device_type
         self._loaded_filament = loaded_filament
+        self._temperatures = temperatures or {}
         self.created_jobs: list[dict[str, object]] = []
 
     async def state(self) -> dict[str, object]:
@@ -117,6 +121,7 @@ class _FakePrinter:
             "printer": {"device_type": self._device_type},
             "job": {"remaining_minutes": 45 if self._busy else 0},
             "health": {"score": 90 if self._connected else 0},
+            "temperatures": self._temperatures,
         }
 
     def job_busy(self) -> bool:
@@ -382,6 +387,57 @@ def test_print_job_manager_uses_order_storage_path_for_asset_download() -> None:
     )
 
     assert result["status"] == "queued"
+
+
+def test_print_job_manager_preflight_warns_when_loaded_filament_is_low() -> None:
+    printer = _FakePrinter(
+        "printer-1",
+        connected=True,
+        busy=False,
+        queue_count=0,
+        loaded_filament={"type": "PLA", "name": "PLA White", "color_name": "White", "color_hex": "#ffffff", "remaining_percent": 4},
+    )
+
+    class _FilamentWorks(_FakeWorksService):
+        async def makerworks_library_item(self, model_id: str, *, include_raw: bool = False) -> dict[str, object]:
+            result = await super().makerworks_library_item(model_id, include_raw=include_raw)
+            result["item"]["materials"] = ["PLA"]
+            result["item"]["colors"] = ["White"]
+            return result
+
+    manager = PrintJobManager(_FakePrinterManager([printer]), _FilamentWorks())
+
+    preflight = asyncio.run(manager.makerworks_preflight("widget-1"))
+
+    assert preflight["candidates"][0]["filament"]["remaining_percent"] == 4
+    assert "low" in preflight["candidates"][0]["filament"]["remaining_message"].lower()
+
+
+def test_print_job_manager_preflight_blocks_hot_printer_guardrail(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("QUEUE_MAX_CHAMBER_TEMP_C", "45")
+    printer = _FakePrinter(
+        "printer-1",
+        connected=True,
+        busy=False,
+        queue_count=0,
+        loaded_filament={"type": "PLA", "name": "PLA White", "color_name": "White", "color_hex": "#ffffff", "remaining_percent": 80},
+        temperatures={"chamber": 52},
+    )
+
+    class _FilamentWorks(_FakeWorksService):
+        async def makerworks_library_item(self, model_id: str, *, include_raw: bool = False) -> dict[str, object]:
+            result = await super().makerworks_library_item(model_id, include_raw=include_raw)
+            result["item"]["materials"] = ["PLA"]
+            result["item"]["colors"] = ["White"]
+            return result
+
+    manager = PrintJobManager(_FakePrinterManager([printer]), _FilamentWorks())
+
+    preflight = asyncio.run(manager.makerworks_preflight("widget-1"))
+
+    assert preflight["qualified_printer_count"] == 0
+    assert preflight["candidates"][0]["safety"]["ok"] is False
+    assert "chamber" in preflight["candidates"][0]["safety"]["messages"][0].lower()
 
 
 def test_print_job_manager_routes_when_filament_telemetry_is_unavailable() -> None:

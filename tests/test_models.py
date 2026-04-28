@@ -83,6 +83,13 @@ def test_printer_dashboard_contains_sidebar_navigation(monkeypatch: pytest.Monke
     assert 'href="/conversion"' in html
     assert 'href="/makerworks"' in html
     assert 'href="/makerworks-routing"' in html
+    assert 'id="healthTab"' in html
+    assert 'id="systemHealthPanel"' in html
+    assert 'id="cleanupDryRunBtn"' in html
+    assert "/maintenance/timelapse-cleanup" in html
+    assert 'id="configExportBtn"' in html
+    assert "/api/config/backup" in html
+    assert "/api/system/health" in html
     assert 'id="youtubeList"' in html
     assert 'id="youtubeConnection"' in html
     assert 'id="nozzleTempButton"' in html

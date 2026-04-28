@@ -12,7 +12,6 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
 
-
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 
 

@@ -205,6 +205,12 @@ class QueuePrintJobRequest(OrderworksPrintJobRequest):
     start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
 
 
+class CacheCleanupRequest(BaseModel):
+    max_age_days: int = Field(default=14, ge=0, le=3650)
+    keep_latest: int = Field(default=3, ge=0, le=1000)
+    dry_run: bool = True
+
+
 class MakerworksQueueJobRequest(BaseModel):
     model_id: str = Field(min_length=1)
     start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
@@ -2011,9 +2017,8 @@ class PrinterService:
             return None
         try:
             if ":" in value:
-                dt = datetime.strptime(value, "%b %d %H:%M").replace(tzinfo=timezone.utc)
                 now_utc = datetime.now(timezone.utc)
-                dt = dt.replace(year=now_utc.year)
+                dt = datetime.strptime(f"{now_utc.year} {value}", "%Y %b %d %H:%M").replace(tzinfo=timezone.utc)
                 delta = dt - now_utc
                 six_months = timedelta(days=190)
                 if delta > six_months:
@@ -2348,6 +2353,76 @@ class PrinterService:
             except Exception:
                 continue
         return deleted
+
+    def cleanup_timelapse_cache(self, *, max_age_days: int, keep_latest: int, dry_run: bool = True, actor: str = "dashboard") -> dict[str, Any]:
+        cache_dir = self._timelapse_cache_dir()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        allowed_suffixes = {".mp4", ".mov", ".m4v", ".jpg", ".jpeg", ".png", ".webp"}
+        files: list[tuple[float, int, Path]] = []
+        for path in cache_dir.iterdir():
+            if not path.is_file() or path.suffix.lower() not in allowed_suffixes:
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            files.append((stat.st_mtime, stat.st_size, path))
+
+        files.sort(key=lambda item: item[0], reverse=True)
+        keep_latest = max(0, keep_latest)
+        protected = {path.resolve() for _mtime, _size, path in files[:keep_latest]}
+        cutoff_ts = time.time() - (max(0, max_age_days) * 86400)
+        candidates: list[tuple[float, int, Path]] = [
+            item for item in files if item[2].resolve() not in protected and item[0] <= cutoff_ts
+        ]
+
+        deleted: list[dict[str, Any]] = []
+        errors: list[dict[str, str]] = []
+        cache_root = cache_dir.resolve()
+        for mtime, size, path in candidates:
+            resolved = path.resolve()
+            if cache_root not in resolved.parents:
+                continue
+            item = {
+                "path": str(resolved),
+                "name": path.name,
+                "size_bytes": size,
+                "modified_at": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
+            }
+            if not dry_run:
+                try:
+                    resolved.unlink()
+                except OSError as exc:
+                    errors.append({"path": str(resolved), "error": str(exc)})
+                    continue
+            deleted.append(item)
+
+        result = {
+            "ok": not errors,
+            "dry_run": dry_run,
+            "cache_dir": str(cache_dir),
+            "max_age_days": max_age_days,
+            "keep_latest": keep_latest,
+            "scanned_count": len(files),
+            "delete_count": len(deleted),
+            "reclaimed_bytes": sum(int(item["size_bytes"]) for item in deleted),
+            "items": deleted,
+            "errors": errors,
+        }
+        if not dry_run:
+            self._record_audit(
+                "cleanup_timelapse_cache",
+                f"Cleaned {len(deleted)} local timelapse cache file{'s' if len(deleted) != 1 else ''}.",
+                actor=actor,
+                details={
+                    "delete_count": len(deleted),
+                    "reclaimed_bytes": result["reclaimed_bytes"],
+                    "max_age_days": max_age_days,
+                    "keep_latest": keep_latest,
+                    "errors": errors,
+                },
+            )
+        return result
 
     def _find_latest_timelapse_file(self, record: dict[str, Any]) -> Path | None:
         cache_dir = self._timelapse_cache_dir()
@@ -3847,9 +3922,8 @@ class PrinterService:
             try:
                 if ":" in ts_raw:
                     # FTP LIST without year: infer year relative to now to avoid future-dated entries.
-                    dt = datetime.strptime(ts_raw, "%b %d %H:%M").replace(tzinfo=timezone.utc)
                     now_utc = datetime.now().astimezone(timezone.utc)
-                    dt = dt.replace(year=now_utc.year)
+                    dt = datetime.strptime(f"{now_utc.year} {ts_raw}", "%Y %b %d %H:%M").replace(tzinfo=timezone.utc)
                     delta = dt - now_utc
                     six_months = timedelta(days=190)
                     if delta > six_months:
@@ -4843,6 +4917,60 @@ class MultiPrinterManager:
         items.sort(key=lambda item: str(item.get("at") or ""), reverse=True)
         return items[: max(1, min(limit, 500))]
 
+    def export_config_backup(self) -> dict[str, Any]:
+        printers: list[dict[str, Any]] = []
+        for service in self._services.values():
+            config = dict(service._configured_settings)
+            access_code = str(config.pop("access_code", "") or "")
+            printers.append(
+                {
+                    "id": service.printer_id,
+                    "name": service.display_name,
+                    "is_added": service.printer_id in self._added_printers,
+                    "host": config.get("host", ""),
+                    "serial": config.get("serial", ""),
+                    "device_type": config.get("device_type", "unknown"),
+                    "local_mqtt": bool(config.get("local_mqtt", True)),
+                    "enable_camera": bool(config.get("enable_camera", True)),
+                    "disable_ssl_verify": bool(config.get("disable_ssl_verify", False)),
+                    "has_access_code": bool(access_code),
+                }
+            )
+        return {
+            "version": 1,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "secrets_included": False,
+            "printers": printers,
+        }
+
+    def import_config_backup(self, payload: dict[str, Any], *, actor: str = "dashboard") -> dict[str, Any]:
+        raw_printers = payload.get("printers") if isinstance(payload, dict) else None
+        if not isinstance(raw_printers, list):
+            raise ValueError("Config backup must include a printers list.")
+        updated: list[str] = []
+        skipped: list[dict[str, str]] = []
+        for raw in raw_printers:
+            if not isinstance(raw, dict):
+                continue
+            printer_id = str(raw.get("id") or "").strip()
+            name = str(raw.get("name") or "").strip()
+            if not printer_id:
+                continue
+            if printer_id not in self._services:
+                skipped.append({"id": printer_id, "reason": "Printer credentials are required before importing a new printer."})
+                continue
+            if name:
+                self.rename(printer_id, name)
+                updated.append(printer_id)
+        for printer_id in updated:
+            self.get(printer_id)._record_audit(
+                "config_backup_import",
+                "Imported non-secret printer backup settings.",
+                actor=actor,
+                details={"updated_printer_ids": updated, "skipped": skipped},
+            )
+        return {"ok": True, "updated_count": len(updated), "skipped": skipped}
+
     def _load_name_overrides(self) -> dict[str, str]:
         try:
             if self._names_file.exists():
@@ -5084,6 +5212,22 @@ class PrintJobManager:
         color = self._color_requirement(source_item)
         snapshot = service.filament_snapshot()
         slots = snapshot.get("remaining_filament") or []
+        min_remaining = max(0, int(get_env("QUEUE_MIN_FILAMENT_REMAINING_PERCENT", "10") or "10"))
+
+        def remaining_detail(filament: dict[str, Any] | None) -> dict[str, Any]:
+            if not filament:
+                return {"remaining_percent": None, "remaining_message": "Filament remaining estimate unavailable."}
+            raw = filament.get("remaining_percent")
+            try:
+                remaining = int(raw) if raw is not None else None
+            except (TypeError, ValueError):
+                remaining = None
+            if remaining is None:
+                return {"remaining_percent": None, "remaining_message": "Filament remaining estimate unavailable."}
+            if remaining < min_remaining:
+                return {"remaining_percent": remaining, "remaining_message": f"Low filament estimate: {remaining}% remaining."}
+            return {"remaining_percent": remaining, "remaining_message": f"Filament estimate: {remaining}% remaining."}
+
         if not material and not color:
             return {
                 "status": "not_required",
@@ -5092,6 +5236,7 @@ class PrintJobManager:
                 "loaded_match": False,
                 "available_match": False,
                 "loaded_filament": snapshot.get("loaded_filament"),
+                **remaining_detail(snapshot.get("loaded_filament")),
             }
 
         loaded = snapshot.get("loaded_filament") or {}
@@ -5106,10 +5251,12 @@ class PrintJobManager:
                 "loaded_match": False,
                 "available_match": False,
                 "loaded_filament": None,
+                **remaining_detail(None),
             }
         loaded_material_match = not material_tokens or self._contains_token_match(loaded_tokens, material_tokens)
         loaded_color_match = not color_tokens or self._contains_token_match(loaded_tokens, color_tokens)
         if loaded and loaded_material_match and loaded_color_match:
+            remaining = remaining_detail(loaded)
             return {
                 "status": "loaded_match",
                 "ok": True,
@@ -5117,6 +5264,7 @@ class PrintJobManager:
                 "loaded_match": True,
                 "available_match": True,
                 "loaded_filament": loaded,
+                **remaining,
             }
 
         for slot in slots:
@@ -5131,6 +5279,7 @@ class PrintJobManager:
                     "loaded_match": False,
                     "available_match": True,
                     "loaded_filament": loaded or None,
+                    **remaining_detail(slot),
                 }
 
         requirement_bits = [bit for bit in (material, color) if bit]
@@ -5141,6 +5290,7 @@ class PrintJobManager:
             "loaded_match": False,
             "available_match": False,
             "loaded_filament": loaded or None,
+            **remaining_detail(loaded or None),
         }
 
     def _preflight_time_estimate(self, source_item: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
@@ -5166,6 +5316,27 @@ class PrintJobManager:
                 else f"Estimated start in about {wait_minutes} min; MakerWorks did not provide a print duration."
             ),
         }
+
+    def _queue_safety_check(self, state: dict[str, Any]) -> dict[str, Any]:
+        temperatures = state.get("temperatures") or {}
+        messages: list[str] = []
+
+        def temp_value(name: str) -> float | None:
+            try:
+                raw = temperatures.get(name)
+                return float(raw) if raw is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        chamber = temp_value("chamber")
+        bed = temp_value("bed_current")
+        max_chamber = float(get_env("QUEUE_MAX_CHAMBER_TEMP_C", "60") or "60")
+        max_bed = float(get_env("QUEUE_MAX_BED_TEMP_C", "120") or "120")
+        if chamber is not None and chamber > max_chamber:
+            messages.append(f"Chamber temperature {round(chamber)}C is above the {round(max_chamber)}C queue guardrail.")
+        if bed is not None and bed > max_bed:
+            messages.append(f"Bed temperature {round(bed)}C is above the {round(max_bed)}C queue guardrail.")
+        return {"ok": not messages, "messages": messages}
 
     def _apply_makerworks_submit_overrides(
         self,
@@ -5218,7 +5389,8 @@ class PrintJobManager:
             compatible, compatibility_message = self._printer_profile_matches(source_item, entry["id"], service, state)
             filament = self._filament_check(source_item, service)
             estimate = self._preflight_time_estimate(source_item, state)
-            qualifies = connected and compatible and filament["ok"]
+            safety = self._queue_safety_check(state)
+            qualifies = connected and compatible and filament["ok"] and safety["ok"]
             queue_count = int((state.get("queue") or {}).get("count") or 0)
             health_score = int((state.get("health") or {}).get("score") or 0)
             busy_penalty = 90 if service.job_busy() else 0
@@ -5245,6 +5417,7 @@ class PrintJobManager:
                 "score": score,
                 "compatibility": {"ok": compatible, "message": compatibility_message},
                 "filament": filament,
+                "safety": safety,
                 "estimate": estimate,
                 "reason": (
                     "Qualified for automatic routing."
@@ -5252,7 +5425,7 @@ class PrintJobManager:
                     else (
                         "Printer is offline."
                         if not connected
-                        else compatibility_message if not compatible else filament["message"]
+                        else compatibility_message if not compatible else safety["messages"][0] if not safety["ok"] else filament["message"]
                     )
                 ),
             }

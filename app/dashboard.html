@@ -1525,6 +1525,7 @@
       <div class="status-shell">
         <div class="dashboard-tabs" role="tablist" aria-label="Printer dashboard sections">
           <button id="overviewTab" class="dashboard-tab active" type="button" data-panel="overview" role="tab" aria-selected="true">Overview</button>
+          <button id="healthTab" class="dashboard-tab" type="button" data-panel="systemHealth" role="tab" aria-selected="false">Health</button>
           <button id="settingsTab" class="dashboard-tab" type="button" data-panel="settings" role="tab" aria-selected="false">Settings</button>
         </div>
         <div id="overviewPanel" class="dashboard-panel active" role="tabpanel" aria-labelledby="overviewTab">
@@ -1585,6 +1586,68 @@
                 </div>
               </div>
             </div>
+          </section>
+        </div>
+        <div id="systemHealthPanel" class="dashboard-panel" role="tabpanel" aria-labelledby="healthTab">
+          <section class="status-card" aria-labelledby="systemHealthTitle">
+            <h3 id="systemHealthTitle">System Health</h3>
+            <div class="status-kpis">
+              <div class="status-kpi">
+                <div class="status-kpi-label">Printers Online</div>
+                <div id="healthPrintersOnline" class="status-kpi-value">-</div>
+                <div id="healthPrintersLine" class="status-line">Loading</div>
+              </div>
+              <div class="status-kpi">
+                <div class="status-kpi-label">Queued Jobs</div>
+                <div id="healthQueuedJobs" class="status-kpi-value">-</div>
+                <div id="healthQueueLine" class="status-line">Loading</div>
+              </div>
+              <div class="status-kpi">
+                <div class="status-kpi-label">Data Storage</div>
+                <div id="healthStorageUsed" class="status-kpi-value">-</div>
+                <div id="healthStorageLine" class="status-line">Loading</div>
+              </div>
+            </div>
+            <div id="systemHealthSummary" class="status-message">Loading system health...</div>
+          </section>
+          <section class="status-card" aria-labelledby="systemHealthPrintersTitle">
+            <h3 id="systemHealthPrintersTitle">Printer Operations</h3>
+            <div id="systemHealthPrinters" class="status-list">
+              <div class="status-list-row"><strong>Printers</strong><span>-</span></div>
+            </div>
+          </section>
+          <section class="status-card" aria-labelledby="systemHealthServicesTitle">
+            <h3 id="systemHealthServicesTitle">Integrations</h3>
+            <div id="systemHealthIntegrations" class="status-list">
+              <div class="status-list-row"><strong>YouTube</strong><span>-</span></div>
+              <div class="status-list-row"><strong>Webhooks</strong><span>-</span></div>
+              <div class="status-list-row"><strong>Callbacks</strong><span>-</span></div>
+            </div>
+          </section>
+          <section class="status-card" aria-labelledby="cleanupTitle">
+            <h3 id="cleanupTitle">Local Cache Cleanup</h3>
+            <div class="mini-form-grid">
+              <label class="label">Max Age Days
+                <input id="cleanupMaxAgeDays" class="field" type="number" min="0" max="3650" value="14">
+              </label>
+              <label class="label">Keep Latest
+                <input id="cleanupKeepLatest" class="field" type="number" min="0" max="1000" value="3">
+              </label>
+            </div>
+            <div class="queue-item-actions">
+              <button id="cleanupDryRunBtn" class="btn" type="button" onclick="runTimelapseCleanup(true)">Preview Cleanup</button>
+              <button id="cleanupExecuteBtn" class="btn danger" type="button" onclick="runTimelapseCleanup(false)">Delete Eligible Files</button>
+            </div>
+            <div id="cleanupResult" class="status-message">Preview before deleting local timelapse cache files.</div>
+          </section>
+          <section class="status-card" aria-labelledby="configBackupTitle">
+            <h3 id="configBackupTitle">Config Backup</h3>
+            <div class="queue-item-actions">
+              <button id="configExportBtn" class="btn" type="button" onclick="exportConfigBackup()">Export Backup</button>
+              <button id="configImportBtn" class="btn" type="button" onclick="importConfigBackup()">Import Backup</button>
+            </div>
+            <textarea id="configBackupText" class="field" rows="8" spellcheck="false" placeholder="Exported backup JSON appears here. Paste a backup here to import non-secret settings."></textarea>
+            <div id="configBackupStatus" class="status-message">Backups exclude access codes and other secrets.</div>
           </section>
         </div>
         <div id="settingsPanel" class="dashboard-panel" role="tabpanel" aria-labelledby="settingsTab">
@@ -1994,7 +2057,7 @@
     }
 
     function switchDashboardPanel(panel) {
-      const nextPanel = panel === "settings" ? "settings" : "overview";
+      const nextPanel = ["overview", "settings", "systemHealth"].includes(panel) ? panel : "overview";
       document.querySelectorAll(".dashboard-tab").forEach((button) => {
         const active = button.dataset.panel === nextPanel;
         button.classList.toggle("active", active);
@@ -2003,6 +2066,7 @@
       document.querySelectorAll(".dashboard-panel").forEach((section) => {
         section.classList.toggle("active", section.id === `${nextPanel}Panel`);
       });
+      if (nextPanel === "systemHealth") loadSystemHealth();
     }
 
     async function savePrinterName() {
@@ -3194,6 +3258,133 @@
       `;
     }
 
+    function renderSystemHealth(payload) {
+      const summary = payload?.summary || {};
+      const storage = payload?.storage || {};
+      const printers = Array.isArray(payload?.printers) ? payload.printers : [];
+      const printerTotal = Number(summary.printer_count || printers.length || 0);
+      const printerOnline = Number(summary.connected_printer_count || 0);
+      const queuedJobs = Number(summary.queued_job_count || 0);
+      const storageUsed = Number(storage.used_percent || 0);
+
+      const setText = (id, value) => {
+        const node = document.getElementById(id);
+        if (node) node.textContent = value;
+      };
+
+      setText("healthPrintersOnline", `${printerOnline}/${printerTotal}`);
+      setText("healthPrintersLine", printerTotal ? `${printerTotal - printerOnline} offline or disconnected` : "No printers configured");
+      setText("healthQueuedJobs", String(queuedJobs));
+      setText("healthQueueLine", queuedJobs ? "Work waiting across printers" : "No queued work");
+      setText("healthStorageUsed", `${storageUsed}%`);
+      setText("healthStorageLine", `${formatBytes(Number(storage.free_bytes))} free in ${storage.data_root || "data"}`);
+      setText(
+        "systemHealthSummary",
+        `YouTube ready on ${summary.youtube_ready_count || 0} printer${Number(summary.youtube_ready_count || 0) === 1 ? "" : "s"}. ${summary.enabled_webhook_count || 0} webhook${Number(summary.enabled_webhook_count || 0) === 1 ? "" : "s"} enabled. ${summary.audit_count || 0} recent audit entries.`
+      );
+
+      const printerList = document.getElementById("systemHealthPrinters");
+      if (printerList) {
+        printerList.innerHTML = printers.length
+          ? printers.map((printer) => {
+              const queue = printer.queue || {};
+              const youtube = printer.youtube || {};
+              const health = printer.health || {};
+              const state = printer.connected ? "Connected" : "Disconnected";
+              const detail = `${queue.count || 0} queued - YouTube ${youtube.ready ? "ready" : (youtube.enabled ? "needs config" : "disabled")} - score ${health.score ?? "-"}`;
+              return `<div class="status-list-row"><strong>${escapeHtml(printer.printer_name || printer.printer_id || "Printer")}</strong><span>${escapeHtml(`${state} - ${detail}`)}</span></div>`;
+            }).join("")
+          : `<div class="status-list-row"><strong>Printers</strong><span>None configured</span></div>`;
+      }
+
+      const integrations = document.getElementById("systemHealthIntegrations");
+      if (integrations) {
+        integrations.innerHTML = `
+          <div class="status-list-row"><strong>YouTube</strong><span>${escapeHtml(`${summary.youtube_ready_count || 0}/${printerTotal} ready`)}</span></div>
+          <div class="status-list-row"><strong>Webhooks</strong><span>${escapeHtml(`${summary.enabled_webhook_count || 0} enabled${summary.last_webhook_delivery_at ? ` - last ${formatDateTime(summary.last_webhook_delivery_at)}` : ""}`)}</span></div>
+          <div class="status-list-row"><strong>Callbacks</strong><span>${escapeHtml(summary.last_callback_delivery_at ? `Last ${formatDateTime(summary.last_callback_delivery_at)}` : "No recent delivery")}</span></div>
+          <div class="status-list-row"><strong>Last Sync Error</strong><span>${escapeHtml(summary.last_sync_error || "-")}</span></div>
+        `;
+      }
+    }
+
+    async function loadSystemHealth() {
+      const panel = document.getElementById("systemHealthPanel");
+      if (!panel || !panel.classList.contains("active")) return;
+      try {
+        const response = await fetch(apiPath("/api/system/health"));
+        if (!response.ok) throw new Error(extractErrorMessage(await response.json().catch(() => ({})), `HTTP ${response.status}`));
+        renderSystemHealth(await response.json());
+      } catch (error) {
+        const summary = document.getElementById("systemHealthSummary");
+        if (summary) summary.textContent = `System health unavailable. ${String(error?.message || error)}`;
+      }
+    }
+
+    async function runTimelapseCleanup(dryRun) {
+      if (!ensureRole("admin")) return;
+      const result = document.getElementById("cleanupResult");
+      const maxAgeDays = Number(document.getElementById("cleanupMaxAgeDays")?.value || 14);
+      const keepLatest = Number(document.getElementById("cleanupKeepLatest")?.value || 3);
+      if (result) result.textContent = dryRun ? "Scanning local timelapse cache..." : "Deleting eligible local timelapse cache files...";
+      try {
+        const response = await fetch(apiPath(`/api/printers/${encodeURIComponent(PRINTER_ID)}/maintenance/timelapse-cleanup`), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ max_age_days: maxAgeDays, keep_latest: keepLatest, dry_run: !!dryRun }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(extractErrorMessage(payload, `HTTP ${response.status}`));
+        const action = dryRun ? "Would delete" : "Deleted";
+        const files = payload.delete_count || 0;
+        const bytes = formatBytes(Number(payload.reclaimed_bytes || 0));
+        if (result) result.textContent = `${action} ${files} file${files === 1 ? "" : "s"} and reclaim ${bytes}.`;
+        await loadSystemHealth();
+        await load();
+      } catch (error) {
+        if (result) result.textContent = `Cleanup failed. ${String(error?.message || error)}`;
+      }
+    }
+
+    function setConfigBackupStatus(message) {
+      const node = document.getElementById("configBackupStatus");
+      if (node) node.textContent = message;
+    }
+
+    async function exportConfigBackup() {
+      if (!ensureRole("admin")) return;
+      try {
+        const response = await fetch(apiPath("/api/config/backup"));
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(extractErrorMessage(payload, `HTTP ${response.status}`));
+        const text = document.getElementById("configBackupText");
+        if (text) text.value = JSON.stringify(payload, null, 2);
+        setConfigBackupStatus("Exported non-secret config backup.");
+      } catch (error) {
+        setConfigBackupStatus(`Export failed. ${String(error?.message || error)}`);
+      }
+    }
+
+    async function importConfigBackup() {
+      if (!ensureRole("admin")) return;
+      const text = document.getElementById("configBackupText");
+      try {
+        const payload = JSON.parse(text?.value || "{}");
+        const response = await fetch(apiPath("/api/config/backup/import"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(extractErrorMessage(result, `HTTP ${response.status}`));
+        setConfigBackupStatus(`Imported ${result.updated_count || 0} printer setting${Number(result.updated_count || 0) === 1 ? "" : "s"}. ${Array.isArray(result.skipped) && result.skipped.length ? `${result.skipped.length} skipped because credentials are required.` : ""}`);
+        await loadSystemHealth();
+        await load();
+      } catch (error) {
+        setConfigBackupStatus(`Import failed. ${String(error?.message || error)}`);
+      }
+    }
+
     function renderYoutubeConnection(connection) {
       const node = document.getElementById("youtubeConnection");
       const summary = document.getElementById("youtubeSummary");
@@ -3499,6 +3690,7 @@
       renderAlertRules(s.alert_rules);
       renderWebhooks(s.webhooks);
       renderSystemStatus(s.system_status);
+      await loadSystemHealth();
       renderAms(s.ams);
       await loadYoutubeVideos(false);
 
@@ -3575,6 +3767,7 @@
       }
       if (event.key === "s") post("/api/actions/stop");
       if (event.key === "g") switchDashboardPanel("overview");
+      if (event.key === "h") switchDashboardPanel("systemHealth");
       if (event.key === "t") switchDashboardPanel("settings");
     });
     applyTheme(document.documentElement.dataset.theme);

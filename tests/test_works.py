@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -639,7 +640,7 @@ def test_sd_thumbnail_alias_path_does_not_reuse_stale_alias_cache(monkeypatch: p
 
     assert content == b"fresh"
     assert mime == "image/png"
-    resolved_key = hashlib.sha1(resolved_path.encode("utf-8")).hexdigest()
+    resolved_key = hashlib.sha1(f"{resolved_path}#plate=1".encode("utf-8")).hexdigest()
     assert (thumb_dir / f"{resolved_key}.png").read_bytes() == b"fresh"
 
 
@@ -1876,6 +1877,52 @@ def test_list_timelapse_inventory_does_not_expose_mp4_thumbnail_endpoint() -> No
 
     assert items[0]["path"] == "/timelapse/video_2026-04-02_14-30-24.mp4"
     assert items[0]["thumbnail_url"] is None
+
+
+def test_ftp_list_timestamp_without_year_survives_deprecation_warnings() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        parsed = service._parse_ftp_list_timestamp("Apr 02 14:30")
+
+    assert parsed is not None
+
+
+def test_timelapse_cleanup_dry_run_preserves_files_and_execute_audits(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = Path("tests/.tmp/cleanup-timelapse")
+    monkeypatch.setenv("PRINTLAB_DATA_DIR", str(tmp_path))
+    cache_dir = tmp_path / "cache" / "timelapse"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    old_file = cache_dir / "old.mp4"
+    new_file = cache_dir / "new.mp4"
+    old_file.write_bytes(b"old-video")
+    new_file.write_bytes(b"new-video")
+    old_ts = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc).timestamp()
+    new_ts = datetime.now(timezone.utc).timestamp()
+    os.utime(old_file, (old_ts, old_ts))
+    os.utime(new_file, (new_ts, new_ts))
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE", "file_cache_path": str(tmp_path / "cache")},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    dry_run = service.cleanup_timelapse_cache(max_age_days=7, keep_latest=1, dry_run=True, actor="admin")
+    assert dry_run["dry_run"] is True
+    assert dry_run["delete_count"] == 1
+    assert old_file.exists()
+
+    executed = service.cleanup_timelapse_cache(max_age_days=7, keep_latest=1, dry_run=False, actor="admin")
+    assert executed["delete_count"] == 1
+    assert not old_file.exists()
+    assert new_file.exists()
+    assert service.audit_snapshot(limit=1)[0]["event"] == "cleanup_timelapse_cache"
 
 
 def test_ensure_timelapse_record_does_not_store_remote_mp4_thumbnail() -> None:

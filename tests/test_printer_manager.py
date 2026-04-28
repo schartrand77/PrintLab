@@ -106,3 +106,19 @@ def test_builtin_printer_cannot_be_removed(monkeypatch: pytest.MonkeyPatch) -> N
             await manager.remove("printer-1")
 
     asyncio.run(run())
+
+
+def test_config_backup_excludes_secrets_and_imports_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PRINTLAB_DATA_DIR", _data_dir())
+    manager = MultiPrinterManager(_base_definition())
+
+    backup = manager.export_config_backup()
+
+    assert backup["printers"][0]["id"] == "printer-1"
+    assert backup["printers"][0]["has_access_code"] is True
+    assert "access_code" not in backup["printers"][0]
+
+    result = manager.import_config_backup({"printers": [{"id": "printer-1", "name": "Restored Name"}]}, actor="admin")
+
+    assert result["updated_count"] == 1
+    assert manager.list_items()[0]["name"] == "Restored Name"

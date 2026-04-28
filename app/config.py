@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 _CONFIG_CACHE: dict[str, Any] | None = None
 _CONFIG_CACHE_SOURCE: str | None = None
 _CONFIG_CACHE_MTIME_NS: int | None = None

@@ -27,10 +27,35 @@ class _FakeService:
             "active_alerts": [],
             "printer": {"serial": "SERIAL1234", "device_type": "x1c"},
             "webhooks": [{"id": "hook-1", "url": "https://example.com/hook", "has_secret": True}],
+            "system_status": {
+                "mqtt": {"connected": True, "last_update_utc": "2026-04-28T12:00:00+00:00"},
+                "callback": {"last_delivered_at": "2026-04-28T12:01:00+00:00", "last_error": None},
+                "webhooks": {
+                    "enabled_count": 1,
+                    "last_delivered_at": "2026-04-28T12:02:00+00:00",
+                    "last_error": None,
+                    "status_code": 200,
+                },
+                "sync": {"last_error": None, "submitted_jobs": 2, "successful_gcodes": 3},
+                "youtube": {"ready": True, "configured": True, "enabled": True, "last_error": None},
+            },
         }
 
     def webhooks_snapshot(self) -> list[dict[str, object]]:
         return [{"id": "hook-1", "url": "https://example.com/hook", "has_secret": True}]
+
+    def cleanup_timelapse_cache(self, *, max_age_days: int, keep_latest: int, dry_run: bool, actor: str) -> dict[str, object]:
+        return {
+            "ok": True,
+            "dry_run": dry_run,
+            "max_age_days": max_age_days,
+            "keep_latest": keep_latest,
+            "delete_count": 2,
+            "reclaimed_bytes": 1024,
+            "actor": actor,
+            "items": [],
+            "errors": [],
+        }
 
 
 class _FakePrinterManager:
@@ -56,6 +81,12 @@ class _FakePrinterManager:
 
     def audit_snapshot(self, limit: int = 500) -> list[dict[str, object]]:
         return []
+
+    def export_config_backup(self) -> dict[str, object]:
+        return {"version": 1, "secrets_included": False, "printers": [{"id": "printer-1", "name": "Printer 1", "has_access_code": True}]}
+
+    def import_config_backup(self, payload: dict[str, object], *, actor: str = "dashboard") -> dict[str, object]:
+        return {"ok": True, "updated_count": len(payload.get("printers", [])), "skipped": [], "actor": actor}
 
 
 def _build_app(monkeypatch) -> FastAPI:
@@ -133,3 +164,53 @@ def test_state_route_omits_webhook_details_for_non_admin(monkeypatch) -> None:
     assert viewer_response.json()["webhooks"] == []
     assert admin_response.status_code == 200
     assert admin_response.json()["webhooks"][0]["has_secret"] is True
+
+
+def test_system_health_is_admin_only_and_summarizes_operations(monkeypatch) -> None:
+    app = _build_app(monkeypatch)
+
+    with TestClient(app) as client:
+        viewer_response = client.get("/api/system/health", headers=_basic("viewer", "view"))
+        admin_response = client.get("/api/system/health", headers=_basic("admin", "secret"))
+
+    assert viewer_response.status_code == 403
+    assert admin_response.status_code == 200
+    payload = admin_response.json()
+    assert payload["summary"]["printer_count"] == 1
+    assert payload["summary"]["connected_printer_count"] == 1
+    assert payload["summary"]["queued_job_count"] == 0
+    assert payload["summary"]["youtube_ready_count"] == 1
+    assert payload["storage"]["data_root"]
+    assert payload["printers"][0]["webhooks"]["enabled_count"] == 1
+
+
+def test_timelapse_cleanup_is_admin_only(monkeypatch) -> None:
+    app = _build_app(monkeypatch)
+
+    body = {"max_age_days": 14, "keep_latest": 2, "dry_run": True}
+    with TestClient(app) as client:
+        viewer_response = client.post("/api/printers/printer-1/maintenance/timelapse-cleanup", headers=_basic("viewer", "view"), json=body)
+        admin_response = client.post("/api/printers/printer-1/maintenance/timelapse-cleanup", headers=_basic("admin", "secret"), json=body)
+
+    assert viewer_response.status_code == 403
+    assert admin_response.status_code == 200
+    assert admin_response.json()["dry_run"] is True
+    assert admin_response.json()["delete_count"] == 2
+
+
+def test_config_backup_export_and_import_are_admin_only(monkeypatch) -> None:
+    app = _build_app(monkeypatch)
+
+    with TestClient(app) as client:
+        viewer_export = client.get("/api/config/backup", headers=_basic("viewer", "view"))
+        admin_export = client.get("/api/config/backup", headers=_basic("admin", "secret"))
+        viewer_import = client.post("/api/config/backup/import", headers=_basic("viewer", "view"), json={"printers": []})
+        admin_import = client.post("/api/config/backup/import", headers=_basic("admin", "secret"), json={"printers": [{"id": "printer-1"}]})
+
+    assert viewer_export.status_code == 403
+    assert admin_export.status_code == 200
+    assert admin_export.json()["secrets_included"] is False
+    assert "access_code" not in admin_export.json()["printers"][0]
+    assert viewer_import.status_code == 403
+    assert admin_import.status_code == 200
+    assert admin_import.json()["updated_count"] == 1

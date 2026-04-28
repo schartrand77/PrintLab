@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 from typing import Any
 from uuid import uuid4
 
@@ -9,13 +10,20 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.auth import actor_from_request, require_role, role_from_request
-from app.conversion import BatchModelConversionRequest, ModelConversionRequest, convert_model_batch, convert_model_upload, supported_conversion_formats
+from app.conversion import (
+    BatchModelConversionRequest,
+    ModelConversionRequest,
+    convert_model_batch,
+    convert_model_upload,
+    supported_conversion_formats,
+)
 from app.errors import api_error, from_exception
 from app.runtime import job_manager, printer_manager, service_or_404, works_service
 from app.services import (
     AddPrinterRequest,
     AlertRuleRequest,
     AlertRuleUpdateRequest,
+    CacheCleanupRequest,
     ChamberLightRequest,
     ControlPresetRequest,
     FanRequest,
@@ -36,6 +44,7 @@ from app.services import (
     WebhookSubscriptionRequest,
     WebhookSubscriptionUpdateRequest,
     WorksRequest,
+    data_root,
 )
 
 router = APIRouter()
@@ -98,6 +107,24 @@ def _sanitize_state_payload(payload: dict[str, Any], *, is_admin: bool) -> dict[
     if not is_admin:
         state["webhooks"] = []
     return state
+
+
+def _storage_health() -> dict[str, Any]:
+    root = data_root()
+    root.mkdir(parents=True, exist_ok=True)
+    usage = shutil.disk_usage(root)
+    return {
+        "data_root": str(root),
+        "total_bytes": usage.total,
+        "used_bytes": usage.used,
+        "free_bytes": usage.free,
+        "used_percent": round((usage.used / usage.total) * 100, 1) if usage.total else 0,
+    }
+
+
+def _latest_value(items: list[dict[str, Any]], key: str) -> Any:
+    values = [item.get(key) for item in items if item.get(key)]
+    return max(values) if values else None
 
 
 @router.get("/health")
@@ -240,6 +267,90 @@ async def get_state(request: Request) -> dict[str, Any]:
 @router.get("/api/printers/{printer_id}/state")
 async def get_state_by_printer(printer_id: str, request: Request) -> dict[str, Any]:
     return _sanitize_state_payload(await service_or_404(printer_id).state(), is_admin=role_from_request(request) == "admin")
+
+
+@router.get("/api/system/health")
+async def system_health(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    printer_items: list[dict[str, Any]] = []
+    connected_count = 0
+    queued_job_count = 0
+    youtube_ready_count = 0
+    enabled_webhook_count = 0
+    webhook_statuses: list[dict[str, Any]] = []
+    callback_statuses: list[dict[str, Any]] = []
+    sync_statuses: list[dict[str, Any]] = []
+
+    for entry in printer_manager.list_items():
+        service = service_or_404(entry["id"])
+        snapshot = await service.state()
+        queue = snapshot.get("queue") or {}
+        system = snapshot.get("system_status") or {}
+        youtube = system.get("youtube") or {}
+        webhooks_status = system.get("webhooks") or {}
+        callback_status = system.get("callback") or {}
+        sync_status = system.get("sync") or {}
+        connected = bool(snapshot.get("connected"))
+        if connected:
+            connected_count += 1
+        queued_job_count += int(queue.get("count") or 0)
+        if youtube.get("ready"):
+            youtube_ready_count += 1
+        enabled_webhook_count += int(webhooks_status.get("enabled_count") or 0)
+        webhook_statuses.append(webhooks_status)
+        callback_statuses.append(callback_status)
+        sync_statuses.append(sync_status)
+        printer_items.append(
+            {
+                "printer_id": entry["id"],
+                "printer_name": entry["name"],
+                "configured": bool(snapshot.get("configured")),
+                "connected": connected,
+                "last_error": snapshot.get("last_error"),
+                "last_update_utc": snapshot.get("last_update_utc"),
+                "queue": {
+                    "count": int(queue.get("count") or 0),
+                    "next_item": queue.get("next_item"),
+                },
+                "health": snapshot.get("health") or {},
+                "youtube": youtube,
+                "callback": callback_status,
+                "webhooks": webhooks_status,
+                "sync": sync_status,
+            }
+        )
+
+    return {
+        "summary": {
+            "printer_count": len(printer_items),
+            "connected_printer_count": connected_count,
+            "queued_job_count": queued_job_count,
+            "youtube_ready_count": youtube_ready_count,
+            "enabled_webhook_count": enabled_webhook_count,
+            "audit_count": len(printer_manager.audit_snapshot(limit=500)),
+            "last_webhook_delivery_at": _latest_value(webhook_statuses, "last_delivered_at"),
+            "last_callback_delivery_at": _latest_value(callback_statuses, "last_delivered_at"),
+            "last_sync_error": next((item.get("last_error") for item in sync_statuses if item.get("last_error")), None),
+        },
+        "storage": _storage_health(),
+        "printers": printer_items,
+        "services": works_service.list_services(),
+    }
+
+
+@router.get("/api/config/backup")
+async def export_config_backup(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    return printer_manager.export_config_backup()
+
+
+@router.post("/api/config/backup/import")
+async def import_config_backup(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
+    _require_admin(request)
+    try:
+        return printer_manager.import_config_backup(payload, actor=actor_from_request(request))
+    except Exception as exc:
+        _raise_api_error(exc)
 
 
 @router.get("/api/works/services")
@@ -961,6 +1072,20 @@ async def webhooks_by_printer(printer_id: str, request: Request) -> dict[str, An
     _require_admin(request)
     items = service_or_404(printer_id).webhooks_snapshot()
     return {"items": items, "count": len(items)}
+
+
+@router.post("/api/printers/{printer_id}/maintenance/timelapse-cleanup")
+async def cleanup_timelapse_cache_by_printer(printer_id: str, request: Request, payload: CacheCleanupRequest) -> dict[str, Any]:
+    _require_admin(request)
+    try:
+        return service_or_404(printer_id).cleanup_timelapse_cache(
+            max_age_days=payload.max_age_days,
+            keep_latest=payload.keep_latest,
+            dry_run=payload.dry_run,
+            actor=actor_from_request(request),
+        )
+    except Exception as exc:
+        _raise_api_error(exc)
 
 
 @router.post("/api/printers/{printer_id}/webhooks")

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
+import base64
 import shutil
 from pathlib import Path
 
 import pytest
-
-import base64
 
 from app.conversion import (
     BatchModelConversionRequest,
@@ -63,7 +62,7 @@ def test_convert_model_bytes_writes_obj_output_with_uvs(monkeypatch: pytest.Monk
         content = saved.read_text(encoding="utf-8")
         assert "\nv " in content
         assert "\nvt " in content
-        assert any("/" in line and not "//" in line for line in content.splitlines() if line.startswith("f "))
+        assert any("/" in line and "//" not in line for line in content.splitlines() if line.startswith("f "))
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
 
