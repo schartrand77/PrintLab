@@ -57,7 +57,7 @@
   <Config Name="Session TTL Seconds" Target="SESSION_TTL_SECONDS" Default="1800" Mode="" Description="Session lifetime in seconds" Type="Variable" Display="advanced" Required="false" Mask="false">1800</Config>
   <Config Name="Session Cookie Secure" Target="SESSION_COOKIE_SECURE" Default="false" Mode="" Description="Set true when serving behind HTTPS" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
 
-  <Config Name="Makerworks Base URL" Target="MAKERWORKS_BASE_URL" Default="" Mode="" Description="Makerworks API base URL" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Makerworks Base URL" Target="MAKERWORKS_BASE_URL" Default="http://MakerWorks-v2:3000" Mode="" Description="Makerworks API base URL. Use the MakerWorks container name when all Works containers share makerworks-net." Type="Variable" Display="advanced" Required="false" Mask="false">http://MakerWorks-v2:3000</Config>
   <Config Name="Makerworks API Key" Target="MAKERWORKS_API_KEY" Default="" Mode="" Description="Makerworks API key" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="Makerworks Bearer Token" Target="MAKERWORKS_BEARER_TOKEN" Default="" Mode="" Description="Makerworks bearer token" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="Makerworks Auth Header" Target="MAKERWORKS_AUTH_HEADER" Default="X-API-Key" Mode="" Description="Header used for Makerworks API key" Type="Variable" Display="advanced" Required="false" Mask="false">X-API-Key</Config>
@@ -81,7 +81,7 @@
   <Config Name="Orderworks Auth Header" Target="ORDERWORKS_AUTH_HEADER" Default="X-API-Key" Mode="" Description="Header used for Orderworks API key" Type="Variable" Display="advanced" Required="false" Mask="false">X-API-Key</Config>
   <Config Name="Orderworks Verify SSL" Target="ORDERWORKS_VERIFY_SSL" Default="true" Mode="" Description="Verify SSL for Orderworks requests" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
 
-  <Config Name="Stockworks Base URL" Target="STOCKWORKS_BASE_URL" Default="" Mode="" Description="Stockworks API base URL" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Stockworks Base URL" Target="STOCKWORKS_BASE_URL" Default="http://StockWorks:8000" Mode="" Description="Stockworks API base URL. Use the StockWorks container name when all Works containers share makerworks-net." Type="Variable" Display="advanced" Required="false" Mask="false">http://StockWorks:8000</Config>
   <Config Name="Stockworks API Key" Target="STOCKWORKS_API_KEY" Default="" Mode="" Description="Stockworks API key" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="Stockworks Bearer Token" Target="STOCKWORKS_BEARER_TOKEN" Default="" Mode="" Description="Stockworks bearer token" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="Stockworks Admin Username" Target="STOCKWORKS_ADMIN_USERNAME" Default="" Mode="" Description="Optional Stockworks admin username for form login flows" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
