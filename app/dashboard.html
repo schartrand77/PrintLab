@@ -2909,10 +2909,11 @@
           const updated = item.updated_at || item.created_at;
           const routeLabel = item.printer_handoff_ready ? "Assets ready" : "Metadata only";
           const openUrl = item.model_url || item.download_url || "";
+          const thumbnailUrl = item.thumbnail_proxy_url || item.thumbnail_url || placeholderThumb;
           return `
           <article class="model-card">
             <div class="model-preview">
-              <img src="${escapeHtml(item.thumbnail_url || placeholderThumb)}" alt="model preview" onerror="this.onerror=null;this.src='${placeholderThumb}'">
+              <img src="${escapeHtml(thumbnailUrl)}" alt="model preview" onerror="this.onerror=null;this.src='${placeholderThumb}'">
             </div>
             <div class="model-body">
               <div class="model-name">${escapeHtml(item.name || "Untitled model")}</div>
