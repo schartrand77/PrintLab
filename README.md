@@ -7,21 +7,11 @@ This is **not** Home Assistant. It runs as a direct web/API service.
 
 ## Suite demo walkthrough
 
-PrintLab participates in the MakerWorks suite demo as the printer routing and production-handoff app. The public screenshots below use synthetic fixture printers only, so they do not expose live printer serials, camera views, access codes, private job state, or real printer controls.
+PrintLab participates in the MakerWorks suite demo as the printer routing and production-handoff app. The public screenshot below uses synthetic fixture printers only, so it does not expose live printer serials, camera views, access codes, private job state, or real printer controls.
 
 ### Synthetic printer fleet
 
 ![PrintLab synthetic printer fleet](docs/assets/suite-screenshots/printlab-01-printers.png)
-
-### MakerWorks library handoff
-
-![PrintLab MakerWorks library handoff](docs/assets/suite-screenshots/printlab-03-makerworks-library.png)
-
-### Preflight routing and submitted jobs
-
-![PrintLab preflight routing with synthetic printer candidates](docs/assets/suite-screenshots/printlab-04-preflight.png)
-
-![PrintLab submitted jobs ledger with synthetic job data](docs/assets/suite-screenshots/printlab-05-jobs.png)
 
 ## What it provides
 
