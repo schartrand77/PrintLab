@@ -8,6 +8,8 @@ services:
         HA_BAMBULAB_REF: main
     image: printlab-standalone:local
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       PRINTERS_JSON: ${PRINTERS_JSON:-}
@@ -32,7 +34,7 @@ services:
       REQUIRE_AUTH: ${REQUIRE_AUTH:-true}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
-      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+      ADMIN_PASSWORD_HASH: ""
       SESSION_SECRET: ${SESSION_SECRET:-}
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-1800}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
