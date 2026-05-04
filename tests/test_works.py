@@ -1662,6 +1662,76 @@ def test_youtube_auto_upload_retry_can_reuse_same_timelapse_path(monkeypatch: py
     assert scheduled == []
 
 
+def test_youtube_auto_upload_claims_timelapse_path_during_background_upload(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = Path("tests/.tmp/youtube-claimed-path")
+    cache_dir = tmp_path / "cache" / "timelapse"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    video_path = cache_dir / "video_2026-03-13_12-12-18.mp4"
+    video_path.write_bytes(b"stable-video")
+    matched_ts = datetime(2026, 3, 13, 12, 12, 18, tzinfo=timezone.utc).timestamp()
+    os.utime(video_path, (matched_ts, matched_ts))
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE", "file_cache_path": str(tmp_path / "cache")},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    record = {
+        "id": "record-claim-2",
+        "file_name": "widget-b.3mf",
+        "model_name": "Widget B",
+        "completed_at": "2026-03-13T12:01:00+00:00",
+        "youtube": {"uploaded": False},
+    }
+    service._successful_gcodes = [record]
+    service._youtube_claimed_timelapse_paths = {str(video_path.resolve())}
+
+    assert service._find_latest_timelapse_file(record) is None
+
+
+def test_retryable_youtube_upload_failure_resets_progress_to_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = Path("tests/.tmp/youtube-retry-progress")
+    video_path = tmp_path / "cache" / "timelapse" / "video_2026-03-13_12-12-18.mp4"
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    video_path.write_bytes(b"stable-video")
+
+    monkeypatch.setenv("YOUTUBE_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("YOUTUBE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("YOUTUBE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("YOUTUBE_REFRESH_TOKEN", "refresh-token")
+    monkeypatch.setenv("YOUTUBE_TIMELAPSE_STABLE_SECONDS", "0")
+
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE", "file_cache_path": str(tmp_path / "cache")},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    record = {
+        "id": "record-retry-progress",
+        "file_name": "widget.3mf",
+        "model_name": "Widget",
+        "completed_at": "2026-03-13T12:00:00+00:00",
+        "youtube": {"uploaded": False, "progress_percent": 95, "progress_stage": "uploading"},
+    }
+
+    monkeypatch.setattr(
+        service,
+        "_stage_timelapse_for_youtube_sync",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("Timelapse file changed while staging for YouTube upload")),
+    )
+    monkeypatch.setattr(service, "_find_latest_timelapse_file", lambda _record: video_path)
+    monkeypatch.setattr(service, "_download_latest_timelapse_from_printer_sync", lambda _record: None)
+    monkeypatch.setattr(service, "_save_successful_gcodes", lambda: None)
+    monkeypatch.setattr(service, "_schedule_youtube_retry", lambda *_args, **_kwargs: None)
+
+    result = asyncio.run(service._sync_successful_gcode_to_youtube(record, force=False, video_path=None))
+
+    assert result is record
+    assert record["youtube"]["progress_stage"] == "waiting"
+    assert record["youtube"]["progress_percent"] == 5
+    assert record["youtube"]["progress_label"] == "Waiting for timelapse"
+
+
 def test_successful_gcode_surfaces_youtube_api_message_without_upload_url(monkeypatch: pytest.MonkeyPatch) -> None:
     tmp_path = Path("tests/.tmp/youtube-upload-failure")
     cache_dir = tmp_path / "cache" / "timelapse"

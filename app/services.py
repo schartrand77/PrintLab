@@ -1212,6 +1212,7 @@ class PrinterService:
         self._last_job_state: str | None = None
         self._active_job_context: dict[str, Any] | None = None
         self._last_completed_job_key: str | None = None
+        self._youtube_claimed_timelapse_paths: set[str] = set()
         self._stockworks_color_cache: dict[str, str] | None = None
         self._stockworks_color_cache_at: float = 0.0
 
@@ -2436,6 +2437,7 @@ class PrinterService:
             if isinstance(item, dict)
             and str(item.get("id") or "").strip() != current_record_id
         }
+        used_paths.update(getattr(self, "_youtube_claimed_timelapse_paths", set()))
         candidates: list[tuple[float, Path]] = []
         for ext in ("*.mp4", "*.avi", "*.mov"):
             for path in cache_dir.glob(ext):
@@ -3172,7 +3174,14 @@ class PrinterService:
             selected_path = await self._wait_for_stable_timelapse_file(selected_path, cfg=cfg)
         except Exception as exc:
             if video_path is None and not force and self._is_retryable_timelapse_wait_error(exc):
-                youtube["last_error"] = None
+                youtube.update(
+                    {
+                        "last_error": None,
+                        "progress_stage": "waiting",
+                        "progress_percent": 5,
+                        "progress_label": "Waiting for timelapse",
+                    }
+                )
                 self._save_successful_gcodes()
                 self._schedule_youtube_retry(
                     str(record.get("id") or ""),
@@ -3181,6 +3190,24 @@ class PrinterService:
                 return record
             raise
         self._set_youtube_progress(record, stage="ready", percent=15, label="Timelapse ready")
+        selected_path_key = str(selected_path.resolve())
+        if not force and selected_path_key in self._youtube_claimed_timelapse_paths:
+            youtube.update(
+                {
+                    "uploaded": False,
+                    "last_error": None,
+                    "progress_stage": "waiting",
+                    "progress_percent": 5,
+                    "progress_label": "Waiting for timelapse",
+                }
+            )
+            self._save_successful_gcodes()
+            self._schedule_youtube_retry(
+                str(record.get("id") or ""),
+                delay_seconds=max(60, int(cfg.get("poll_interval_seconds") or 5) * 12),
+            )
+            return record
+        self._youtube_claimed_timelapse_paths.add(selected_path_key)
         youtube["path"] = str(selected_path.resolve())
         staged_path: Path | None = None
         upload_path: Path | None = None
@@ -3242,6 +3269,7 @@ class PrinterService:
                         "uploaded": False,
                         "last_error": None,
                         "progress_stage": "waiting",
+                        "progress_percent": 5,
                         "progress_label": "Waiting for timelapse",
                     }
                 )
@@ -3256,6 +3284,7 @@ class PrinterService:
                     "uploaded": False,
                     "last_error": str(exc),
                     "progress_stage": "failed",
+                    "progress_percent": 0,
                     "progress_label": "Upload failed",
                 }
             )
@@ -3269,6 +3298,9 @@ class PrinterService:
             )
             raise
         finally:
+            selected_path_key = locals().get("selected_path_key")
+            if selected_path_key:
+                self._youtube_claimed_timelapse_paths.discard(str(selected_path_key))
             for cleanup_path in {staged_path, upload_path}:
                 if cleanup_path is not None:
                     try:
