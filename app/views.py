@@ -1037,7 +1037,12 @@ def render_makerworks_search_html() -> str:
     body { margin:0; font-family:"Segoe UI",sans-serif; background:var(--bg); color:var(--text); min-height:100vh; min-height:100dvh; }
     .wrap { max-width:1280px; margin:0 auto; padding:calc(var(--safe-top) + 24px) calc(var(--safe-right) + 16px) calc(var(--safe-bottom) + 40px) calc(var(--safe-left) + 16px); }
     .top { display:flex; gap:12px; align-items:flex-start; margin-bottom:14px; }
-    .menu { border:0; border-radius:12px; background:var(--button); color:var(--button-text); padding:10px 12px; font-weight:700; cursor:pointer; }
+    .hamburger { border:0; border-radius:10px; background:var(--button); color:var(--button-text); cursor:pointer; width:42px; height:34px; display:grid; place-items:center; box-shadow:0 8px 22px rgba(22,54,86,.34); }
+    .hamburger-lines { width:16px; height:12px; position:relative; }
+    .hamburger-lines::before, .hamburger-lines::after, .hamburger-lines span { content:""; position:absolute; left:0; right:0; height:2px; background:currentColor; border-radius:2px; }
+    .hamburger-lines::before { top:0; }
+    .hamburger-lines span { top:5px; }
+    .hamburger-lines::after { top:10px; }
     .layout { display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:16px; }
     .panel { background:var(--panel); border:1px solid var(--line); border-radius:22px; padding:16px; }
     .controls { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:10px; align-items:end; margin-bottom:12px; }
@@ -1099,7 +1104,7 @@ def render_makerworks_search_html() -> str:
   </aside>
   <div class="wrap">
     <div class="top">
-      <button class="menu" type="button" onclick="openSidebar()">Menu</button>
+      <button class="hamburger" type="button" aria-label="Open menu" onclick="openSidebar()"><div class="hamburger-lines"><span></span></div></button>
       <div>
         <h1>MakerWorks Search</h1>
         <p>Search, preflight, and queue MakerWorks models here. If more than one printer qualifies, PrintLab stops for approval instead of guessing.</p>
@@ -1424,7 +1429,12 @@ def render_makerworks_routing_html() -> str:
     .wrap { max-width:1600px; margin:0 auto; padding:calc(var(--safe-top) + 18px) calc(var(--safe-right) + 14px) calc(var(--safe-bottom) + 28px) calc(var(--safe-left) + 14px); min-height:100vh; min-height:100dvh; display:flex; flex-direction:column; }
     .top { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:12px; }
     .top-head { display:grid; gap:10px; }
-    .menu { border:0; border-radius:12px; background:var(--button); color:var(--button-text); padding:10px 12px; font-weight:700; cursor:pointer; width:max-content; }
+    .hamburger { border:0; border-radius:10px; background:var(--button); color:var(--button-text); cursor:pointer; width:42px; height:34px; display:grid; place-items:center; box-shadow:0 8px 22px rgba(22,54,86,.34); }
+    .hamburger-lines { width:16px; height:12px; position:relative; }
+    .hamburger-lines::before, .hamburger-lines::after, .hamburger-lines span { content:""; position:absolute; left:0; right:0; height:2px; background:currentColor; border-radius:2px; }
+    .hamburger-lines::before { top:0; }
+    .hamburger-lines span { top:5px; }
+    .hamburger-lines::after { top:10px; }
     .top-actions { display:flex; gap:10px; flex-wrap:wrap; }
     .btn, .link-btn { border:0; border-radius:12px; background:var(--button); color:var(--button-text); padding:10px 12px; font-weight:700; font-size:13px; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
     .btn.secondary { background:var(--soft); color:var(--text); border:1px solid var(--line); }
@@ -1536,7 +1546,7 @@ def render_makerworks_routing_html() -> str:
   <div class="wrap">
     <div class="top">
       <div class="top-head">
-        <button class="menu" type="button" onclick="openSidebar()">Menu</button>
+        <button class="hamburger" type="button" aria-label="Open menu" onclick="openSidebar()"><div class="hamburger-lines"><span></span></div></button>
         <div>
         <h1 style="margin:0 0 8px;">MakerWorks Routing Board</h1>
         <p style="margin:0;color:var(--muted);max-width:760px;">Models stay in the left queue column and printers stay in the right column. Each column scrolls independently, and cards can collapse to a single summary row.</p>
@@ -2275,18 +2285,24 @@ def render_conversion_html() -> str:
     .sidebar.open { transform: translateX(0); }
     .sidebar-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
     .sidebar-head-actions { display: flex; gap: 8px; align-items: center; }
-    .theme-toggle, .sidebar-close, .menu, .btn, .download-link, .select, .field {
+    .theme-toggle, .sidebar-close, .btn, .download-link, .select, .field {
       border-radius: 12px;
       border: 1px solid transparent;
       font: inherit;
     }
-    .theme-toggle, .sidebar-close, .menu {
+    .theme-toggle, .sidebar-close {
       background: var(--soft);
       color: var(--text);
       cursor: pointer;
       padding: 8px 10px;
     }
     .sidebar-close { font-size: 18px; line-height: 1; padding: 6px 10px; }
+    .hamburger { border: 0; border-radius: 10px; background: var(--soft); color: var(--text); cursor: pointer; width: 42px; height: 34px; display: grid; place-items: center; box-shadow: 0 8px 22px rgba(22, 54, 86, 0.18); }
+    .hamburger-lines { width: 16px; height: 12px; position: relative; }
+    .hamburger-lines::before, .hamburger-lines::after, .hamburger-lines span { content: ""; position: absolute; left: 0; right: 0; height: 2px; background: currentColor; border-radius: 2px; }
+    .hamburger-lines::before { top: 0; }
+    .hamburger-lines span { top: 5px; }
+    .hamburger-lines::after { top: 10px; }
     .sidebar-tabs { display: grid; gap: 8px; margin-top: 12px; }
     .sidebar-tab {
       display: block;
@@ -2494,7 +2510,7 @@ def render_conversion_html() -> str:
     <section class="hero">
       <div class="hero-top">
         <div class="hero-copy">
-          <button class="menu" type="button" onclick="openSidebar()">Menu</button>
+          <button class="hamburger" type="button" aria-label="Open menu" onclick="openSidebar()"><div class="hamburger-lines"><span></span></div></button>
           <h1>3D File Conversion</h1>
           <p>Upload a 3D file, convert it to another mesh format, and download the result. OBJ is preselected as the default target, and UVs are generated automatically when needed.</p>
         </div>

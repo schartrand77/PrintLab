@@ -98,6 +98,22 @@ def test_printer_dashboard_contains_sidebar_navigation(monkeypatch: pytest.Monke
     assert "handleTemperatureInputKeydown(event, 'nozzle')" in html
 
 
+def test_sidebar_openers_use_hamburger_icon() -> None:
+    pages = [
+        render_gallery_html(),
+        render_add_printer_html(),
+        render_makerworks_search_html(),
+        render_makerworks_routing_html(),
+        render_conversion_html(),
+    ]
+
+    for html in pages:
+        assert 'class="hamburger"' in html
+        assert 'class="hamburger-lines"' in html
+        assert 'aria-label="Open menu"' in html
+        assert '>Menu</button>' not in html
+
+
 def test_render_conversion_page_contains_converter_controls() -> None:
     html = render_conversion_html()
     assert 'href="/conversion"' in html
