@@ -1098,8 +1098,8 @@ def test_youtube_upload_uses_consistent_file_size_for_resumable_session(monkeypa
     original_stat = Path.stat
     stat_calls = {"target": 0}
 
-    def fake_stat(self: Path):
-        result = original_stat(self)
+    def fake_stat(self: Path, *, follow_symlinks: bool = True):
+        result = original_stat(self, follow_symlinks=follow_symlinks)
         if self == video_path:
             stat_calls["target"] += 1
             if stat_calls["target"] == 2:
