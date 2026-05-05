@@ -180,6 +180,73 @@ def test_makerworks_library_thumbnail_path_keeps_fallback_fields_when_env_is_leg
     assert result["items"][0]["thumbnail_url"] == "https://makerworks.local/thumbs/99.png"
 
 
+def test_makerworks_library_merges_thumbnail_summary_endpoint(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+
+    class FakeResponse:
+        ok = True
+        status_code = 200
+        headers = {"content-type": "application/json"}
+
+        def __init__(self, body: dict[str, object]) -> None:
+            self._body = body
+
+        def json(self) -> dict[str, object]:
+            return self._body
+
+        @property
+        def text(self) -> str:
+            return ""
+
+    calls: list[dict[str, object]] = []
+
+    def fake_request(**kwargs):
+        calls.append({"url": kwargs["url"], "params": kwargs.get("params")})
+        if str(kwargs["url"]).endswith("/api/models/thumbs"):
+            return FakeResponse(
+                {
+                    "models": [
+                        {
+                            "id": "model-1",
+                            "title": "Desk Organizer",
+                            "coverImagePath": "/thumbs/model-1.webp",
+                        }
+                    ]
+                }
+            )
+        return FakeResponse(
+            {
+                "models": [
+                    {
+                        "id": "model-1",
+                        "title": "Desk Organizer",
+                        "coverImagePath": None,
+                        "filePath": "/files/model-1.3mf",
+                    }
+                ],
+                "total": 1,
+            }
+        )
+
+    monkeypatch.setattr("app.services.requests.request", fake_request)
+    service = WorksService()
+
+    result = service.makerworks_library_sync(query="desk", page=2, page_size=10)
+
+    assert result["items"][0]["thumbnail_url"] == "https://makerworks.local/thumbs/model-1.webp"
+    assert result["items"][0]["thumbnail_proxy_url"] == "/api/works/makerworks/asset?url=https%3A%2F%2Fmakerworks.local%2Fthumbs%2Fmodel-1.webp"
+    assert calls == [
+        {
+            "url": "https://makerworks.local/api/models",
+            "params": {"q": "desk", "page": 2, "page_size": 10},
+        },
+        {
+            "url": "https://makerworks.local/api/models/thumbs",
+            "params": {"q": "desk", "page": 2, "pageSize": 10},
+        },
+    ]
+
+
 def test_makerworks_library_derives_preview_mesh_when_thumbnail_is_missing(monkeypatch) -> None:
     monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
 
@@ -528,6 +595,10 @@ def test_makerworks_library_retries_without_pagination_after_400(monkeypatch) ->
         {
             "url": "https://makerworks.local/api/models",
             "params": {"q": "desk"},
+        },
+        {
+            "url": "https://makerworks.local/api/models/thumbs",
+            "params": {"q": "desk", "page": 1, "pageSize": 24},
         },
     ]
 

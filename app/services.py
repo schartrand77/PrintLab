@@ -437,6 +437,7 @@ class WorksService:
             "files_path": get_env("MAKERWORKS_LIBRARY_FILES_PATH", "files|assets"),
             "created_at_path": get_env("MAKERWORKS_LIBRARY_CREATED_AT_PATH", "created_at|createdAt|published_at"),
             "updated_at_path": get_env("MAKERWORKS_LIBRARY_UPDATED_AT_PATH", "updated_at|updatedAt|modified_at"),
+            "thumbs_path": self._clean_optional_path(get_env("MAKERWORKS_LIBRARY_THUMBS_PATH", "/api/models/thumbs"), "/api/models/thumbs"),
         }
 
     def _path_tokens(self, path: str) -> list[str]:
@@ -902,6 +903,14 @@ class WorksService:
             params[str(cfg["page_size_param"])] = page_size
         return params
 
+    def _makerworks_library_thumbs_query_params(self, query: str | None, page: int, page_size: int) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if query:
+            params["q"] = query
+        params["page"] = page
+        params["pageSize"] = page_size
+        return params
+
     def _makerworks_library_request(self, list_path: str, query_params: dict[str, Any]) -> dict[str, Any]:
         payload = WorksRequest(
             method="GET",
@@ -909,6 +918,42 @@ class WorksService:
             query=query_params,
         )
         return self.request_sync("makerworks", payload)
+
+    def _makerworks_library_thumb_by_id(
+        self,
+        cfg: dict[str, Any],
+        *,
+        query: str | None,
+        page: int,
+        page_size: int,
+        base_url: str,
+    ) -> dict[str, str]:
+        thumbs_path = str(cfg.get("thumbs_path") or "").strip()
+        if not thumbs_path:
+            return {}
+        try:
+            response = self._makerworks_library_request(
+                thumbs_path,
+                self._makerworks_library_thumbs_query_params(query, page, page_size),
+            )
+            if not response.get("ok"):
+                return {}
+            body = response.get("body")
+            items = self._makerworks_library_items(body, {**cfg, "items_path": "models|items|data.items|results"})
+        except Exception:
+            return {}
+        thumbs: dict[str, str] = {}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_id = self._stringify_library_value(self._extract_path_value(item, cfg["id_path"]))
+            thumbnail = self._absolutize_external_url(
+                base_url,
+                self._stringify_library_value(self._extract_path_value(item, cfg["thumbnail_path"])),
+            )
+            if item_id and thumbnail:
+                thumbs[item_id] = thumbnail
+        return thumbs
 
     def _raise_upstream_response_error(self, response: dict[str, Any], fallback: str) -> None:
         status_code = int(response.get("status_code") or 0)
@@ -964,6 +1009,20 @@ class WorksService:
             )
             for item in self._makerworks_library_items(body, library_cfg)
         ]
+        thumbs_by_id = self._makerworks_library_thumb_by_id(
+            library_cfg,
+            query=query,
+            page=page_value,
+            page_size=size_value,
+            base_url=str(service_cfg["base_url"]),
+        )
+        for item in items:
+            if item.get("thumbnail_url"):
+                continue
+            thumbnail = thumbs_by_id.get(str(item.get("id") or ""))
+            if thumbnail:
+                item["thumbnail_url"] = thumbnail
+                item["thumbnail_proxy_url"] = self._external_proxy_url("makerworks", thumbnail)
         total = self._extract_path_value(body, library_cfg["total_path"]) if isinstance(body, dict) else None
         total_value = int(total) if isinstance(total, (int, float)) else len(items)
         return {
