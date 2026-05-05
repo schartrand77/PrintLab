@@ -1399,6 +1399,67 @@ def test_active_job_context_keeps_model_metadata_when_snapshot_reports_internal_
     assert service._youtube_template_context(record)["model_name"] == "Widget"
 
 
+def test_monitor_records_success_when_busy_print_is_idle_at_100_percent(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    service._last_job_state = "RUNNING"
+    service._active_job_context = {"file_path": "/cache/widget.3mf"}
+
+    class FakeClient:
+        connected = True
+
+        async def refresh(self) -> None:
+            return None
+
+        def get_device(self):
+            return SimpleNamespace(
+                print_job=SimpleNamespace(
+                    gcode_state="IDLE",
+                    gcode_file="/cache/widget.3mf",
+                    subtask_name="",
+                    print_percentage=100,
+                    remaining_time=0,
+                )
+            )
+
+    sleep_calls = {"count": 0}
+
+    async def fake_sleep(_seconds: float) -> None:
+        sleep_calls["count"] += 1
+        if sleep_calls["count"] > 1:
+            raise asyncio.CancelledError
+
+    recorded: list[dict[str, object]] = []
+
+    async def fake_record_successful_completion(snapshot: dict[str, object]) -> None:
+        recorded.append(snapshot)
+
+    service.client = FakeClient()
+    monkeypatch.setattr("app.services.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr(service, "_record_successful_completion", fake_record_successful_completion)
+
+    asyncio.run(service._monitor_print_jobs())
+
+    assert recorded == [
+        {
+            "state": "IDLE",
+            "file_path": "/cache/widget.3mf",
+            "subtask_name": None,
+            "progress_percent": 100,
+            "remaining_minutes": 0,
+            "file_name": "widget.3mf",
+            "model_key": "widget",
+            "model_id": None,
+            "model_name": "widget",
+            "plate_index": None,
+        }
+    ]
+    assert service._active_job_context is None
+
+
 def test_wait_for_stable_timelapse_file_accepts_aged_file(monkeypatch: pytest.MonkeyPatch) -> None:
     tmp_path = Path("tests/.tmp/youtube-stable-file")
     cache_dir = tmp_path / "cache" / "timelapse"

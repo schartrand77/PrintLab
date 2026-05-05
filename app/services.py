@@ -3542,9 +3542,18 @@ class PrinterService:
                 previously_busy = bool(self._last_job_state) and not any(
                     marker in str(self._last_job_state or "").upper() for marker in ("IDLE", "FINISH", "COMPLETE", "FAILED", "STOP")
                 )
+                try:
+                    progress_percent = int(snapshot.get("progress_percent") or 0)
+                except (TypeError, ValueError):
+                    progress_percent = 0
+                completed_successfully = previously_busy and (
+                    "FINISH" in state
+                    or "COMPLETE" in state
+                    or ("IDLE" in state and progress_percent >= 99)
+                )
                 if busy:
                     self._merge_active_job_snapshot(snapshot, previously_busy=previously_busy)
-                elif ("FINISH" in state or "COMPLETE" in state) and previously_busy:
+                elif completed_successfully:
                     await self._record_successful_completion(snapshot)
                     self._active_job_context = None
                 elif "FAILED" in state or "STOP" in state or "IDLE" in state:
