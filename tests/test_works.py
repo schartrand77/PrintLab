@@ -1975,6 +1975,48 @@ def test_youtube_video_snapshot_matches_same_day_timelapse_started_hours_before_
     assert snapshot["items"][0]["path"] == "/timelapse/video_2026-04-02_14-30-24.mp4"
 
 
+def test_youtube_video_snapshot_shows_matched_timelapse_as_ready() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    service._successful_gcodes = [
+        {
+            "id": "record-1",
+            "model_name": "plate_1",
+            "file_name": "plate_1.gcode",
+            "file_path": "/data/Metadata/plate_1.gcode",
+            "completed_at": "2026-04-02T23:50:05+00:00",
+            "plate_index": 1,
+            "model_key": "plate-1",
+            "youtube": {
+                "uploaded": False,
+                "last_attempt_at": "2026-04-02T23:50:10+00:00",
+                "progress_percent": 5,
+                "progress_label": "Waiting for timelapse",
+                "progress_stage": "waiting",
+            },
+        }
+    ]
+    service._list_timelapse_inventory = lambda: [
+        {
+            "name": "video_2026-04-02_14-30-24.mp4",
+            "path": "/timelapse/video_2026-04-02_14-30-24.mp4",
+            "size": 123,
+            "mtime": service._parse_iso_timestamp("2026-04-02T19:31:00+00:00").timestamp(),
+            "thumbnail_url": None,
+        }
+    ]
+
+    snapshot = service.youtube_videos_snapshot(page=1, page_size=5)
+
+    assert snapshot["items"][0]["path"] == "/timelapse/video_2026-04-02_14-30-24.mp4"
+    assert snapshot["items"][0]["progress_stage"] == "ready"
+    assert snapshot["items"][0]["progress_percent"] == 15
+    assert snapshot["items"][0]["progress_label"] == "Timelapse ready"
+
+
 def test_list_timelapse_inventory_does_not_expose_mp4_thumbnail_endpoint() -> None:
     tmp_path = Path("tests/.tmp/list-timelapse-inventory")
     service = PrinterService(

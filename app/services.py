@@ -1504,6 +1504,21 @@ class PrinterService:
                 continue
             record_by_timelapse_name[Path(video_path).name.lower()] = record
 
+        def display_progress(youtube: dict[str, Any], *, has_timelapse: bool) -> tuple[int, str, str]:
+            if youtube.get("uploaded"):
+                return 100, "Uploaded", "uploaded"
+            if youtube.get("last_error"):
+                return 0, "Upload failed", "failed"
+            current_stage = str(youtube.get("progress_stage") or "new")
+            if has_timelapse and current_stage in {"new", "pending", "waiting"}:
+                return 15, "Timelapse ready", "ready"
+            percent = youtube.get("progress_percent")
+            return (
+                int(percent) if percent is not None else 0,
+                str(youtube.get("progress_label") or "Not uploaded"),
+                current_stage,
+            )
+
         merged_items: list[dict[str, Any]] = []
         for timelapse in timelapses:
             name = str(timelapse.get("name") or "")
@@ -1521,6 +1536,7 @@ class PrinterService:
                 matched_record_ids.add(str(record.get("id")))
             youtube = (record or {}).get("youtube") or {}
             status = "uploaded" if youtube.get("uploaded") else ("failed" if youtube.get("last_error") else "new")
+            progress_percent, progress_label, progress_stage = display_progress(youtube, has_timelapse=bool(record))
             merged_items.append(
                 {
                     "record_id": (record or {}).get("id"),
@@ -1538,9 +1554,9 @@ class PrinterService:
                     "video_url": youtube.get("video_url"),
                     "title": youtube.get("title") or Path(name).stem,
                     "path": timelapse.get("path"),
-                    "progress_percent": youtube.get("progress_percent") if record else (100 if youtube.get("uploaded") else 0),
-                    "progress_label": youtube.get("progress_label") if record else ("Uploaded" if youtube.get("uploaded") else "Not uploaded"),
-                    "progress_stage": youtube.get("progress_stage") if record else ("uploaded" if youtube.get("uploaded") else "new"),
+                    "progress_percent": progress_percent,
+                    "progress_label": progress_label,
+                    "progress_stage": progress_stage,
                     "thumbnail_url": timelapse.get("thumbnail_url") or (self._record_thumbnail_url(record) if record else None),
                     "captured_at": captured_at.isoformat() if captured_at else None,
                     "size_bytes": timelapse.get("size"),
@@ -1561,6 +1577,7 @@ class PrinterService:
                 continue
             file_name = str(record.get("file_name") or path_name or "")
             status = "uploaded" if youtube.get("uploaded") else ("failed" if youtube.get("last_error") else "new")
+            progress_percent, progress_label, progress_stage = display_progress(youtube, has_timelapse=bool(path_name))
             merged_items.append(
                 {
                     "record_id": record.get("id"),
@@ -1578,9 +1595,9 @@ class PrinterService:
                     "video_url": youtube.get("video_url"),
                     "title": youtube.get("title") or Path(file_name).stem,
                     "path": youtube.get("path"),
-                    "progress_percent": youtube.get("progress_percent") if youtube.get("progress_percent") is not None else (100 if youtube.get("uploaded") else 0),
-                    "progress_label": youtube.get("progress_label") or ("Uploaded" if youtube.get("uploaded") else "Not uploaded"),
-                    "progress_stage": youtube.get("progress_stage") or ("uploaded" if youtube.get("uploaded") else "new"),
+                    "progress_percent": progress_percent,
+                    "progress_label": progress_label,
+                    "progress_stage": progress_stage,
                     "thumbnail_url": self._record_thumbnail_url(record),
                     "captured_at": record.get("completed_at"),
                     "size_bytes": None,
