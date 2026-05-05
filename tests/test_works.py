@@ -2046,6 +2046,58 @@ def test_list_timelapse_inventory_does_not_expose_mp4_thumbnail_endpoint() -> No
     assert items[0]["thumbnail_url"] is None
 
 
+def test_delete_all_timelapses_surfaces_sd_card_delete_failures() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    service._list_timelapse_inventory = lambda: [
+        {"path": "/timelapse/keep.mp4", "name": "keep.mp4"},
+    ]
+
+    def fail_delete(_path: str) -> str:
+        raise RuntimeError("550 delete failed")
+
+    service._delete_timelapse_file_sync = fail_delete
+
+    with pytest.raises(RuntimeError, match="Failed to delete 1 timelapse"):
+        service._delete_all_timelapses_sync()
+
+
+def test_delete_timelapse_file_falls_back_to_relative_sd_card_delete() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    calls: list[tuple[str, str]] = []
+
+    class FakeFtp:
+        def delete(self, path: str) -> None:
+            calls.append(("delete", path))
+            if path == "/timelapse/video.mp4":
+                raise RuntimeError("550 file unavailable")
+
+        def cwd(self, path: str) -> None:
+            calls.append(("cwd", path))
+
+        def quit(self) -> None:
+            calls.append(("quit", ""))
+
+    service.client = SimpleNamespace(ftp_connection=lambda: FakeFtp())
+
+    deleted = service._delete_timelapse_file_sync("/timelapse/video.mp4")
+
+    assert deleted == "/timelapse/video.mp4"
+    assert calls == [
+        ("delete", "/timelapse/video.mp4"),
+        ("cwd", "/timelapse"),
+        ("delete", "video.mp4"),
+        ("quit", ""),
+    ]
+
+
 def test_ftp_list_timestamp_without_year_survives_deprecation_warnings() -> None:
     service = PrinterService(
         config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},

@@ -2336,7 +2336,11 @@ class PrinterService:
                 raise RuntimeError("Client not initialized.")
             ftp = self.client.ftp_connection()
             try:
-                ftp.delete(normalized)
+                try:
+                    ftp.delete(normalized)
+                except Exception:
+                    ftp.cwd("/timelapse")
+                    ftp.delete(Path(normalized).name)
             finally:
                 try:
                     ftp.quit()
@@ -2364,12 +2368,20 @@ class PrinterService:
 
     def _delete_all_timelapses_sync(self) -> list[str]:
         deleted: list[str] = []
+        errors: list[tuple[str, str]] = []
         inventory = self._list_timelapse_inventory()
         for item in inventory:
+            path = str(item.get("path") or "")
             try:
-                deleted.append(self._delete_timelapse_file_sync(str(item.get("path") or "")))
-            except Exception:
-                continue
+                deleted.append(self._delete_timelapse_file_sync(path))
+            except Exception as exc:
+                errors.append((path, str(exc)))
+        if errors:
+            detail = "; ".join(f"{path}: {error}" for path, error in errors[:3])
+            suffix = f" ({detail})" if detail else ""
+            raise RuntimeError(
+                f"Failed to delete {len(errors)} timelapse video{'s' if len(errors) != 1 else ''}{suffix}"
+            )
         return deleted
 
     def cleanup_timelapse_cache(self, *, max_age_days: int, keep_latest: int, dry_run: bool = True, actor: str = "dashboard") -> dict[str, Any]:
