@@ -1498,6 +1498,8 @@ class PrinterService:
             if not isinstance(record, dict):
                 continue
             youtube = record.get("youtube") or {}
+            if youtube.get("progress_stage") == "deleted":
+                continue
             video_path = str(youtube.get("path") or "").strip()
             if not video_path:
                 orphan_records.append(record)
