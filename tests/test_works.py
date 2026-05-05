@@ -2134,6 +2134,42 @@ def test_delete_all_timelapses_hides_deleted_upload_records() -> None:
     assert snapshot["items"] == []
 
 
+def test_delete_all_timelapses_clears_upload_cards_when_inventory_is_unavailable() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    service._successful_gcodes = [
+        {
+            "id": "record-1",
+            "model_name": "Widget",
+            "file_name": "widget.3mf",
+            "completed_at": "2026-04-02T23:50:05+00:00",
+            "youtube": {
+                "uploaded": True,
+                "uploaded_at": "2026-04-03T00:01:00+00:00",
+                "video_id": "video-1",
+                "video_url": "https://www.youtube.com/watch?v=video-1",
+                "path": None,
+                "progress_stage": "waiting",
+                "progress_percent": 5,
+                "progress_label": "Waiting for timelapse",
+            },
+        }
+    ]
+    service._list_timelapse_inventory = lambda: []
+
+    result = asyncio.run(service.delete_all_timelapses())
+    snapshot = service.youtube_videos_snapshot(page=1, page_size=5)
+    connection = service.youtube_connection_status()
+
+    assert result["deleted"] == 0
+    assert result["cleared"] == 1
+    assert snapshot["items"] == []
+    assert connection["uploaded_count"] == 0
+
+
 def test_ftp_list_timestamp_without_year_survives_deprecation_warnings() -> None:
     service = PrinterService(
         config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},

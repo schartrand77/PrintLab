@@ -1390,20 +1390,25 @@ class PrinterService:
 
     def youtube_connection_status(self) -> dict[str, Any]:
         cfg = self._youtube_upload_config()
+        youtube_records = [
+            item
+            for item in self._successful_gcodes
+            if (item.get("youtube") or {}).get("progress_stage") != "deleted"
+        ]
         latest_uploaded = next(
-            (item for item in self._successful_gcodes if (item.get("youtube") or {}).get("uploaded")),
+            (item for item in youtube_records if (item.get("youtube") or {}).get("uploaded")),
             None,
         )
         latest_attempt = next(
             (
                 item
-                for item in self._successful_gcodes
+                for item in youtube_records
                 if (item.get("youtube") or {}).get("last_attempt_at") or (item.get("youtube") or {}).get("uploaded_at")
             ),
             None,
         )
         latest_error = next(
-            (item for item in self._successful_gcodes if (item.get("youtube") or {}).get("last_error")),
+            (item for item in youtube_records if (item.get("youtube") or {}).get("last_error")),
             None,
         )
         configured = bool(cfg["client_id"] and cfg["client_secret"] and cfg["refresh_token"])
@@ -1413,7 +1418,7 @@ class PrinterService:
             "ready": bool(cfg["enabled"] and configured),
             "privacy_status": cfg["privacy_status"],
             "category_id": cfg["category_id"],
-            "uploaded_count": sum(1 for item in self._successful_gcodes if (item.get("youtube") or {}).get("uploaded")),
+            "uploaded_count": sum(1 for item in youtube_records if (item.get("youtube") or {}).get("uploaded")),
             "last_uploaded_at": (latest_uploaded or {}).get("youtube", {}).get("uploaded_at"),
             "last_video_url": (latest_uploaded or {}).get("youtube", {}).get("video_url"),
             "last_attempt_at": (latest_attempt or {}).get("youtube", {}).get("last_attempt_at"),
@@ -2386,6 +2391,36 @@ class PrinterService:
             )
         return deleted
 
+    def _mark_youtube_record_deleted(self, record: dict[str, Any]) -> bool:
+        youtube = record.get("youtube")
+        if not isinstance(youtube, dict) or youtube.get("progress_stage") == "deleted":
+            return False
+        if not any(
+            youtube.get(key)
+            for key in (
+                "uploaded",
+                "uploaded_at",
+                "last_attempt_at",
+                "video_id",
+                "video_url",
+                "path",
+                "progress_stage",
+                "progress_label",
+            )
+        ):
+            return False
+        youtube.update(
+            {
+                "uploaded": False,
+                "uploaded_at": None,
+                "path": None,
+                "progress_stage": "deleted",
+                "progress_percent": 0,
+                "progress_label": "Deleted",
+            }
+        )
+        return True
+
     def cleanup_timelapse_cache(self, *, max_age_days: int, keep_latest: int, dry_run: bool = True, actor: str = "dashboard") -> dict[str, Any]:
         cache_dir = self._timelapse_cache_dir()
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -3113,15 +3148,7 @@ class PrinterService:
             youtube_name = Path(str(youtube.get("path") or "")).name.lower()
             file_name = Path(str(record.get("file_name") or "")).name.lower()
             if deleted_name and deleted_name in {youtube_name, file_name}:
-                youtube.update(
-                    {
-                        "path": None,
-                        "progress_stage": "deleted",
-                        "progress_percent": 0,
-                        "progress_label": "Deleted",
-                    }
-                )
-                changed = True
+                changed = self._mark_youtube_record_deleted(record) or changed
         if changed:
             self._save_successful_gcodes()
         return {"deleted": True, "path": deleted_path}
@@ -3129,6 +3156,7 @@ class PrinterService:
     async def delete_all_timelapses(self) -> dict[str, Any]:
         deleted = await asyncio.get_running_loop().run_in_executor(None, self._delete_all_timelapses_sync)
         changed = False
+        cleared = 0
         if deleted:
             deleted_names = {Path(item).name.lower() for item in deleted if item}
             for record in self._successful_gcodes:
@@ -3138,18 +3166,18 @@ class PrinterService:
                 youtube_name = Path(str(youtube.get("path") or "")).name.lower()
                 file_name = Path(str(record.get("file_name") or "")).name.lower()
                 if deleted_names.intersection({youtube_name, file_name}):
-                    youtube.update(
-                        {
-                            "path": None,
-                            "progress_stage": "deleted",
-                            "progress_percent": 0,
-                            "progress_label": "Deleted",
-                        }
-                    )
-                    changed = True
+                    if self._mark_youtube_record_deleted(record):
+                        cleared += 1
+                        changed = True
+        for record in self._successful_gcodes:
+            if not isinstance(record, dict):
+                continue
+            if self._mark_youtube_record_deleted(record):
+                cleared += 1
+                changed = True
         if changed:
             self._save_successful_gcodes()
-        return {"deleted": len(deleted), "items": deleted}
+        return {"deleted": len(deleted), "cleared": cleared, "items": deleted}
 
     async def sync_successful_gcode_to_youtube(self, record_id: str, *, force: bool = False) -> dict[str, Any]:
         for record in self._successful_gcodes:
