@@ -180,6 +180,38 @@ def test_makerworks_library_thumbnail_path_keeps_fallback_fields_when_env_is_leg
     assert result["items"][0]["thumbnail_url"] == "https://makerworks.local/thumbs/99.png"
 
 
+def test_makerworks_library_cover_image_path_uses_files_route_for_storage_path(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+
+    class FakeResponse:
+        ok = True
+        status_code = 200
+        headers = {"content-type": "application/json"}
+
+        def json(self) -> dict[str, object]:
+            return {
+                "models": [
+                    {
+                        "id": "model-storage-cover",
+                        "title": "Storage Cover Model",
+                        "coverImagePath": "/user-1/thumbnails/cover.png",
+                    }
+                ],
+                "total": 1,
+            }
+
+        @property
+        def text(self) -> str:
+            return ""
+
+    monkeypatch.setattr("app.services.requests.request", lambda **kwargs: FakeResponse())
+    service = WorksService()
+
+    result = service.makerworks_library_sync()
+
+    assert result["items"][0]["thumbnail_url"] == "https://makerworks.local/files/user-1/thumbnails/cover.png"
+
+
 def test_makerworks_library_merges_thumbnail_summary_endpoint(monkeypatch) -> None:
     monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
 

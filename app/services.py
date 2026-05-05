@@ -530,6 +530,19 @@ class WorksService:
             return raw
         return f"{base_url.rstrip('/')}/{raw.lstrip('/')}"
 
+    def _absolutize_makerworks_cover_url(self, base_url: str, value: str | None) -> str | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        if raw.startswith("http://") or raw.startswith("https://"):
+            return raw
+        if raw.startswith("/files/") or raw.startswith("files/"):
+            return self._absolutize_external_url(base_url, raw)
+        path_parts = [part for part in raw.strip("/").split("/") if part]
+        if raw.startswith("/") and len(path_parts) >= 2 and path_parts[1] in {"avatars", "gallery", "thumbnails", "uploads"}:
+            return self._absolutize_external_url(base_url, f"/files{raw}")
+        return self._absolutize_external_url(base_url, raw)
+
     def _external_proxy_url(self, service: str, value: str | None) -> str | None:
         raw = str(value or "").strip()
         if not raw:
@@ -606,9 +619,10 @@ class WorksService:
             )
             or self._derive_preview_mesh_path(raw_download)
         )
-        thumbnail_url = self._absolutize_external_url(
-            base_url,
-            raw_thumbnail,
+        thumbnail_url = (
+            self._absolutize_makerworks_cover_url(base_url, raw_thumbnail)
+            if raw_thumbnail == self._stringify_library_value(item.get("coverImagePath"))
+            else self._absolutize_external_url(base_url, raw_thumbnail)
         )
         preview_mesh_url = self._absolutize_external_url(base_url, raw_preview_mesh)
         model_url = self._absolutize_external_url(
@@ -947,7 +961,7 @@ class WorksService:
             if not isinstance(item, dict):
                 continue
             item_id = self._stringify_library_value(self._extract_path_value(item, cfg["id_path"]))
-            thumbnail = self._absolutize_external_url(
+            thumbnail = self._absolutize_makerworks_cover_url(
                 base_url,
                 self._stringify_library_value(self._extract_path_value(item, cfg["thumbnail_path"])),
             )
