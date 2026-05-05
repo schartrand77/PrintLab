@@ -1526,6 +1526,12 @@ class PrinterService:
                 current_stage,
             )
 
+        def has_visible_upload_record(record: dict[str, Any]) -> bool:
+            youtube = record.get("youtube") or {}
+            if youtube.get("uploaded") or youtube.get("video_id") or youtube.get("video_url") or youtube.get("last_error"):
+                return True
+            return bool(str(youtube.get("path") or "").strip())
+
         merged_items: list[dict[str, Any]] = []
         for timelapse in timelapses:
             name = str(timelapse.get("name") or "")
@@ -1578,6 +1584,8 @@ class PrinterService:
             if path_name not in orphan_timelapse_names:
                 unmatched_records.append(record)
         for record in unmatched_records:
+            if not has_visible_upload_record(record):
+                continue
             youtube = record.get("youtube") or {}
             path_name = Path(str(youtube.get("path") or "")).name.lower()
             if path_name and path_name in orphan_timelapse_names:

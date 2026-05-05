@@ -1863,12 +1863,13 @@ def test_youtube_video_snapshot_is_paginated() -> None:
     assert page_two["items"][0]["video_id"] == "video-2"
 
 
-def test_youtube_video_snapshot_does_not_fall_back_to_active_job_thumbnail() -> None:
+def test_youtube_video_snapshot_hides_pending_record_without_timelapse() -> None:
     service = PrinterService(
         config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
         printer_id="printer-1",
         display_name="Printer 1",
     )
+    service._list_timelapse_inventory = lambda: []
     service._active_job_context = {"file_path": "/cache/current-print.3mf", "plate_gcode": "/cache/current-print.gcode.3mf"}
     service._successful_gcodes = [
         {
@@ -1891,7 +1892,8 @@ def test_youtube_video_snapshot_does_not_fall_back_to_active_job_thumbnail() -> 
 
     snapshot = service.youtube_videos_snapshot(page=1, page_size=5)
 
-    assert snapshot["items"][0]["thumbnail_url"] is None
+    assert snapshot["count"] == 0
+    assert snapshot["items"] == []
 
 
 def test_youtube_video_snapshot_does_not_match_stale_timelapse_to_new_print() -> None:
@@ -1930,8 +1932,9 @@ def test_youtube_video_snapshot_does_not_match_stale_timelapse_to_new_print() ->
 
     snapshot = service.youtube_videos_snapshot(page=1, page_size=5)
 
-    assert snapshot["items"][0]["file_name"] == "plate_1.gcode"
-    assert snapshot["items"][0]["path"] is None
+    assert snapshot["count"] == 1
+    assert snapshot["items"][0]["record_id"] is None
+    assert snapshot["items"][0]["path"] == "/timelapse/video_2026-04-01_14-30-24.mp4"
 
 
 def test_youtube_video_snapshot_matches_same_day_timelapse_started_hours_before_completion() -> None:
