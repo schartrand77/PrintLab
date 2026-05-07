@@ -279,6 +279,58 @@ def test_makerworks_library_merges_thumbnail_summary_endpoint(monkeypatch) -> No
     ]
 
 
+def test_makerworks_library_thumbnail_summary_overrides_stale_list_thumbnail(monkeypatch) -> None:
+    monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
+
+    class FakeResponse:
+        ok = True
+        status_code = 200
+        headers = {"content-type": "application/json"}
+
+        def __init__(self, body: dict[str, object]) -> None:
+            self._body = body
+
+        def json(self) -> dict[str, object]:
+            return self._body
+
+        @property
+        def text(self) -> str:
+            return ""
+
+    def fake_request(**kwargs):
+        if str(kwargs["url"]).endswith("/api/models/thumbs"):
+            return FakeResponse(
+                {
+                    "models": [
+                        {
+                            "id": "model-1",
+                            "coverImagePath": "/files/current-thumb.webp",
+                        }
+                    ]
+                }
+            )
+        return FakeResponse(
+            {
+                "models": [
+                    {
+                        "id": "model-1",
+                        "title": "Desk Organizer",
+                        "coverImagePath": "/files/old-thumb.webp",
+                    }
+                ],
+                "total": 1,
+            }
+        )
+
+    monkeypatch.setattr("app.services.requests.request", fake_request)
+    service = WorksService()
+
+    result = service.makerworks_library_sync()
+
+    assert result["items"][0]["thumbnail_url"] == "https://makerworks.local/files/current-thumb.webp"
+    assert result["items"][0]["thumbnail_proxy_url"] == "/api/works/makerworks/asset?url=https%3A%2F%2Fmakerworks.local%2Ffiles%2Fcurrent-thumb.webp"
+
+
 def test_makerworks_library_derives_preview_mesh_when_thumbnail_is_missing(monkeypatch) -> None:
     monkeypatch.setenv("MAKERWORKS_BASE_URL", "https://makerworks.local")
 

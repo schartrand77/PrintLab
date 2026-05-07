@@ -1121,19 +1121,25 @@ async def remove_webhook_by_printer(printer_id: str, webhook_id: str, request: R
 
 
 @router.get("/api/sd/models")
-async def sd_models(query: str | None = None) -> dict[str, Any]:
+async def sd_models(query: str | None = None) -> JSONResponse:
     try:
         models = await service_or_404().list_sd_models(query=query)
-        return {"items": models, "count": len(models)}
+        return JSONResponse(
+            {"items": models, "count": len(models)},
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
     except Exception as exc:
         _raise_api_error(exc)
 
 
 @router.get("/api/printers/{printer_id}/sd/models")
-async def sd_models_by_printer(printer_id: str, query: str | None = None) -> dict[str, Any]:
+async def sd_models_by_printer(printer_id: str, query: str | None = None) -> JSONResponse:
     try:
         models = await service_or_404(printer_id).list_sd_models(query=query)
-        return {"items": models, "count": len(models)}
+        return JSONResponse(
+            {"items": models, "count": len(models)},
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
     except Exception as exc:
         _raise_api_error(exc)
 

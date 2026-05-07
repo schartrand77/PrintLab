@@ -1,8 +1,37 @@
 from pathlib import Path
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+import app.routers.api as api_routes
+
 
 def test_makerworks_library_cards_use_proxied_thumbnails() -> None:
     html = Path("app/dashboard.html").read_text(encoding="utf-8")
     makerworks_section = html.split("async function loadMakerworksModels()", 1)[1].split("async function", 1)[0]
 
     assert "item.thumbnail_proxy_url || item.thumbnail_url || placeholderThumb" in makerworks_section
+
+
+def test_sd_model_browser_uses_uncached_fetches() -> None:
+    html = Path("app/dashboard.html").read_text(encoding="utf-8")
+    sd_section = html.split("async function loadSdModels()", 1)[1].split("async function", 1)[0]
+
+    assert 'cache: "no-store"' in sd_section
+
+
+def test_sd_models_api_disables_response_caching(monkeypatch) -> None:
+    class FakeService:
+        async def list_sd_models(self, query: str | None = None):
+            return [{"name": "current.3mf", "path": "/cache/current.3mf"}]
+
+    monkeypatch.setattr(api_routes, "service_or_404", lambda printer_id=None: FakeService())
+    app = FastAPI()
+    app.include_router(api_routes.router)
+    client = TestClient(app)
+
+    response = client.get("/api/printers/printer-1/sd/models")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert response.json()["items"] == [{"name": "current.3mf", "path": "/cache/current.3mf"}]

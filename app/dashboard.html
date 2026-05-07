@@ -2848,7 +2848,7 @@
       const q = (document.getElementById("modelSearch").value || "").trim();
       grid.innerHTML = "<div class='model-meta'>Loading...</div>";
       try {
-        const res = await fetch(`${apiPath("/api/sd/models")}?query=${encodeURIComponent(q)}`);
+        const res = await fetch(`${apiPath("/api/sd/models")}?query=${encodeURIComponent(q)}&_=${Date.now()}`, { cache: "no-store" });
         const data = await res.json();
         const items = data.items || [];
         count.textContent = String(items.length);

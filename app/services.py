@@ -1031,8 +1031,6 @@ class WorksService:
             base_url=str(service_cfg["base_url"]),
         )
         for item in items:
-            if item.get("thumbnail_url"):
-                continue
             thumbnail = thumbs_by_id.get(str(item.get("id") or ""))
             if thumbnail:
                 item["thumbnail_url"] = thumbnail
