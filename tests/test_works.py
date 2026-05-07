@@ -756,6 +756,39 @@ def test_resolve_sd_path_from_internal_plate_path_uses_current_subtask_name() ->
     assert resolved == "/cache/CubeStack_desk_lamp_(no_glue,_no_supports).gcode.3mf"
 
 
+def test_list_sd_models_filters_files_missing_from_sd_card() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+
+    class FakeFtp:
+        def retrlines(self, command: str, callback) -> None:
+            if command == "LIST /cache":
+                callback("-rw-r--r-- 1 user group 123 Mar 09 10:00 current.gcode.3mf")
+            if command == "LIST /":
+                callback("-rw-r--r-- 1 user group 456 Mar 09 10:00 stale.gcode.3mf")
+
+        def size(self, path: str) -> int:
+            if path == "/cache/current.gcode.3mf":
+                return 123
+            raise FileNotFoundError("550 No such file or directory")
+
+        def quit(self) -> None:
+            return None
+
+    class FakeClient:
+        def ftp_connection(self) -> FakeFtp:
+            return FakeFtp()
+
+    service.client = FakeClient()
+
+    models = service._list_sd_models_sync()
+
+    assert [item["path"] for item in models] == ["/cache/current.gcode.3mf"]
+
+
 def test_sd_thumbnail_alias_path_does_not_reuse_stale_alias_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     data_dir = Path("tests/.tmp/thumb-cache")
     data_dir.mkdir(parents=True, exist_ok=True)

@@ -4026,6 +4026,19 @@ class PrinterService:
 
         return f"/{Path(path).name}"
 
+    def _sd_path_exists_sync(self, ftp: Any, path: str) -> bool:
+        size_fn = getattr(ftp, "size", None)
+        if not callable(size_fn):
+            return True
+        try:
+            size_fn(path)
+            return True
+        except Exception as exc:
+            message = str(exc).lower()
+            if "550" in message or "not found" in message or "no such file" in message or "not exist" in message:
+                return False
+            return True
+
     def _list_sd_models_sync(self, query: str | None = None) -> list[dict[str, Any]]:
         if self.client is None:
             raise RuntimeError("Client not initialized.")
@@ -4104,6 +4117,8 @@ class PrinterService:
             if path in seen:
                 return
             seen.add(path)
+            if not self._sd_path_exists_sync(ftp, path):
+                return
 
             if query and query.lower() not in name.lower():
                 return
