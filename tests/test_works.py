@@ -2269,6 +2269,53 @@ def test_youtube_video_snapshot_shows_matched_timelapse_as_ready() -> None:
     assert snapshot["items"][0]["progress_label"] == "Timelapse ready"
 
 
+def test_youtube_video_snapshot_treats_video_id_as_uploaded() -> None:
+    service = PrinterService(
+        config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    service._successful_gcodes = [
+        {
+            "id": "record-1",
+            "model_name": "plate_1",
+            "file_name": "plate_1.gcode",
+            "file_path": "/data/Metadata/plate_1.gcode",
+            "completed_at": "2026-04-02T23:50:05+00:00",
+            "plate_index": 1,
+            "model_key": "plate-1",
+            "youtube": {
+                "uploaded": False,
+                "uploaded_at": "2026-04-03T00:01:00+00:00",
+                "last_attempt_at": "2026-04-03T00:00:00+00:00",
+                "video_id": "video-123",
+                "video_url": "https://www.youtube.com/watch?v=video-123",
+                "path": "/timelapse/video_2026-04-02_14-30-24.mp4",
+                "progress_percent": 15,
+                "progress_label": "Timelapse ready",
+                "progress_stage": "ready",
+            },
+        }
+    ]
+    service._list_timelapse_inventory = lambda: [
+        {
+            "name": "video_2026-04-02_14-30-24.mp4",
+            "path": "/timelapse/video_2026-04-02_14-30-24.mp4",
+            "size": 123,
+            "mtime": service._parse_iso_timestamp("2026-04-02T19:31:00+00:00").timestamp(),
+            "thumbnail_url": None,
+        }
+    ]
+
+    snapshot = service.youtube_videos_snapshot(page=1, page_size=5)
+
+    assert snapshot["connection"]["uploaded_count"] == 1
+    assert snapshot["items"][0]["status"] == "uploaded"
+    assert snapshot["items"][0]["progress_stage"] == "uploaded"
+    assert snapshot["items"][0]["progress_percent"] == 100
+    assert snapshot["items"][0]["progress_label"] == "Uploaded"
+
+
 def test_list_timelapse_inventory_does_not_expose_mp4_thumbnail_endpoint() -> None:
     tmp_path = Path("tests/.tmp/list-timelapse-inventory")
     service = PrinterService(

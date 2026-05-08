@@ -1459,6 +1459,15 @@ class PrinterService:
     def successful_gcodes_snapshot(self) -> list[dict[str, Any]]:
         return list(self._successful_gcodes[:200])
 
+    @staticmethod
+    def _youtube_upload_succeeded(youtube: dict[str, Any]) -> bool:
+        return bool(
+            youtube.get("uploaded")
+            or youtube.get("uploaded_at")
+            or youtube.get("video_id")
+            or youtube.get("video_url")
+        )
+
     def youtube_connection_status(self) -> dict[str, Any]:
         cfg = self._youtube_upload_config()
         youtube_records = [
@@ -1467,7 +1476,7 @@ class PrinterService:
             if (item.get("youtube") or {}).get("progress_stage") != "deleted"
         ]
         latest_uploaded = next(
-            (item for item in youtube_records if (item.get("youtube") or {}).get("uploaded")),
+            (item for item in youtube_records if self._youtube_upload_succeeded(item.get("youtube") or {})),
             None,
         )
         latest_attempt = next(
@@ -1489,7 +1498,7 @@ class PrinterService:
             "ready": bool(cfg["enabled"] and configured),
             "privacy_status": cfg["privacy_status"],
             "category_id": cfg["category_id"],
-            "uploaded_count": sum(1 for item in youtube_records if (item.get("youtube") or {}).get("uploaded")),
+            "uploaded_count": sum(1 for item in youtube_records if self._youtube_upload_succeeded(item.get("youtube") or {})),
             "last_uploaded_at": (latest_uploaded or {}).get("youtube", {}).get("uploaded_at"),
             "last_video_url": (latest_uploaded or {}).get("youtube", {}).get("video_url"),
             "last_attempt_at": (latest_attempt or {}).get("youtube", {}).get("last_attempt_at"),
@@ -1583,7 +1592,7 @@ class PrinterService:
             record_by_timelapse_name[Path(video_path).name.lower()] = record
 
         def display_progress(youtube: dict[str, Any], *, has_timelapse: bool) -> tuple[int, str, str]:
-            if youtube.get("uploaded"):
+            if self._youtube_upload_succeeded(youtube):
                 return 100, "Uploaded", "uploaded"
             if youtube.get("last_error"):
                 return 0, "Upload failed", "failed"
@@ -1619,7 +1628,7 @@ class PrinterService:
             if record and record.get("id"):
                 matched_record_ids.add(str(record.get("id")))
             youtube = (record or {}).get("youtube") or {}
-            status = "uploaded" if youtube.get("uploaded") else ("failed" if youtube.get("last_error") else "new")
+            status = "uploaded" if self._youtube_upload_succeeded(youtube) else ("failed" if youtube.get("last_error") else "new")
             progress_percent, progress_label, progress_stage = display_progress(youtube, has_timelapse=bool(record))
             merged_items.append(
                 {
@@ -1662,7 +1671,7 @@ class PrinterService:
             if path_name and path_name in orphan_timelapse_names:
                 continue
             file_name = str(record.get("file_name") or path_name or "")
-            status = "uploaded" if youtube.get("uploaded") else ("failed" if youtube.get("last_error") else "new")
+            status = "uploaded" if self._youtube_upload_succeeded(youtube) else ("failed" if youtube.get("last_error") else "new")
             progress_percent, progress_label, progress_stage = display_progress(youtube, has_timelapse=bool(path_name))
             merged_items.append(
                 {
