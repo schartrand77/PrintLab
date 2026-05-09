@@ -76,11 +76,6 @@
   <Config Name="Makerworks Attach G-code Method" Target="MAKERWORKS_ATTACH_GCODE_METHOD" Default="POST" Mode="" Description="HTTP method for successful G-code attachment" Type="Variable" Display="advanced" Required="false" Mask="false">POST</Config>
   <Config Name="Makerworks Attach G-code Path Template" Target="MAKERWORKS_ATTACH_GCODE_PATH_TEMPLATE" Default="" Mode="" Description="Path template for attaching successful G-code records" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
 
-  <Config Name="Orderworks Base URL" Target="ORDERWORKS_BASE_URL" Default="" Mode="" Description="Orderworks API base URL" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
-  <Config Name="Orderworks API Key" Target="ORDERWORKS_API_KEY" Default="" Mode="" Description="Orderworks API key" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
-  <Config Name="Orderworks Bearer Token" Target="ORDERWORKS_BEARER_TOKEN" Default="" Mode="" Description="Orderworks bearer token" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
-  <Config Name="Orderworks Auth Header" Target="ORDERWORKS_AUTH_HEADER" Default="X-API-Key" Mode="" Description="Header used for Orderworks API key" Type="Variable" Display="advanced" Required="false" Mask="false">X-API-Key</Config>
-  <Config Name="Orderworks Verify SSL" Target="ORDERWORKS_VERIFY_SSL" Default="true" Mode="" Description="Verify SSL for Orderworks requests" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
 
   <Config Name="Stockworks Base URL" Target="STOCKWORKS_BASE_URL" Default="http://StockWorks:8000" Mode="" Description="Stockworks API base URL. Use the StockWorks container name when all Works containers share makerworks-net." Type="Variable" Display="advanced" Required="false" Mask="false">http://StockWorks:8000</Config>
   <Config Name="Stockworks API Key" Target="STOCKWORKS_API_KEY" Default="" Mode="" Description="Stockworks API key" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>

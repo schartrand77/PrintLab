@@ -187,7 +187,7 @@ class WorksRequest(BaseModel):
     timeout_seconds: float = Field(default=20.0, ge=1.0, le=120.0)
 
 
-class OrderworksPrintJobRequest(BaseModel):
+class PrintJobRequest(BaseModel):
     file_path: str = Field(min_length=1, description="Path to .3mf/.gcode.3mf on printer SD card, e.g. /cache/model.3mf")
     plate_gcode: str = Field(default="Metadata/plate_1.gcode")
     subtask_name: str | None = None
@@ -201,7 +201,7 @@ class OrderworksPrintJobRequest(BaseModel):
     layer_inspect: bool = True
 
 
-class QueuePrintJobRequest(OrderworksPrintJobRequest):
+class QueuePrintJobRequest(PrintJobRequest):
     start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
 
 
@@ -262,6 +262,10 @@ class SubmittedJobQueueRequest(BaseModel):
     flow_cali: bool | None = None
     vibration_cali: bool | None = None
     layer_inspect: bool | None = None
+
+
+class SubmittedJobConnectRequest(BaseModel):
+    printer_id: str = Field(min_length=1, max_length=64)
 
 
 class QueueUpdateRequest(BaseModel):
@@ -328,7 +332,6 @@ class WorksService:
     def __init__(self) -> None:
         self._service_env: dict[str, str] = {
             "makerworks": "MAKERWORKS",
-            "orderworks": "ORDERWORKS",
             "stockworks": "STOCKWORKS",
         }
 
@@ -1459,6 +1462,26 @@ class PrinterService:
     def successful_gcodes_snapshot(self) -> list[dict[str, Any]]:
         return list(self._successful_gcodes[:200])
 
+    def active_submitted_job_snapshot(self) -> dict[str, Any] | None:
+        job_id = str((self._active_job_context or {}).get("job_id") or "").strip()
+        if not job_id:
+            return None
+        try:
+            job = self.submitted_job_record(job_id)
+        except ValueError:
+            return None
+        if str(job.get("status") or "").lower() not in {"queued", "started"}:
+            return None
+        return {
+            "id": job.get("id"),
+            "status": job.get("status"),
+            "source": job.get("source"),
+            "model_name": job.get("model_name"),
+            "file_name": job.get("file_name"),
+            "progress_percent": job.get("progress_percent"),
+            "remaining_minutes": job.get("remaining_minutes"),
+        }
+
     @staticmethod
     def _youtube_upload_succeeded(youtube: dict[str, Any]) -> bool:
         return bool(
@@ -1726,6 +1749,12 @@ class PrinterService:
         if not status:
             return list(self._submitted_jobs[:200])
         target = status.strip().lower()
+        if target == "routing":
+            return [
+                item
+                for item in self._submitted_jobs[:200]
+                if str(item.get("status") or "").lower() in {"queued", "started"}
+            ]
         return [item for item in self._submitted_jobs[:200] if str(item.get("status") or "").lower() == target]
 
     def submitted_job(self, job_id: str) -> dict[str, Any]:
@@ -1799,6 +1828,37 @@ class PrinterService:
         self._append_submitted_job_event(job, status=status, message=message, details=details)
         self._save_submitted_jobs()
         self._schedule_submitted_job_callback(job_id)
+        return copy.deepcopy(job)
+
+    def update_submitted_job_progress(
+        self,
+        job_id: str,
+        *,
+        snapshot: dict[str, Any],
+        current_print: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        job = self.submitted_job(job_id)
+        progress_fields = {
+            "current_print_state": snapshot.get("state"),
+            "progress_percent": snapshot.get("progress_percent"),
+            "remaining_minutes": snapshot.get("remaining_minutes"),
+            "current_layer": snapshot.get("current_layer"),
+            "total_layers": snapshot.get("total_layers"),
+            "file_path": snapshot.get("file_path") or job.get("file_path"),
+            "file_name": snapshot.get("file_name") or job.get("file_name"),
+            "subtask_name": snapshot.get("subtask_name") or job.get("subtask_name"),
+        }
+        if current_print is not None:
+            progress_fields["connected_current_print"] = current_print
+        changed = False
+        for key, value in progress_fields.items():
+            if value is not None and job.get(key) != value:
+                job[key] = value
+                changed = True
+        if changed:
+            job["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._save_submitted_jobs()
+            self._schedule_submitted_job_callback(job_id)
         return copy.deepcopy(job)
 
     def _strip_model_suffix(self, value: str) -> str:
@@ -1939,7 +1999,7 @@ class PrinterService:
                 return candidate
         return None
 
-    def _job_context_from_request(self, request: OrderworksPrintJobRequest, actor: str) -> dict[str, Any]:
+    def _job_context_from_request(self, request: PrintJobRequest, actor: str) -> dict[str, Any]:
         metadata = self._extract_model_metadata(request.file_path, request.subtask_name)
         return {
             "file_path": request.file_path if request.file_path.startswith("/") else f"/{request.file_path}",
@@ -1961,7 +2021,7 @@ class PrinterService:
             subtask_name = str(getattr(job, "subtask_name", "") or "").strip() or None
             state = str(getattr(job, "gcode_state", "") or "").upper()
             metadata = self._extract_model_metadata(file_path or subtask_name or "", subtask_name)
-            return {
+            snapshot = {
                 "state": state,
                 "file_path": file_path,
                 "subtask_name": subtask_name,
@@ -1969,8 +2029,57 @@ class PrinterService:
                 "remaining_minutes": getattr(job, "remaining_time", None),
                 **metadata,
             }
+            current_layer = getattr(job, "current_layer", None)
+            total_layers = getattr(job, "total_layers", None)
+            if current_layer is not None:
+                snapshot["current_layer"] = current_layer
+            if total_layers is not None:
+                snapshot["total_layers"] = total_layers
+            return snapshot
         except Exception:
             return None
+
+    def attach_submitted_job_to_current_print(self, job: dict[str, Any], current_print: dict[str, Any], *, actor: str) -> None:
+        file_path = str(current_print.get("file") or current_print.get("file_path") or job.get("file_path") or "").strip()
+        subtask_name = str(current_print.get("subtask_name") or job.get("subtask_name") or "").strip() or None
+        file_name = str(job.get("file_name") or "").strip()
+        if not file_name and file_path:
+            file_name = Path(file_path).name
+        metadata = self._extract_model_metadata(file_path or file_name, subtask_name)
+        started_at = str(job.get("started_at") or "").strip() or datetime.now(timezone.utc).isoformat()
+        self._active_job_context = {
+            **metadata,
+            "job_id": job.get("id"),
+            "source": job.get("source"),
+            "source_job_id": job.get("source_job_id"),
+            "source_order_id": job.get("source_order_id"),
+            "model_id": job.get("model_id") or metadata.get("model_id"),
+            "model_name": job.get("model_name") or metadata.get("model_name"),
+            "model_url": job.get("model_url"),
+            "download_url": job.get("download_url"),
+            "file_path": file_path,
+            "file_name": file_name or metadata.get("file_name"),
+            "plate_gcode": job.get("plate_gcode"),
+            "subtask_name": subtask_name,
+            "actor": actor,
+            "started_at": started_at,
+            "connected_current_print": dict(current_print),
+        }
+        self._last_job_state = str(current_print.get("state") or current_print.get("gcode_state") or self._last_job_state or "").upper()
+        self.update_submitted_job_progress(
+            str(job.get("id") or ""),
+            snapshot={
+                "state": self._last_job_state,
+                "file_path": file_path,
+                "file_name": file_name or metadata.get("file_name"),
+                "subtask_name": subtask_name,
+                "progress_percent": current_print.get("progress_percent"),
+                "remaining_minutes": current_print.get("remaining_minutes"),
+                "current_layer": current_print.get("current_layer"),
+                "total_layers": current_print.get("total_layers"),
+            },
+            current_print=current_print,
+        )
 
     def _build_completion_record(self, snapshot: dict[str, Any], completed_at: str) -> dict[str, Any]:
         context = self._active_job_context or {}
@@ -3021,6 +3130,12 @@ class PrinterService:
             "start_at": job.get("start_at"),
             "started_at": job.get("started_at"),
             "completed_at": job.get("completed_at"),
+            "current_print_state": job.get("current_print_state"),
+            "progress_percent": job.get("progress_percent"),
+            "remaining_minutes": job.get("remaining_minutes"),
+            "current_layer": job.get("current_layer"),
+            "total_layers": job.get("total_layers"),
+            "connected_current_print": job.get("connected_current_print"),
             "last_error": job.get("last_error"),
             "metadata": job.get("metadata") or {},
             "history": job.get("history") or [],
@@ -3052,7 +3167,11 @@ class PrinterService:
 
         callback = job.setdefault("callback", {})
         current_status = str(job.get("status") or "").strip().lower()
-        if callback.get("delivered_status") == current_status and not force:
+        current_fingerprint = "|".join(
+            str(job.get(key) or "")
+            for key in ("status", "progress_percent", "remaining_minutes", "current_layer", "total_layers", "completed_at", "last_error")
+        )
+        if callback.get("delivered_fingerprint") == current_fingerprint and not force:
             return job
 
         path = cfg["path_template"].format(
@@ -3080,6 +3199,7 @@ class PrinterService:
             callback.update(
                 {
                     "delivered_status": current_status,
+                    "delivered_fingerprint": current_fingerprint,
                     "last_delivered_at": datetime.now(timezone.utc).isoformat(),
                     "last_error": None,
                     "status_code": result.get("status_code"),
@@ -3533,6 +3653,18 @@ class PrinterService:
             **context,
             **updates,
         }
+        if context.get("connected_current_print"):
+            self._active_job_context["connected_current_print"] = {
+                **dict(context.get("connected_current_print") or {}),
+                **updates,
+            }
+        job_id = str(self._active_job_context.get("job_id") or "").strip()
+        if job_id:
+            self.update_submitted_job_progress(
+                job_id,
+                snapshot=self._active_job_context,
+                current_print=self._active_job_context.get("connected_current_print") if isinstance(self._active_job_context.get("connected_current_print"), dict) else None,
+            )
 
     async def _monitor_print_jobs(self) -> None:
         while True:
@@ -4586,7 +4718,7 @@ class PrinterService:
         except Exception:
             return {"loaded_filament": None, "remaining_filament": []}
 
-    async def start_orderworks_print_job(self, request: OrderworksPrintJobRequest, actor: str = "dashboard") -> dict[str, Any]:
+    async def start_print_job(self, request: PrintJobRequest, actor: str = "dashboard") -> dict[str, Any]:
         if self.client is None:
             raise RuntimeError("Client not initialized.")
 
@@ -4620,7 +4752,7 @@ class PrinterService:
 
         ok = self.client.publish(command)
         self._active_job_context = self._job_context_from_request(request, actor)
-        self._mark_event("event_orderworks_print_submit")
+        self._mark_event("event_print_submit")
         self._record_timeline(
             "print_submit",
             f"Submitted print job for {Path(ftp_path).name}.",
@@ -4814,8 +4946,8 @@ class PrinterService:
 
                 due_item["last_attempt_at"] = datetime.now(timezone.utc).isoformat()
                 self._save_queue()
-                request = OrderworksPrintJobRequest(**{k: v for k, v in due_item.items() if k in OrderworksPrintJobRequest.model_fields})
-                result = await self.start_orderworks_print_job(request, actor=f"queue:{due_item.get('actor') or 'system'}")
+                request = PrintJobRequest(**{k: v for k, v in due_item.items() if k in PrintJobRequest.model_fields})
+                result = await self.start_print_job(request, actor=f"queue:{due_item.get('actor') or 'system'}")
                 if result.get("submitted"):
                     if due_item.get("job_id"):
                         if self._active_job_context is None:
@@ -5001,6 +5133,7 @@ class PrinterService:
                 "queue": queue,
                 "timeline": self.timeline_snapshot()[:8],
                 "successful_gcodes": self.successful_gcodes_snapshot()[:8],
+                "active_submitted_job": self.active_submitted_job_snapshot(),
                 "control_presets": self.presets_snapshot(),
                 "alert_rules": self.alert_rules_snapshot(),
                 "webhooks": self.webhooks_snapshot(),
@@ -5931,6 +6064,8 @@ class PrintJobManager:
             raise ValueError("Only MakerWorks submitted jobs can be queued from the routing board.")
         if job.get("queue_item_id"):
             return self._job_response(job)
+        if job.get("routing_hold"):
+            raise ValueError("MakerWorks routing holds must be manually sliced and connected to the current printer job.")
 
         target_printer = self._printer_manager.get(printer_id)
         model_id = str(job.get("model_id") or "").strip()
@@ -6023,6 +6158,60 @@ class PrintJobManager:
             f"Queued routed MakerWorks job for {source_item.get('name') or model_id}.",
             actor=actor,
             details={"job_id": job_id, "queue_item_id": queue_item.get("id"), "model_id": source_item.get("id")},
+        )
+        return self._job_response(updated)
+
+    async def connect_submitted_job_to_current_print(
+        self,
+        job_id: str,
+        *,
+        printer_id: str,
+        actor: str = "dashboard",
+    ) -> dict[str, Any]:
+        owner, job = self._find_submitted_job_owner(job_id)
+        if str(job.get("source") or "").lower() != "makerworks":
+            raise ValueError("Only MakerWorks submitted jobs can be connected to a current printer job.")
+        if job.get("queue_item_id"):
+            raise ValueError("Submitted job is already connected to a PrintLab queue item.")
+
+        target_printer = self._printer_manager.get(printer_id)
+        state = await target_printer.state()
+        if not state.get("connected"):
+            raise ValueError(f"Printer {printer_id} is not connected.")
+        if not target_printer.job_busy():
+            raise ValueError(f"Printer {printer_id} is not currently printing.")
+
+        current_print = dict(state.get("job") or {})
+        file_path = str(current_print.get("file") or current_print.get("file_path") or "").strip() or None
+        file_name = str(current_print.get("subtask_name") or "").strip()
+        if not file_name and file_path:
+            file_name = Path(file_path).name
+        if not file_name:
+            file_name = str(current_print.get("name") or current_print.get("job_name") or "Current printer job")
+
+        updated = owner.update_submitted_job(
+            job_id,
+            status="started",
+            message=f"Connected MakerWorks job to current print on {target_printer.display_name}.",
+            details={"printer_id": printer_id, "current_print": current_print},
+            extra={
+                "printer_id": target_printer.printer_id,
+                "printer_name": target_printer.display_name,
+                "queue_item_id": None,
+                "file_path": file_path,
+                "file_name": file_name,
+                "routing_hold": False,
+                "connected_current_print": current_print,
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        if hasattr(target_printer, "attach_submitted_job_to_current_print"):
+            target_printer.attach_submitted_job_to_current_print(updated, current_print, actor=actor)
+        target_printer._record_timeline(
+            "job_connect",
+            f"Connected MakerWorks job {job_id} to current print.",
+            actor=actor,
+            details={"job_id": job_id, "printer_id": printer_id, "current_print": current_print},
         )
         return self._job_response(updated)
 

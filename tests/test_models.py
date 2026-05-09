@@ -167,7 +167,7 @@ def test_render_makerworks_routing_page_contains_board_layout() -> None:
     assert "Selected left, then connect right." not in html
     assert "Select left, then connect right." not in html
     assert "/api/works/makerworks/jobs" in html
-    assert "/api/jobs?status=queued" in html
+    assert "/api/jobs?status=routing" in html
     assert "/api/queue/" in html
     assert "wire-live" in html
     assert "@keyframes wireFlow" in html
@@ -189,6 +189,8 @@ def test_render_makerworks_routing_page_contains_board_layout() -> None:
     assert "printerGlowClass" in html
     assert "printer-open" in html
     assert "printer-running" in html
+    assert "printer-current-print" in html
+    assert "active_submitted_job" in html
     assert ">Up<" in html
     assert ">Down<" in html
     assert ">Delete<" in html

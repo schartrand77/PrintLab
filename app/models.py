@@ -45,7 +45,7 @@ class WorksRequest(BaseModel):
     timeout_seconds: float = Field(default=20.0, ge=1.0, le=120.0)
 
 
-class OrderworksPrintJobRequest(BaseModel):
+class PrintJobRequest(BaseModel):
     file_path: str = Field(min_length=1, description="Path to .3mf/.gcode.3mf on printer SD card, e.g. /cache/model.3mf")
     plate_gcode: str = Field(default="Metadata/plate_1.gcode")
     subtask_name: str | None = None
@@ -59,7 +59,7 @@ class OrderworksPrintJobRequest(BaseModel):
     layer_inspect: bool = True
 
 
-class QueuePrintJobRequest(OrderworksPrintJobRequest):
+class QueuePrintJobRequest(PrintJobRequest):
     start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
 
 

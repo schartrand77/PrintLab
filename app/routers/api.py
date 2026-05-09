@@ -31,11 +31,12 @@ from app.services import (
     MakerworksQueueJobRequest,
     MakerworksSubmitError,
     MakerworksSubmitJobRequest,
-    OrderworksPrintJobRequest,
     PrinterNameRequest,
+    PrintJobRequest,
     QueuePrintJobRequest,
     QueueReorderRequest,
     QueueUpdateRequest,
+    SubmittedJobConnectRequest,
     SubmittedJobQueueRequest,
     SuccessfulGcodeSyncRequest,
     TemperatureRequest,
@@ -176,6 +177,7 @@ async def list_printers(request: Request) -> dict[str, Any]:
         queue = state.get("queue") or {}
         health = state.get("health") or {}
         active_alerts = state.get("active_alerts") or []
+        active_submitted_job = state.get("active_submitted_job")
         items.append(
             {
                 "id": entry["id"],
@@ -199,6 +201,7 @@ async def list_printers(request: Request) -> dict[str, Any]:
                     "count": queue.get("count", 0),
                     "next_item": queue.get("next_item"),
                 },
+                "active_submitted_job": active_submitted_job if isinstance(active_submitted_job, dict) else None,
                 "health": {
                     "score": health.get("score"),
                 },
@@ -578,6 +581,16 @@ async def queue_submitted_job(job_id: str, request: Request, payload: SubmittedJ
         _raise_api_error(exc)
 
 
+@router.post("/api/jobs/{job_id}/connect-current-print")
+async def connect_submitted_job_to_current_print(job_id: str, request: Request, payload: SubmittedJobConnectRequest) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        item = await job_manager.connect_submitted_job_to_current_print(job_id, printer_id=payload.printer_id, actor=actor_from_request(request))
+        return {"ok": True, "item": item}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
 @router.get("/api/printers/{printer_id}/jobs")
 async def list_jobs_by_printer(printer_id: str, status: str | None = None) -> dict[str, Any]:
     try:
@@ -610,20 +623,20 @@ async def sync_job_by_printer(
         _raise_api_error(exc)
 
 
-@router.post("/api/works/orderworks/print-job")
-async def orderworks_print_job(request: Request, payload: OrderworksPrintJobRequest, printer_id: str | None = None) -> dict[str, Any]:
+@router.post("/api/print-job")
+async def print_job(request: Request, payload: PrintJobRequest, printer_id: str | None = None) -> dict[str, Any]:
     _require_operator(request)
     try:
-        return await service_or_404(printer_id).start_orderworks_print_job(payload, actor=actor_from_request(request))
+        return await service_or_404(printer_id).start_print_job(payload, actor=actor_from_request(request))
     except Exception as exc:
         _raise_api_error(exc)
 
 
-@router.post("/api/printers/{printer_id}/works/orderworks/print-job")
-async def orderworks_print_job_by_printer(printer_id: str, request: Request, payload: OrderworksPrintJobRequest) -> dict[str, Any]:
+@router.post("/api/printers/{printer_id}/print-job")
+async def print_job_by_printer(printer_id: str, request: Request, payload: PrintJobRequest) -> dict[str, Any]:
     _require_operator(request)
     try:
-        return await service_or_404(printer_id).start_orderworks_print_job(payload, actor=actor_from_request(request))
+        return await service_or_404(printer_id).start_print_job(payload, actor=actor_from_request(request))
     except Exception as exc:
         _raise_api_error(exc)
 

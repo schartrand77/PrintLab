@@ -2604,7 +2604,7 @@
     async function printModelNow(filePath) {
       const payload = currentQueuePayload(filePath);
       delete payload.start_at;
-      await post("/api/works/orderworks/print-job", payload);
+      await post("/api/print-job", payload);
     }
 
     async function removeQueueItem(itemId) {

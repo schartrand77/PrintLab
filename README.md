@@ -77,7 +77,7 @@ Interactive API docs are published at:
 - `POST /api/actions/temperature` with `{"target":"heatbed|nozzle","value":0-320}`
 - `POST /api/printers/{printer_id}/actions/...` (printer-scoped equivalents for all action endpoints)
 - `GET /api/works/services`
-- `GET /api/works/{makerworks|orderworks|stockworks}/health?path=/health`
+- `GET /api/works/{makerworks|stockworks}/health?path=/health`
 - `GET /api/works/makerworks/library`
 - `GET /api/works/makerworks/library/{model_id}`
 - `POST /api/works/makerworks/preflight`
@@ -87,18 +87,22 @@ Interactive API docs are published at:
 - `GET /api/jobs`
 - `GET /api/jobs/{job_id}`
 - `POST /api/jobs/{job_id}/sync-makerworks`
+- `POST /api/jobs/{job_id}/connect-current-print`
+  connects a MakerWorks queued job to the print already running on the selected printer after manual slicing/start.
 - `GET /api/printers/{printer_id}/jobs`
 - `GET /api/printers/{printer_id}/jobs/{job_id}`
 - `POST /api/printers/{printer_id}/jobs/{job_id}/sync-makerworks`
-- `POST /api/works/{makerworks|orderworks|stockworks}/request`
+- `POST /api/works/{makerworks|stockworks}/request`
   with:
   `{"method":"GET|POST|PUT|PATCH|DELETE","path":"/v1/resource","query":{},"body":{},"headers":{},"timeout_seconds":20}`
-- `POST /api/works/orderworks/print-job`
+- `POST /api/print-job`
   with:
   `{"file_path":"/cache/model.3mf","plate_gcode":"Metadata/plate_1.gcode","use_ams":true,"ams_mapping":[0]}`
   (optional query: `?printer_id={printer_id}`)
 - `GET /api/printers/{printer_id}/works/...`
-  printer-scoped equivalents for `health`, `request`, MakerWorks library browsing, and `orderworks/print-job`
+  printer-scoped equivalents for `health`, `request`, and MakerWorks library browsing
+- `POST /api/printers/{printer_id}/print-job`
+  printer-scoped print submission for an already sliced/staged file.
 - `GET /api/successful-gcodes`
 - `GET /api/printers/{printer_id}/successful-gcodes`
 - `POST /api/successful-gcodes/{record_id}/sync-makerworks`
@@ -117,7 +121,6 @@ Configure each external system in `.env`:
   `CONVERSION_MAX_UPLOAD_MB` controls the per-file upload limit for the conversion page and API. Default: `200`.
 - MakerWorks library normalization:
   `MAKERWORKS_LIBRARY_LIST_PATH`, `MAKERWORKS_LIBRARY_DETAIL_PATH_TEMPLATE`, `MAKERWORKS_LIBRARY_SEARCH_PARAM`, `MAKERWORKS_LIBRARY_PAGE_PARAM`, `MAKERWORKS_LIBRARY_PAGE_SIZE_PARAM`, `MAKERWORKS_LIBRARY_PAGE_SIZE`, `MAKERWORKS_LIBRARY_ITEMS_PATH`, `MAKERWORKS_LIBRARY_TOTAL_PATH`, `MAKERWORKS_LIBRARY_ID_PATH`, `MAKERWORKS_LIBRARY_NAME_PATH`, `MAKERWORKS_LIBRARY_SUMMARY_PATH`, `MAKERWORKS_LIBRARY_DESCRIPTION_PATH`, `MAKERWORKS_LIBRARY_THUMBNAIL_PATH`, `MAKERWORKS_LIBRARY_THUMBS_PATH`, `MAKERWORKS_LIBRARY_MODEL_URL_PATH`, `MAKERWORKS_LIBRARY_DOWNLOAD_URL_PATH`, `MAKERWORKS_LIBRARY_AUTHOR_PATH`, `MAKERWORKS_LIBRARY_TAGS_PATH`, `MAKERWORKS_LIBRARY_FILES_PATH`, `MAKERWORKS_LIBRARY_CREATED_AT_PATH`, `MAKERWORKS_LIBRARY_UPDATED_AT_PATH`
-- `ORDERWORKS_BASE_URL`, `ORDERWORKS_API_KEY`, `ORDERWORKS_BEARER_TOKEN`, `ORDERWORKS_AUTH_HEADER`, `ORDERWORKS_VERIFY_SSL`, `ORDERWORKS_ALLOWED_PATHS`, `ORDERWORKS_ALLOWED_METHODS`
 - `STOCKWORKS_BASE_URL`, `STOCKWORKS_API_KEY`, `STOCKWORKS_BEARER_TOKEN`, `STOCKWORKS_AUTH_HEADER`, `STOCKWORKS_VERIFY_SSL`, `STOCKWORKS_ALLOWED_PATHS`, `STOCKWORKS_ALLOWED_METHODS`
 
 Auth behavior:

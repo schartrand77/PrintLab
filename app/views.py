@@ -1482,6 +1482,7 @@ def render_makerworks_routing_html() -> str:
       border-color: rgba(47,155,101,.55);
       box-shadow: inset 0 -18px 30px rgba(47,155,101,.18), 0 16px 34px rgba(47,155,101,.24);
     }
+    .printer-current-print { border-color: rgba(47,155,101,.72); box-shadow: inset 0 -18px 32px rgba(47,155,101,.24), 0 16px 34px rgba(47,155,101,.24); }
     .printer-open { box-shadow: inset 0 -14px 24px rgba(47,155,101,.16), 0 12px 28px rgba(47,155,101,.12); }
     .printer-running { box-shadow: inset 0 -14px 24px rgba(210,68,68,.22), 0 12px 28px rgba(210,68,68,.14); border-color: rgba(210,68,68,.42); }
     .node-title { font-size:15px; font-weight:800; line-height:1.15; }
@@ -1549,7 +1550,7 @@ def render_makerworks_routing_html() -> str:
         <button class="hamburger" type="button" aria-label="Open menu" onclick="openSidebar()"><div class="hamburger-lines"><span></span></div></button>
         <div>
         <h1 style="margin:0 0 8px;">MakerWorks Routing Board</h1>
-        <p style="margin:0;color:var(--muted);max-width:760px;">Models stay in the left queue column and printers stay in the right column. Each column scrolls independently, and cards can collapse to a single summary row.</p>
+        <p style="margin:0;color:var(--muted);max-width:760px;">MakerWorks jobs stay in the left queue column until the model is manually sliced and started. Connect the queued job to the active print on the selected printer.</p>
         </div>
       </div>
       <div class="top-actions">
@@ -1778,6 +1779,7 @@ def render_makerworks_routing_html() -> str:
     }
     function printerGlowClass(printer) {
       const state = String(printer?.job?.state || '').toLowerCase();
+      if (printer?.active_submitted_job?.id) return 'printer-current-print';
       if (['running', 'printing', 'started', 'busy', 'processing'].includes(state)) return 'printer-running';
       if (printer?.connected) return 'printer-open';
       return '';
@@ -1924,14 +1926,14 @@ def render_makerworks_routing_html() -> str:
         showNotice(`Failed to resend callback: ${String(error?.message || error)}`);
       }
     }
-    async function queueSubmittedJob(nodeId, jobId) {
+    async function connectSubmittedJobToCurrentPrint(nodeId, jobId) {
       const printerId = draftAssignments[nodeId];
       if (!printerId) {
         showNotice('Connect the job to a printer first.');
         return;
       }
       try {
-        const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/queue`, {
+        const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/connect-current-print`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ printer_id: printerId }),
@@ -1941,9 +1943,9 @@ def render_makerworks_routing_html() -> str:
         delete draftAssignments[nodeId];
         saveDraftAssignments();
         await refreshBoard();
-        showNotice(`${data.item?.model_name || 'Queued job'} queued to ${printers.find((printer) => printer.id === printerId)?.name || printerId}.`);
+        showNotice(`${data.item?.model_name || 'Queued job'} connected to current print on ${printers.find((printer) => printer.id === printerId)?.name || printerId}.`);
       } catch (error) {
-        showNotice(`Failed to queue routed job: ${String(error?.message || error)}`);
+        showNotice(`Failed to connect routed job: ${String(error?.message || error)}`);
       }
     }
     function decodeRoutingItem(encoded) {
@@ -2076,7 +2078,8 @@ def render_makerworks_routing_html() -> str:
             : '';
           const encodedItem = encodeURIComponent(JSON.stringify(item));
           const hasQueueItem = !isChosen && !!item.queue_item_id;
-          const canQueueSubmitted = !isChosen && !!assignedPrinter && !item.queue_item_id;
+          const isStartedSubmitted = !isChosen && String(item.status || '').toLowerCase() === 'started';
+          const canConnectSubmitted = !isChosen && !!assignedPrinter && !item.queue_item_id && !isStartedSubmitted;
           return `
             <article id="${escapeHtml(entry.id)}" class="node routeable ${activeLeft === entry.id ? 'selected' : ''} ${assignedPrinter ? 'connected' : ''} ${queuedJobStateClass}" onclick="selectLeftNode('${escapeHtml(entry.id)}')">
               <span class="drag-handle right" title="Drag to printer" onpointerdown="startWireDrag('${escapeHtml(entry.id)}', event)">
@@ -2096,7 +2099,7 @@ def render_makerworks_routing_html() -> str:
               ` : ''}
               <div class="node-actions">
                 ${assignedPrinter ? `<button class="btn secondary" type="button" onclick="event.stopPropagation(); disconnectPrinter('${escapeHtml(entry.id)}')">Disconnect Printer</button>` : (isChosen || !item.printer_id ? `<button class="btn secondary" type="button" disabled>No Printer Connected</button>` : `<a class="link-btn" href="/printer/${encodeURIComponent(item.printer_id || '')}" onclick="event.stopPropagation();">Open</a>`)}
-                ${isChosen ? `<button class="btn" type="button" onclick="event.stopPropagation(); submitChosenModel('${escapeHtml(entry.id)}')" ${assignedPrinter ? '' : 'disabled'}>Queue Now</button>` : (canQueueSubmitted ? `<button class="btn" type="button" onclick="event.stopPropagation(); queueSubmittedJob('${escapeHtml(entry.id)}', '${escapeHtml(String(item.id || ''))}')">Queue Now</button>` : (hasQueueItem ? `<button class="btn secondary" type="button" onclick="event.stopPropagation(); deleteQueuedJob('${escapeHtml(entry.id)}', '${escapeHtml(String(item.queue_item_id || ''))}', '${escapeHtml(String(item.model_name || item.file_name || item.id || 'Queued job'))}')">Delete Queue</button>` : `<button class="btn secondary" type="button" disabled>Connect Printer</button>`))}
+                ${isChosen ? `<button class="btn" type="button" onclick="event.stopPropagation(); submitChosenModel('${escapeHtml(entry.id)}')" ${assignedPrinter ? '' : 'disabled'}>Queue Now</button>` : (isStartedSubmitted ? `<button class="btn secondary" type="button" disabled>Current Print Synced</button>` : (canConnectSubmitted ? `<button class="btn" type="button" onclick="event.stopPropagation(); connectSubmittedJobToCurrentPrint('${escapeHtml(entry.id)}', '${escapeHtml(String(item.id || ''))}')">Connect Current Print</button>` : (hasQueueItem ? `<button class="btn secondary" type="button" onclick="event.stopPropagation(); deleteQueuedJob('${escapeHtml(entry.id)}', '${escapeHtml(String(item.queue_item_id || ''))}', '${escapeHtml(String(item.model_name || item.file_name || item.id || 'Queued job'))}')">Delete Queue</button>` : `<button class="btn secondary" type="button" disabled>Connect Printer</button>`)))}
               </div>
               ${isChosen ? '' : `<div class="node-actions queued-routing-row"><button class="btn secondary" type="button" onclick="event.stopPropagation(); sendQueuedJobToSlicer('${escapeHtml(encodedItem)}')">Send to slicer</button><button class="btn secondary" type="button" onclick="event.stopPropagation(); importQueuedRevision('${escapeHtml(encodedItem)}')">Import revision</button></div>`}
               ${isChosen ? '' : `<div class="node-actions queued-meta-row"><button class="btn secondary" type="button" onclick="event.stopPropagation(); syncSubmittedJob('${escapeHtml(String(item.id || ''))}')">Resend Callback</button><span class="node-meta path">${escapeHtml(String(item.file_path || ''))}</span></div>`}
@@ -2111,7 +2114,7 @@ def render_makerworks_routing_html() -> str:
           <span class="dot left"></span>
           <div class="node-title">${escapeHtml(printer.name)}</div>
           <div class="node-meta">${escapeHtml(printer.device_type || 'Printer')} • ${escapeHtml(printer.connected ? 'Connected' : 'Offline')}</div>
-          <div class="node-meta">${escapeHtml(`Queue ${Number(printer.queue?.count || 0)} • ${String(printer.job?.state || 'Ready')}`)}</div>
+          <div class="node-meta">${escapeHtml(printer.active_submitted_job?.id ? `Synced current print • ${printer.active_submitted_job.model_name || printer.active_submitted_job.file_name || printer.active_submitted_job.id}` : `Queue ${Number(printer.queue?.count || 0)} • ${String(printer.job?.state || 'Ready')}`)}</div>
           <div class="node-actions">
             <a class="link-btn" href="/printer/${encodeURIComponent(printer.id)}" onclick="event.stopPropagation();">Open Dashboard</a>
             <button class="btn secondary" type="button" onclick="event.stopPropagation(); connectToPrinter('${escapeHtml(printer.id)}')">${activeLeft ? 'Connect' : 'Select Left Node First'}</button>
@@ -2125,7 +2128,7 @@ def render_makerworks_routing_html() -> str:
     async function refreshBoard() {
       const previousSubmittedIds = new Set(submittedJobs.map((item) => String(item.id || '')));
       chosenModels = getChosenModels();
-      const [printerRes, jobRes] = await Promise.all([fetch('/api/printers'), fetch('/api/jobs?status=queued')]);
+      const [printerRes, jobRes] = await Promise.all([fetch('/api/printers'), fetch('/api/jobs?status=routing')]);
       const printerData = await printerRes.json();
       const jobData = await jobRes.json();
       if (!printerRes.ok) throw new Error(printerData?.detail || `HTTP ${printerRes.status}`);

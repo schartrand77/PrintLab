@@ -100,6 +100,7 @@ class _FakePrinter:
         connected: bool,
         busy: bool,
         queue_count: int,
+        current_job: dict[str, object] | None = None,
         device_type: str = "x1c",
         loaded_filament: dict[str, object] | None = None,
         temperatures: dict[str, object] | None = None,
@@ -109,17 +110,19 @@ class _FakePrinter:
         self._connected = connected
         self._busy = busy
         self._queue_count = queue_count
+        self._current_job = current_job
         self._device_type = device_type
         self._loaded_filament = loaded_filament
         self._temperatures = temperatures or {}
         self.created_jobs: list[dict[str, object]] = []
+        self.connected_contexts: list[dict[str, object]] = []
 
     async def state(self) -> dict[str, object]:
         return {
             "connected": self._connected,
             "queue": {"count": self._queue_count},
             "printer": {"device_type": self._device_type},
-            "job": {"remaining_minutes": 45 if self._busy else 0},
+            "job": self._current_job or {"state": "RUNNING" if self._busy else "IDLE", "remaining_minutes": 45 if self._busy else 0},
             "health": {"score": 90 if self._connected else 0},
             "temperatures": self._temperatures,
         }
@@ -167,6 +170,13 @@ class _FakePrinter:
                 return dict(job)
         raise ValueError(f"Unknown submitted job: {job_id}")
 
+    def submitted_jobs_snapshot(self, *, status: str | None = None) -> list[dict[str, object]]:
+        if status == "routing":
+            return [dict(job) for job in self.created_jobs if str(job.get("status") or "").lower() in {"queued", "started"}]
+        if status:
+            return [dict(job) for job in self.created_jobs if str(job.get("status") or "").lower() == status]
+        return [dict(job) for job in self.created_jobs]
+
     def update_submitted_job(self, job_id: str, *, status: str, message: str, details=None, extra=None) -> dict[str, object]:
         for job in self.created_jobs:
             if job.get("id") == job_id:
@@ -178,6 +188,9 @@ class _FakePrinter:
 
     def _record_timeline(self, *_args, **_kwargs) -> None:
         return None
+
+    def attach_submitted_job_to_current_print(self, job: dict[str, object], current_print: dict[str, object], *, actor: str) -> None:
+        self.connected_contexts.append({"job": dict(job), "current_print": dict(current_print), "actor": actor})
 
 
 class _FakePrinterManager:
@@ -261,7 +274,7 @@ def test_print_job_manager_route_only_submission_waits_for_routing() -> None:
     assert printer._queue_count == 0
 
 
-def test_print_job_manager_queues_route_only_submission_after_assignment() -> None:
+def test_print_job_manager_rejects_queueing_route_only_submission_after_assignment() -> None:
     printer = _FakePrinter("printer-1", connected=True, busy=False, queue_count=0)
     manager = PrintJobManager(_FakePrinterManager([printer]), _FakeWorksService())
     held = asyncio.run(
@@ -277,14 +290,89 @@ def test_print_job_manager_queues_route_only_submission_after_assignment() -> No
         )
     )
 
-    result = asyncio.run(manager.queue_submitted_job(str(held["id"]), printer_id="printer-1", actor="operator"))
+    with pytest.raises(ValueError, match="manually sliced and connected"):
+        asyncio.run(manager.queue_submitted_job(str(held["id"]), printer_id="printer-1", actor="operator"))
 
-    assert result["status"] == "queued"
+    assert printer._queue_count == 0
+
+
+def test_print_job_manager_connects_route_only_submission_to_current_busy_print_without_queueing() -> None:
+    printer = _FakePrinter(
+        "printer-1",
+        connected=True,
+        busy=True,
+        queue_count=0,
+        current_job={
+            "state": "RUNNING",
+            "file": "/cache/already-sliced.gcode.3mf",
+            "subtask_name": "already-sliced.gcode.3mf",
+            "progress_percent": 32,
+            "remaining_minutes": 61,
+        },
+    )
+    manager = PrintJobManager(_FakePrinterManager([printer]), _FakeWorksService())
+    held = asyncio.run(
+        manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(
+                model_id="widget-1",
+                idempotency_key="mw-route-only",
+                source_job_id="source-job-1",
+                source_order_id="source-order-1",
+                route_only=True,
+            ),
+            actor="makerworks",
+        )
+    )
+
+    result = asyncio.run(manager.connect_submitted_job_to_current_print(str(held["id"]), printer_id="printer-1", actor="operator"))
+
+    assert result["status"] == "started"
     assert result["printer_id"] == "printer-1"
-    assert result["queue_item_id"] == "queue-1"
-    assert result["file_path"] == "/cache/makerworks-widget-1-Widget.3mf"
+    assert result["queue_item_id"] is None
+    assert result["file_path"] == "/cache/already-sliced.gcode.3mf"
+    assert result["file_name"] == "already-sliced.gcode.3mf"
     assert result["routing_hold"] is False
-    assert printer._queue_count == 1
+    assert result["connected_current_print"]["state"] == "RUNNING"
+    assert printer.connected_contexts[0]["job"]["id"] == held["id"]
+    assert printer.connected_contexts[0]["current_print"]["remaining_minutes"] == 61
+    assert printer._queue_count == 0
+
+
+def test_print_job_manager_routing_status_includes_connected_active_jobs_until_terminal() -> None:
+    printer = _FakePrinter(
+        "printer-1",
+        connected=True,
+        busy=True,
+        queue_count=0,
+        current_job={
+            "state": "RUNNING",
+            "file": "/cache/already-sliced.gcode.3mf",
+            "subtask_name": "already-sliced.gcode.3mf",
+            "remaining_minutes": 61,
+        },
+    )
+    manager = PrintJobManager(_FakePrinterManager([printer]), _FakeWorksService())
+    held = asyncio.run(
+        manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(
+                model_id="widget-1",
+                idempotency_key="mw-route-only",
+                source_job_id="source-job-1",
+                source_order_id="source-order-1",
+                route_only=True,
+            ),
+            actor="makerworks",
+        )
+    )
+
+    asyncio.run(manager.connect_submitted_job_to_current_print(str(held["id"]), printer_id="printer-1", actor="operator"))
+
+    routing_items = manager.list_jobs(status="routing")
+    assert [item["id"] for item in routing_items] == [held["id"]]
+
+    printer.update_submitted_job(str(held["id"]), status="completed", message="Done.")
+
+    assert manager.list_jobs(status="routing") == []
 
 
 def test_print_job_manager_reuses_existing_idempotent_job_across_printers() -> None:
