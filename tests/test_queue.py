@@ -274,6 +274,41 @@ def test_print_job_manager_route_only_submission_waits_for_routing() -> None:
     assert printer._queue_count == 0
 
 
+def test_print_job_manager_route_only_accepts_non_queueable_assets_for_routing() -> None:
+    printer = _FakePrinter("printer-1", connected=True, busy=False, queue_count=0)
+
+    class _StlWorksService(_FakeWorksService):
+        async def makerworks_library_item(self, model_id: str, *, include_raw: bool = False) -> dict[str, object]:
+            result = await super().makerworks_library_item(model_id, include_raw=include_raw)
+            result["item"]["download_url"] = "https://makerworks.local/files/widget.stl"
+            result["item"]["file_type"] = "stl"
+            result["item"]["queue_supported"] = False
+            result["item"]["printer_handoff_ready"] = True
+            result["item"]["printer_handoff_note"] = "Model assets are available, but this file type is not queueable yet."
+            return result
+
+    manager = PrintJobManager(_FakePrinterManager([printer]), _StlWorksService())
+
+    result = asyncio.run(
+        manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(
+                model_id="widget-1",
+                idempotency_key="mw-route-only-stl",
+                source_job_id="source-job-1",
+                source_order_id="source-order-1",
+                route_only=True,
+            ),
+            actor="makerworks",
+        )
+    )
+
+    assert result["status"] == "queued"
+    assert result["routing_hold"] is True
+    assert result["download_url"] == "https://makerworks.local/files/widget.stl"
+    assert result["preflight"]["selected_printer_id"] is None
+    assert printer._queue_count == 0
+
+
 def test_print_job_manager_rejects_queueing_route_only_submission_after_assignment() -> None:
     printer = _FakePrinter("printer-1", connected=True, busy=False, queue_count=0)
     manager = PrintJobManager(_FakePrinterManager([printer]), _FakeWorksService())

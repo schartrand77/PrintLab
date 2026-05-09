@@ -5910,26 +5910,41 @@ class PrintJobManager:
         try:
             detail = await self._works_service.makerworks_library_item(payload.model_id, include_raw=False)
             source_item = self._apply_makerworks_submit_overrides(detail["item"], payload.metadata)
-            if not source_item.get("queue_supported"):
+            route_only_asset_handoff = payload.route_only and bool(
+                source_item.get("printer_handoff_ready") or source_item.get("download_url")
+            )
+            if not source_item.get("queue_supported") and not route_only_asset_handoff:
                 raise ValueError(source_item.get("printer_handoff_note") or "This MakerWorks model cannot be queued yet.")
-            preflight = await self.makerworks_preflight(payload.model_id, printer_id=payload.printer_id, metadata=payload.metadata)
-            if payload.printer_id:
-                selected = next((item for item in preflight["candidates"] if item.get("printer_id") == payload.printer_id), None)
-                if not selected or not selected.get("qualifies"):
-                    raise ValueError((selected or {}).get("reason") or f"Printer {payload.printer_id} did not pass preflight.")
-                target_printer = self._printer_manager.get(payload.printer_id)
+            if route_only_asset_handoff and not source_item.get("queue_supported"):
+                preflight = {
+                    "selected_printer_id": None,
+                    "qualified_printer_count": 0,
+                    "approval_required": False,
+                }
             else:
-                if preflight.get("approval_required"):
-                    names = ", ".join(str(item.get("printer_name") or item.get("printer_id")) for item in preflight["candidates"] if item.get("qualifies"))
-                    raise ValueError(f"Multiple printers qualify. Approval required before queueing: {names}.")
-                selected_printer_id = str(preflight.get("selected_printer_id") or "")
-                if not selected_printer_id:
-                    raise ValueError("No connected printer passed MakerWorks preflight.")
-                target_printer = self._printer_manager.get(selected_printer_id)
+                preflight = await self.makerworks_preflight(payload.model_id, printer_id=payload.printer_id, metadata=payload.metadata)
+                if payload.printer_id:
+                    selected = next((item for item in preflight["candidates"] if item.get("printer_id") == payload.printer_id), None)
+                    if not selected or not selected.get("qualifies"):
+                        raise ValueError((selected or {}).get("reason") or f"Printer {payload.printer_id} did not pass preflight.")
+                    target_printer = self._printer_manager.get(payload.printer_id)
+                else:
+                    if preflight.get("approval_required"):
+                        names = ", ".join(str(item.get("printer_name") or item.get("printer_id")) for item in preflight["candidates"] if item.get("qualifies"))
+                        raise ValueError(f"Multiple printers qualify. Approval required before queueing: {names}.")
+                    selected_printer_id = str(preflight.get("selected_printer_id") or "")
+                    if not selected_printer_id:
+                        raise ValueError("No connected printer passed MakerWorks preflight.")
+                    target_printer = self._printer_manager.get(selected_printer_id)
 
             if payload.route_only:
                 now = datetime.now(timezone.utc).isoformat()
-                storage_printer = target_printer or await self._select_best_printer()
+                storage_printer = target_printer
+                if storage_printer is None:
+                    printers = self._printer_manager.list_items()
+                    if not printers:
+                        raise ValueError("No printers are configured for MakerWorks routing.")
+                    storage_printer = self._printer_manager.get(str(printers[0]["id"]))
                 submitted_job = storage_printer.create_submitted_job(
                     {
                         "id": job_id,
