@@ -116,6 +116,15 @@ class SubmittedJobQueueRequest(BaseModel):
     layer_inspect: bool | None = None
 
 
+class SubmittedJobConnectRequest(BaseModel):
+    printer_id: str = Field(min_length=1, max_length=64)
+
+
+class SubmittedJobBatchConnectRequest(BaseModel):
+    printer_id: str = Field(min_length=1, max_length=64)
+    job_ids: list[str] = Field(min_length=1, max_length=50)
+
+
 class QueueUpdateRequest(BaseModel):
     start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
 

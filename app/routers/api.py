@@ -36,6 +36,7 @@ from app.services import (
     QueuePrintJobRequest,
     QueueReorderRequest,
     QueueUpdateRequest,
+    SubmittedJobBatchConnectRequest,
     SubmittedJobConnectRequest,
     SubmittedJobQueueRequest,
     SuccessfulGcodeSyncRequest,
@@ -587,6 +588,19 @@ async def connect_submitted_job_to_current_print(job_id: str, request: Request, 
     try:
         item = await job_manager.connect_submitted_job_to_current_print(job_id, printer_id=payload.printer_id, actor=actor_from_request(request))
         return {"ok": True, "item": item}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.post("/api/jobs/connect-current-print")
+async def connect_submitted_jobs_to_current_print(request: Request, payload: SubmittedJobBatchConnectRequest) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        return await job_manager.connect_submitted_jobs_to_current_print(
+            payload.job_ids,
+            printer_id=payload.printer_id,
+            actor=actor_from_request(request),
+        )
     except Exception as exc:
         _raise_api_error(exc)
 

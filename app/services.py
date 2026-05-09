@@ -268,6 +268,11 @@ class SubmittedJobConnectRequest(BaseModel):
     printer_id: str = Field(min_length=1, max_length=64)
 
 
+class SubmittedJobBatchConnectRequest(BaseModel):
+    printer_id: str = Field(min_length=1, max_length=64)
+    job_ids: list[str] = Field(min_length=1, max_length=50)
+
+
 class QueueUpdateRequest(BaseModel):
     start_at: str | None = Field(default=None, description="UTC ISO timestamp for scheduled start.")
 
@@ -1482,6 +1487,19 @@ class PrinterService:
             "remaining_minutes": job.get("remaining_minutes"),
         }
 
+    def _active_submitted_job_contexts(self) -> list[dict[str, Any]]:
+        context = self._active_job_context or {}
+        raw_items = context.get("active_submitted_jobs")
+        if isinstance(raw_items, list):
+            items = [dict(item) for item in raw_items if isinstance(item, dict) and str(item.get("job_id") or "").strip()]
+            if items:
+                return items
+        job_id = str(context.get("job_id") or "").strip()
+        return [dict(context)] if job_id else []
+
+    def _active_submitted_job_ids(self) -> list[str]:
+        return list(dict.fromkeys(str(item.get("job_id") or "").strip() for item in self._active_submitted_job_contexts() if item.get("job_id")))
+
     @staticmethod
     def _youtube_upload_succeeded(youtube: dict[str, Any]) -> bool:
         return bool(
@@ -2047,7 +2065,7 @@ class PrinterService:
             file_name = Path(file_path).name
         metadata = self._extract_model_metadata(file_path or file_name, subtask_name)
         started_at = str(job.get("started_at") or "").strip() or datetime.now(timezone.utc).isoformat()
-        self._active_job_context = {
+        job_context = {
             **metadata,
             "job_id": job.get("id"),
             "source": job.get("source"),
@@ -2065,6 +2083,9 @@ class PrinterService:
             "started_at": started_at,
             "connected_current_print": dict(current_print),
         }
+        active_items = [item for item in self._active_submitted_job_contexts() if str(item.get("job_id") or "") != str(job.get("id") or "")]
+        active_items.append(job_context)
+        self._active_job_context = {**job_context, "active_submitted_jobs": active_items}
         self._last_job_state = str(current_print.get("state") or current_print.get("gcode_state") or self._last_job_state or "").upper()
         self.update_submitted_job_progress(
             str(job.get("id") or ""),
@@ -3627,8 +3648,7 @@ class PrinterService:
             except Exception:
                 pass
         self._schedule_youtube_upload(str(record.get("id") or ""))
-        job_id = str((self._active_job_context or {}).get("job_id") or "").strip()
-        if job_id:
+        for job_id in self._active_submitted_job_ids():
             self.update_submitted_job(
                 job_id,
                 status="completed",
@@ -3658,13 +3678,25 @@ class PrinterService:
                 **dict(context.get("connected_current_print") or {}),
                 **updates,
             }
-        job_id = str(self._active_job_context.get("job_id") or "").strip()
-        if job_id:
-            self.update_submitted_job_progress(
-                job_id,
-                snapshot=self._active_job_context,
-                current_print=self._active_job_context.get("connected_current_print") if isinstance(self._active_job_context.get("connected_current_print"), dict) else None,
-            )
+        active_items = self._active_submitted_job_contexts()
+        if active_items:
+            merged_items = []
+            for item in active_items:
+                merged = {**item, **updates}
+                if item.get("connected_current_print"):
+                    merged["connected_current_print"] = {
+                        **dict(item.get("connected_current_print") or {}),
+                        **updates,
+                    }
+                merged_items.append(merged)
+                job_id = str(merged.get("job_id") or "").strip()
+                if job_id:
+                    self.update_submitted_job_progress(
+                        job_id,
+                        snapshot=merged,
+                        current_print=merged.get("connected_current_print") if isinstance(merged.get("connected_current_print"), dict) else None,
+                    )
+            self._active_job_context["active_submitted_jobs"] = merged_items
 
     async def _monitor_print_jobs(self) -> None:
         while True:
@@ -3696,17 +3728,17 @@ class PrinterService:
                     await self._record_successful_completion(snapshot)
                     self._active_job_context = None
                 elif "FAILED" in state or "STOP" in state or "IDLE" in state:
-                    context = self._active_job_context or {}
-                    job_id = str(context.get("job_id") or "").strip()
-                    if previously_busy and job_id:
+                    job_ids = self._active_submitted_job_ids()
+                    if previously_busy and job_ids:
                         failure_status = "cancelled" if "STOP" in state else "failed"
-                        self.update_submitted_job(
-                            job_id,
-                            status=failure_status,
-                            message=f"Print ended in state {state or 'unknown'} for {snapshot.get('file_name') or 'model'}.",
-                            details={"state": state, "file_path": snapshot.get("file_path")},
-                            extra={"completed_at": datetime.now(timezone.utc).isoformat()},
-                        )
+                        for job_id in job_ids:
+                            self.update_submitted_job(
+                                job_id,
+                                status=failure_status,
+                                message=f"Print ended in state {state or 'unknown'} for {snapshot.get('file_name') or 'model'}.",
+                                details={"state": state, "file_path": snapshot.get("file_path")},
+                                extra={"completed_at": datetime.now(timezone.utc).isoformat()},
+                            )
                     self._active_job_context = None
                 self._last_job_state = state
             except asyncio.CancelledError:
@@ -6229,6 +6261,27 @@ class PrintJobManager:
             details={"job_id": job_id, "printer_id": printer_id, "current_print": current_print},
         )
         return self._job_response(updated)
+
+    async def connect_submitted_jobs_to_current_print(
+        self,
+        job_ids: list[str],
+        *,
+        printer_id: str,
+        actor: str = "dashboard",
+    ) -> dict[str, Any]:
+        unique_job_ids = [job_id for job_id in dict.fromkeys(str(job_id).strip() for job_id in job_ids) if job_id]
+        if not unique_job_ids:
+            raise ValueError("At least one submitted job is required.")
+        items = []
+        for job_id in unique_job_ids:
+            items.append(
+                await self.connect_submitted_job_to_current_print(
+                    job_id,
+                    printer_id=printer_id,
+                    actor=actor,
+                )
+            )
+        return {"ok": True, "count": len(items), "items": items}
 
     def list_jobs(self, *, printer_id: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
         if printer_id:

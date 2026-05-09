@@ -1482,6 +1482,10 @@ def render_makerworks_routing_html() -> str:
       border-color: rgba(47,155,101,.55);
       box-shadow: inset 0 -18px 30px rgba(47,155,101,.18), 0 16px 34px rgba(47,155,101,.24);
     }
+    .node.queue-selected {
+      border-color: rgba(47,155,101,.85);
+      box-shadow: inset 0 -16px 28px rgba(47,155,101,.16), 0 0 0 2px rgba(47,155,101,.2);
+    }
     .printer-current-print { border-color: rgba(47,155,101,.72); box-shadow: inset 0 -18px 32px rgba(47,155,101,.24), 0 16px 34px rgba(47,155,101,.24); }
     .printer-open { box-shadow: inset 0 -14px 24px rgba(47,155,101,.16), 0 12px 28px rgba(47,155,101,.12); }
     .printer-running { box-shadow: inset 0 -14px 24px rgba(210,68,68,.22), 0 12px 28px rgba(210,68,68,.14); border-color: rgba(210,68,68,.42); }
@@ -1494,6 +1498,9 @@ def render_makerworks_routing_html() -> str:
     .node-actions.single { grid-template-columns:1fr; }
     .node-admin { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px; }
     .node-row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+    .batch-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+    .batch-select-row { display:flex; gap:8px; align-items:center; color:var(--muted); font-size:12px; font-weight:700; }
+    .batch-select-row input { width:16px; height:16px; accent-color:var(--success); }
     .node-body { display:grid; gap:6px; }
     .state-chip { display:inline-flex; width:max-content; border-radius:999px; padding:3px 8px; background:var(--soft); border:1px solid var(--line); color:var(--text); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.35px; }
     .collapse-toggle { border:1px solid var(--line); border-radius:999px; background:var(--soft); color:var(--text); padding:4px 8px; font-size:11px; font-weight:800; cursor:pointer; white-space:nowrap; }
@@ -1563,6 +1570,11 @@ def render_makerworks_routing_html() -> str:
       <span id="queuedCount" class="pill">0 queued jobs</span>
       <span id="printerCount" class="pill">0 available printers</span>
     </div>
+    <div class="batch-actions">
+      <span id="selectedJobsCount" class="pill">0 selected jobs</span>
+      <button class="btn secondary" type="button" onclick="clearJobSelection()">Clear Selection</button>
+      <button id="batchConnectBtn" class="btn" type="button" onclick="connectSelectedJobsToCurrentPrint()" disabled>Connect Selected To Current Print</button>
+    </div>
     <div id="pageNotice" class="notice" role="status" aria-live="polite"></div>
     <div class="toolbar">
       <div class="field">
@@ -1609,6 +1621,7 @@ def render_makerworks_routing_html() -> str:
     let dragState = null;
     let recentQueuedJobs = {};
     let collapsedCards = {};
+    let selectedJobIds = {};
     let leftSearch = '';
     let printerSearch = '';
     function readCookie(name) {
@@ -1784,6 +1797,38 @@ def render_makerworks_routing_html() -> str:
       if (printer?.connected) return 'printer-open';
       return '';
     }
+    function selectedJobIdList() {
+      return Object.keys(selectedJobIds).filter((jobId) => selectedJobIds[jobId]);
+    }
+    function selectedJobNodeIds() {
+      return selectedJobIdList().map((jobId) => leftNodeId('job', jobId));
+    }
+    function toggleJobSelection(jobId, checked) {
+      const key = String(jobId || '');
+      if (!key) return;
+      if (checked) selectedJobIds[key] = true;
+      else delete selectedJobIds[key];
+      renderBoard();
+    }
+    function clearJobSelection() {
+      selectedJobIds = {};
+      renderBoard();
+    }
+    function selectedJobsAssignedPrinter() {
+      const printerIds = Array.from(new Set(
+        selectedJobNodeIds()
+          .map((nodeId) => draftAssignments[nodeId] || '')
+          .filter(Boolean)
+      ));
+      return printerIds.length === 1 ? printerIds[0] : '';
+    }
+    function updateBatchControls() {
+      const selectedCount = selectedJobIdList().length;
+      const countEl = document.getElementById('selectedJobsCount');
+      const button = document.getElementById('batchConnectBtn');
+      if (countEl) countEl.textContent = `${selectedCount} selected ${selectedCount === 1 ? 'job' : 'jobs'}`;
+      if (button) button.disabled = selectedCount === 0 || !selectedJobsAssignedPrinter();
+    }
     function selectLeftNode(nodeId) { activeLeft = nodeId; renderBoard(); }
     function eventPoint(event) {
       if (event.touches && event.touches[0]) return { x: event.touches[0].clientX, y: event.touches[0].clientY };
@@ -1845,6 +1890,16 @@ def render_makerworks_routing_html() -> str:
       cleanupWireDrag();
     }
     function connectToPrinter(printerId) {
+      const selectedIds = selectedJobIdList();
+      if (selectedIds.length) {
+        selectedIds.forEach((jobId) => {
+          draftAssignments[leftNodeId('job', jobId)] = printerId;
+        });
+        saveDraftAssignments();
+        renderBoard();
+        showNotice(`${selectedIds.length} selected ${selectedIds.length === 1 ? 'job' : 'jobs'} loaded on ${printers.find((printer) => printer.id === printerId)?.name || printerId}.`);
+        return;
+      }
       if (!activeLeft) {
         showNotice('Select a chosen model or queued job on the left first.');
         return;
@@ -1946,6 +2001,36 @@ def render_makerworks_routing_html() -> str:
         showNotice(`${data.item?.model_name || 'Queued job'} connected to current print on ${printers.find((printer) => printer.id === printerId)?.name || printerId}.`);
       } catch (error) {
         showNotice(`Failed to connect routed job: ${String(error?.message || error)}`);
+      }
+    }
+    async function connectSelectedJobsToCurrentPrint() {
+      const jobIds = selectedJobIdList();
+      if (!jobIds.length) {
+        showNotice('Select queued jobs first.');
+        return;
+      }
+      const printerId = selectedJobsAssignedPrinter();
+      if (!printerId) {
+        showNotice('Connect all selected jobs to the same printer first.');
+        return;
+      }
+      try {
+        const response = await fetch('/api/jobs/connect-current-print', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ printer_id: printerId, job_ids: jobIds }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.detail || data?.error?.message || `HTTP ${response.status}`);
+        jobIds.forEach((jobId) => {
+          delete draftAssignments[leftNodeId('job', jobId)];
+          delete selectedJobIds[jobId];
+        });
+        saveDraftAssignments();
+        await refreshBoard();
+        showNotice(`${Number(data.count || jobIds.length)} queued jobs connected to current print on ${printers.find((printer) => printer.id === printerId)?.name || printerId}.`);
+      } catch (error) {
+        showNotice(`Failed to connect selected jobs: ${String(error?.message || error)}`);
       }
     }
     function decodeRoutingItem(encoded) {
@@ -2080,12 +2165,14 @@ def render_makerworks_routing_html() -> str:
           const hasQueueItem = !isChosen && !!item.queue_item_id;
           const isStartedSubmitted = !isChosen && String(item.status || '').toLowerCase() === 'started';
           const canConnectSubmitted = !isChosen && !!assignedPrinter && !item.queue_item_id && !isStartedSubmitted;
+          const isSelectedJob = !isChosen && !!selectedJobIds[String(item.id || '')];
           return `
-            <article id="${escapeHtml(entry.id)}" class="node routeable ${activeLeft === entry.id ? 'selected' : ''} ${assignedPrinter ? 'connected' : ''} ${queuedJobStateClass}" onclick="selectLeftNode('${escapeHtml(entry.id)}')">
+            <article id="${escapeHtml(entry.id)}" class="node routeable ${activeLeft === entry.id ? 'selected' : ''} ${assignedPrinter ? 'connected' : ''} ${queuedJobStateClass} ${isSelectedJob ? 'queue-selected' : ''}" onclick="selectLeftNode('${escapeHtml(entry.id)}')">
               <span class="drag-handle right" title="Drag to printer" onpointerdown="startWireDrag('${escapeHtml(entry.id)}', event)">
                 <span class="drag-cord"></span>
                 <span class="drag-knob"></span>
               </span>
+              ${isChosen || isStartedSubmitted ? '' : `<label class="batch-select-row" onclick="event.stopPropagation();"><input type="checkbox" ${isSelectedJob ? 'checked' : ''} onchange="toggleJobSelection('${escapeHtml(String(item.id || ''))}', this.checked)" />Batch route</label>`}
               <div class="node-title">${escapeHtml(isChosen ? (item.name || 'Untitled model') : (item.model_name || item.file_name || item.id || 'Queued job'))}</div>
               <div class="node-meta">${escapeHtml(isChosen ? `Chosen model • ${item.author || 'Unknown creator'}` : `${String(item.status || 'queued').toUpperCase()} • ${item.source_job_id || item.source_order_id || item.id}`)}</div>
               <div class="node-meta">${escapeHtml(assignedPrinter ? `Connected to ${printers.find((printer) => printer.id === assignedPrinter)?.name || assignedPrinter}` : 'No printer connected yet')}</div>
@@ -2117,12 +2204,13 @@ def render_makerworks_routing_html() -> str:
           <div class="node-meta">${escapeHtml(printer.active_submitted_job?.id ? `Synced current print • ${printer.active_submitted_job.model_name || printer.active_submitted_job.file_name || printer.active_submitted_job.id}` : `Queue ${Number(printer.queue?.count || 0)} • ${String(printer.job?.state || 'Ready')}`)}</div>
           <div class="node-actions">
             <a class="link-btn" href="/printer/${encodeURIComponent(printer.id)}" onclick="event.stopPropagation();">Open Dashboard</a>
-            <button class="btn secondary" type="button" onclick="event.stopPropagation(); connectToPrinter('${escapeHtml(printer.id)}')">${activeLeft ? 'Connect' : 'Select Left Node First'}</button>
+            <button class="btn secondary" type="button" onclick="event.stopPropagation(); connectToPrinter('${escapeHtml(printer.id)}')">${selectedJobIdList().length ? 'Connect Selected' : (activeLeft ? 'Connect' : 'Select Left Node First')}</button>
           </div>
         </article>
       `).join('') : "<div class='node'><div class='node-title'>No printers available</div><div class='node-meta'>Bring a printer online to start routing.</div></div>";
       upgradeCards();
       applyBoardFilters();
+      updateBatchControls();
       window.requestAnimationFrame(drawConnections);
     }
     async function refreshBoard() {
@@ -2135,6 +2223,8 @@ def render_makerworks_routing_html() -> str:
       if (!jobRes.ok) throw new Error(jobData?.detail || `HTTP ${jobRes.status}`);
       printers = Array.isArray(printerData.items) ? printerData.items : [];
       submittedJobs = (Array.isArray(jobData.items) ? jobData.items : []).filter((item) => String(item.source || '').toLowerCase() === 'makerworks');
+      const liveSubmittedIds = new Set(submittedJobs.map((item) => String(item.id || '')));
+      selectedJobIds = Object.fromEntries(Object.entries(selectedJobIds).filter(([jobId]) => liveSubmittedIds.has(jobId)));
       const now = Date.now();
       submittedJobs.forEach((item) => {
         const itemId = String(item.id || '');

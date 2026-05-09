@@ -15,7 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.auth import hash_password, register_admin_auth
+from app.auth import CSRF_COOKIE_NAME, auth_router, hash_password, register_admin_auth
 from app.errors import ApiError
 from app.main import create_app
 from app.routers.api import router as api_router
@@ -1484,6 +1484,61 @@ def test_active_job_context_keeps_model_metadata_when_snapshot_reports_internal_
     assert service._youtube_template_context(record)["model_name"] == "Widget"
 
 
+def test_completion_updates_all_submitted_jobs_attached_to_current_print() -> None:
+    storage_dir = Path("tests/.tmp/batch-current-print-completion")
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    service = PrinterService(
+        config={
+            "host": "127.0.0.1",
+            "serial": "SERIAL",
+            "access_code": "CODE",
+            "storage_dir": str(storage_dir),
+        },
+        printer_id="printer-1",
+        display_name="Printer 1",
+    )
+    first = service.create_submitted_job(
+        {
+            "id": "job-1",
+            "status": "queued",
+            "source": "makerworks",
+            "model_name": "Northern Map Turtle Egg",
+        }
+    )
+    second = service.create_submitted_job(
+        {
+            "id": "job-2",
+            "status": "queued",
+            "source": "makerworks",
+            "model_name": "Snapping Turtle Egg",
+        }
+    )
+    current_print = {
+        "state": "RUNNING",
+        "file": "/cache/turtle-eggs.gcode.3mf",
+        "subtask_name": "turtle-eggs.gcode.3mf",
+        "remaining_minutes": 180,
+    }
+    service.attach_submitted_job_to_current_print(first, current_print, actor="operator")
+    service.attach_submitted_job_to_current_print(second, current_print, actor="operator")
+
+    asyncio.run(
+        service._record_successful_completion(
+            {
+                "state": "FINISH",
+                "file_path": "/cache/turtle-eggs.gcode.3mf",
+                "file_name": "turtle-eggs.gcode.3mf",
+                "progress_percent": 100,
+            }
+        )
+    )
+
+    assert service.submitted_job_record("job-1")["status"] == "completed"
+    assert service.submitted_job_record("job-2")["status"] == "completed"
+    assert service.submitted_job_record("job-1")["successful_gcode_id"]
+    assert service.submitted_job_record("job-2")["successful_gcode_id"]
+
+
 def test_monitor_records_success_when_busy_print_is_idle_at_100_percent(monkeypatch: pytest.MonkeyPatch) -> None:
     service = PrinterService(
         config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
@@ -2721,6 +2776,7 @@ def test_works_request_supports_admin_session_login(monkeypatch: pytest.MonkeyPa
 def _makerworks_api_app() -> FastAPI:
     app = FastAPI()
     register_admin_auth(app)
+    app.include_router(auth_router)
     app.include_router(api_router)
     return app
 
@@ -2827,3 +2883,32 @@ def test_makerworks_submit_route_returns_clear_submit_failure_payload(monkeypatc
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "submit_failed"
     assert response.json()["error"]["details"]["job"]["status"] == "submit_failed"
+
+
+def test_batch_connect_current_print_route_accepts_multiple_job_ids(monkeypatch) -> None:
+    _set_admin_auth(monkeypatch)
+    monkeypatch.setenv("MAKERWORKS_SUBMIT_API_KEY", "submit-secret")
+
+    captured: dict[str, object] = {}
+
+    class FakeJobManager:
+        async def connect_submitted_jobs_to_current_print(self, job_ids, *, printer_id: str, actor: str = "dashboard") -> dict[str, object]:
+            captured["job_ids"] = job_ids
+            captured["printer_id"] = printer_id
+            captured["actor"] = actor
+            return {"ok": True, "count": len(job_ids), "items": [{"id": job_id, "status": "started"} for job_id in job_ids]}
+
+    monkeypatch.setattr("app.routers.api.job_manager", FakeJobManager())
+
+    with TestClient(_makerworks_api_app()) as client:
+        login = client.post("/auth/login", json={"username": "admin", "password": "secret"})
+        csrf = login.cookies.get(CSRF_COOKIE_NAME)
+        response = client.post(
+            "/api/jobs/connect-current-print",
+            headers={"X-CSRF-Token": csrf or ""},
+            json={"printer_id": "printer-1", "job_ids": ["job-1", "job-2"]},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 2
+    assert captured == {"job_ids": ["job-1", "job-2"], "printer_id": "printer-1", "actor": "admin"}

@@ -373,6 +373,64 @@ def test_print_job_manager_connects_route_only_submission_to_current_busy_print_
     assert printer._queue_count == 0
 
 
+def test_print_job_manager_connects_multiple_route_only_submissions_to_same_current_print() -> None:
+    printer = _FakePrinter(
+        "printer-1",
+        connected=True,
+        busy=True,
+        queue_count=0,
+        current_job={
+            "state": "RUNNING",
+            "file": "/cache/turtle-eggs.gcode.3mf",
+            "subtask_name": "turtle-eggs.gcode.3mf",
+            "progress_percent": 12,
+            "remaining_minutes": 182,
+        },
+    )
+    manager = PrintJobManager(_FakePrinterManager([printer]), _FakeWorksService())
+    first = asyncio.run(
+        manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(
+                model_id="egg-1",
+                idempotency_key="mw-route-only-1",
+                source_job_id="source-job-1",
+                source_order_id="source-order-1",
+                route_only=True,
+            ),
+            actor="makerworks",
+        )
+    )
+    second = asyncio.run(
+        manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(
+                model_id="egg-2",
+                idempotency_key="mw-route-only-2",
+                source_job_id="source-job-1",
+                source_order_id="source-order-1",
+                route_only=True,
+            ),
+            actor="makerworks",
+        )
+    )
+
+    result = asyncio.run(
+        manager.connect_submitted_jobs_to_current_print(
+            [str(first["id"]), str(second["id"])],
+            printer_id="printer-1",
+            actor="operator",
+        )
+    )
+
+    assert result["count"] == 2
+    assert [item["status"] for item in result["items"]] == ["started", "started"]
+    assert [item["printer_id"] for item in result["items"]] == ["printer-1", "printer-1"]
+    assert [item["file_name"] for item in result["items"]] == ["turtle-eggs.gcode.3mf", "turtle-eggs.gcode.3mf"]
+    assert len(printer.connected_contexts) == 2
+    assert printer.connected_contexts[0]["current_print"]["remaining_minutes"] == 182
+    assert printer.connected_contexts[1]["current_print"]["remaining_minutes"] == 182
+    assert printer._queue_count == 0
+
+
 def test_print_job_manager_routing_status_includes_connected_active_jobs_until_terminal() -> None:
     printer = _FakePrinter(
         "printer-1",

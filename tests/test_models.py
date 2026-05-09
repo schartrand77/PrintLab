@@ -205,6 +205,16 @@ def test_render_makerworks_routing_page_contains_board_layout() -> None:
     assert "bambustudioopen://open?file=" in html
 
 
+def test_render_makerworks_routing_page_contains_batch_current_print_controls() -> None:
+    html = render_makerworks_routing_html()
+    assert 'id="selectedJobsCount"' in html
+    assert 'id="batchConnectBtn"' in html
+    assert "toggleJobSelection" in html
+    assert "connectSelectedJobsToCurrentPrint" in html
+    assert "/api/jobs/connect-current-print" in html
+    assert "batch-select-row" in html
+
+
 def test_render_makerworks_routing_page_can_target_orcaslicer(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SLICER_TARGET", "orca_slicer")
     html = views.render_makerworks_routing_html()
