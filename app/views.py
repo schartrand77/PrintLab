@@ -1523,6 +1523,7 @@ def render_makerworks_routing_html() -> str:
       stroke-dasharray: 14 10;
       animation: wireFlow 1.2s linear infinite;
       filter: drop-shadow(0 0 6px rgba(45,148,255,.28));
+      vector-effect: non-scaling-stroke;
     }
     @keyframes wireFlow { from { stroke-dashoffset: 24; } to { stroke-dashoffset: 0; } }
     @keyframes queueFreshPulse {
@@ -1619,6 +1620,7 @@ def render_makerworks_routing_html() -> str:
     let activeLeft = null;
     let draftAssignments = {};
     let dragState = null;
+    let drawConnectionsFrame = 0;
     let recentQueuedJobs = {};
     let collapsedCards = {};
     let selectedJobIds = {};
@@ -1865,7 +1867,7 @@ def render_makerworks_routing_html() -> str:
       const point = eventPoint(event);
       dragState.x2 = point.x - boardRect.left;
       dragState.y2 = point.y - boardRect.top;
-      drawConnections();
+      scheduleDrawConnections();
     }
     function completeWireDrag(printerId) {
       if (!dragState) return;
@@ -1877,7 +1879,7 @@ def render_makerworks_routing_html() -> str:
     function cleanupWireDrag() {
       document.querySelectorAll('.drag-handle.dragging').forEach((item) => item.classList.remove('dragging'));
       dragState = null;
-      drawConnections();
+      scheduleDrawConnections();
     }
     function stopWireDrag(event) {
       if (!dragState) return;
@@ -2108,9 +2110,17 @@ def render_makerworks_routing_html() -> str:
         showNotice(`Failed to delete queued job: ${String(error?.message || error)}`);
       }
     }
+    function scheduleDrawConnections() {
+      if (drawConnectionsFrame) return;
+      drawConnectionsFrame = window.requestAnimationFrame(() => {
+        drawConnectionsFrame = 0;
+        drawConnections();
+      });
+    }
     function drawConnections() {
       const svg = document.getElementById('boardSvg');
       const board = document.getElementById('routingBoard');
+      if (!svg || !board) return;
       const boardRect = board.getBoundingClientRect();
       svg.setAttribute('viewBox', `0 0 ${boardRect.width} ${boardRect.height}`);
       svg.setAttribute('width', String(boardRect.width));
@@ -2211,7 +2221,7 @@ def render_makerworks_routing_html() -> str:
       upgradeCards();
       applyBoardFilters();
       updateBatchControls();
-      window.requestAnimationFrame(drawConnections);
+      scheduleDrawConnections();
     }
     async function refreshBoard() {
       const previousSubmittedIds = new Set(submittedJobs.map((item) => String(item.id || '')));
@@ -2244,7 +2254,10 @@ def render_makerworks_routing_html() -> str:
     window.addEventListener('pointerup', stopWireDrag);
     window.addEventListener('pointercancel', cleanupWireDrag);
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeSidebar(); });
-    window.addEventListener('resize', drawConnections);
+    window.addEventListener('resize', scheduleDrawConnections);
+    document.querySelectorAll('#routingBoard .lane-frame').forEach((lane) => {
+      lane.addEventListener('scroll', scheduleDrawConnections, { passive: true });
+    });
     refreshBoard().catch((error) => showNotice(`Failed to load routing board: ${String(error?.message || error)}`));
     window.setInterval(() => {
       refreshBoard().catch(() => {});

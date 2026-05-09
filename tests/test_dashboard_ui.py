@@ -35,3 +35,13 @@ def test_sd_models_api_disables_response_caching(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store, max-age=0"
     assert response.json()["items"] == [{"name": "current.3mf", "path": "/cache/current.3mf"}]
+
+
+def test_routing_board_connections_redraw_on_lane_scroll() -> None:
+    html = Path("app/views.py").read_text(encoding="utf-8")
+    routing_section = html.split("def render_makerworks_routing_html()", 1)[1]
+
+    assert "function scheduleDrawConnections()" in routing_section
+    assert "document.querySelectorAll('#routingBoard .lane-frame').forEach((lane)" in routing_section
+    assert "lane.addEventListener('scroll', scheduleDrawConnections" in routing_section
+    assert "window.addEventListener('resize', scheduleDrawConnections)" in routing_section
