@@ -2449,11 +2449,7 @@
           liveRetryAttempt = 0;
           setLiveBadge("LIVE", "ok");
           if (liveRetryTimer) clearTimeout(liveRetryTimer);
-          liveRetryTimer = setTimeout(() => {
-            if (viewMode !== "live" || sessionId !== liveSessionId) return;
-            setLiveBadge("RECONNECTING", "err");
-            connectStream();
-          }, 5000);
+          liveRetryTimer = null;
         };
 
         img.onerror = () => {

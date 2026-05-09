@@ -20,6 +20,15 @@ def test_sd_model_browser_uses_uncached_fetches() -> None:
     assert 'cache: "no-store"' in sd_section
 
 
+def test_live_feed_does_not_force_reconnect_after_successful_image_load() -> None:
+    html = Path("app/dashboard.html").read_text(encoding="utf-8")
+    live_section = html.split("function startLiveFeed()", 1)[1].split("function stopLiveFeed()", 1)[0]
+
+    assert 'setLiveBadge("LIVE", "ok")' in live_section
+    assert 'setLiveBadge("RECONNECTING", "err")' not in live_section
+    assert "connectStream();" not in live_section.split("img.onerror", 1)[0]
+
+
 def test_sd_models_api_disables_response_caching(monkeypatch) -> None:
     class FakeService:
         async def list_sd_models(self, query: str | None = None):

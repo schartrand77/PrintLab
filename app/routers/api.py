@@ -51,6 +51,46 @@ from app.services import (
 
 router = APIRouter()
 
+LIVE_STREAM_FPS = 10
+LIVE_STREAM_READ_TIMEOUT_SECONDS = 2.5
+LIVE_STREAM_STALE_FRAME_SECONDS = 10.0
+LIVE_STREAM_STALE_FRAME_INTERVAL_SECONDS = 0.75
+
+
+def _build_stable_rtsp_ffmpeg_command(rtsp_url: str) -> list[str]:
+    return [
+        "ffmpeg",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-rtsp_transport",
+        "tcp",
+        "-probesize",
+        "1000000",
+        "-analyzeduration",
+        "1000000",
+        "-i",
+        rtsp_url,
+        "-an",
+        "-vf",
+        f"fps={LIVE_STREAM_FPS}",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-q:v",
+        "5",
+        "pipe:1",
+    ]
+
+
+def _mjpeg_frame_part(boundary: str, frame: bytes, mime: str = "image/jpeg") -> bytes:
+    return (
+        f"--{boundary}\r\n"
+        f"Content-Type: {mime}\r\n"
+        f"Content-Length: {len(frame)}\r\n\r\n"
+    ).encode("ascii") + frame + b"\r\n"
+
 
 def _require_operator(request: Request) -> None:
     require_role(request, "operator")
@@ -1238,34 +1278,7 @@ async def chamber_stream_by_printer(printer_id: str) -> StreamingResponse:
             for rtsp_url in service._rtsp_urls_to_try():
                 proc = None
                 try:
-                    cmd = [
-                        "ffmpeg",
-                        "-nostdin",
-                        "-loglevel",
-                        "error",
-                        "-rtsp_transport",
-                        "tcp",
-                        "-fflags",
-                        "nobuffer",
-                        "-flags",
-                        "low_delay",
-                        "-probesize",
-                        "32",
-                        "-analyzeduration",
-                        "0",
-                        "-i",
-                        rtsp_url,
-                        "-an",
-                        "-vf",
-                        "fps=18",
-                        "-f",
-                        "image2pipe",
-                        "-vcodec",
-                        "mjpeg",
-                        "-q:v",
-                        "4",
-                        "pipe:1",
-                    ]
+                    cmd = _build_stable_rtsp_ffmpeg_command(rtsp_url)
                     proc = await asyncio.create_subprocess_exec(
                         *cmd,
                         stdout=asyncio.subprocess.PIPE,
@@ -1275,14 +1288,30 @@ async def chamber_stream_by_printer(printer_id: str) -> StreamingResponse:
                         raise RuntimeError("ffmpeg did not expose stdout")
                     buffer = bytearray()
                     started = False
+                    last_frame: bytes | None = None
                     last_frame_at = asyncio.get_running_loop().time()
                     while True:
-                        chunk = await asyncio.wait_for(proc.stdout.read(65536), timeout=5.0)
+                        now = asyncio.get_running_loop().time()
+                        try:
+                            chunk = await asyncio.wait_for(
+                                proc.stdout.read(65536),
+                                timeout=LIVE_STREAM_READ_TIMEOUT_SECONDS,
+                            )
+                        except TimeoutError:
+                            if last_frame and (now - last_frame_at) <= LIVE_STREAM_STALE_FRAME_SECONDS:
+                                yield _mjpeg_frame_part(boundary, last_frame)
+                                await asyncio.sleep(LIVE_STREAM_STALE_FRAME_INTERVAL_SECONDS)
+                                continue
+                            raise RuntimeError("ffmpeg stream stalled")
                         if not chunk:
                             if proc.returncode is not None:
                                 break
-                            await asyncio.sleep(0.01)
-                            if started and (asyncio.get_running_loop().time() - last_frame_at) > 5.0:
+                            if last_frame and (now - last_frame_at) <= LIVE_STREAM_STALE_FRAME_SECONDS:
+                                yield _mjpeg_frame_part(boundary, last_frame)
+                                await asyncio.sleep(LIVE_STREAM_STALE_FRAME_INTERVAL_SECONDS)
+                                continue
+                            await asyncio.sleep(0.05)
+                            if started and (asyncio.get_running_loop().time() - last_frame_at) > LIVE_STREAM_STALE_FRAME_SECONDS:
                                 raise RuntimeError("ffmpeg stream stalled")
                             continue
                         started = True
@@ -1300,15 +1329,9 @@ async def chamber_stream_by_printer(printer_id: str) -> StreamingResponse:
                                 break
                             frame = bytes(buffer[: end + 2])
                             del buffer[: end + 2]
-                            header = (
-                                f"--{boundary}\r\n"
-                                f"Content-Type: image/jpeg\r\n"
-                                f"Content-Length: {len(frame)}\r\n\r\n"
-                            ).encode("ascii")
+                            last_frame = frame
                             last_frame_at = asyncio.get_running_loop().time()
-                            yield header
-                            yield frame
-                            yield b"\r\n"
+                            yield _mjpeg_frame_part(boundary, frame)
                     if started:
                         return
                 except asyncio.CancelledError:
@@ -1330,14 +1353,7 @@ async def chamber_stream_by_printer(printer_id: str) -> StreamingResponse:
             while True:
                 content, mime = await service.get_live_frame()
                 if content and mime:
-                    header = (
-                        f"--{boundary}\r\n"
-                        f"Content-Type: {mime}\r\n"
-                        f"Content-Length: {len(content)}\r\n\r\n"
-                    ).encode("ascii")
-                    yield header
-                    yield content
-                    yield b"\r\n"
+                    yield _mjpeg_frame_part(boundary, content, mime)
                 await asyncio.sleep(0.22)
         except asyncio.CancelledError:
             return
