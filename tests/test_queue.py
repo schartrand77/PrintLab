@@ -123,6 +123,77 @@ def test_submitted_jobs_snapshot_reconciles_started_job_with_recorded_completion
     assert updated["completed_at"] == "2026-05-09T16:56:51+00:00"
 
 
+def test_queue_snapshot_removes_completed_makerworks_queue_item() -> None:
+    service = _service()
+    service._queue_items = [
+        {
+            "id": "queue-1",
+            "job_id": "job-1",
+            "source": "makerworks",
+            "file_path": "/cache/turtle-eggs.gcode.3mf",
+            "file_name": "turtle-eggs.gcode.3mf",
+        }
+    ]
+    service._submitted_jobs = [
+        {
+            "id": "job-1",
+            "source": "makerworks",
+            "status": "started",
+            "printer_id": "printer-1",
+            "model_name": "Northern Map Turtle Egg",
+            "file_path": "/cache/turtle-eggs.gcode.3mf",
+            "file_name": "turtle-eggs.gcode.3mf",
+            "started_at": "2026-05-09T15:48:41+00:00",
+            "connected_current_print": {
+                "state": "RUNNING",
+                "file": "/cache/turtle-eggs.gcode.3mf",
+                "subtask_name": "turtle-eggs.gcode.3mf",
+            },
+            "history": [],
+        }
+    ]
+    service._successful_gcodes = [
+        {
+            "id": "record-1",
+            "printer_id": "printer-1",
+            "completed_at": "2026-05-09T16:56:51+00:00",
+            "state": "FINISH",
+            "file_path": "/data/Metadata/plate_1.gcode",
+            "file_name": "plate_1.gcode",
+            "subtask_name": "NorthernMapTurtleEgg(Parameters-_34.44_23.53_20.0_0)_plate_1",
+            "progress_percent": 100,
+        }
+    ]
+
+    assert service.queue_snapshot()["count"] == 0
+    assert service.submitted_job_record("job-1")["status"] == "completed"
+
+
+def test_pending_submitted_job_callbacks_are_scheduled_on_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = _service()
+    service._submitted_jobs = [
+        {
+            "id": "job-1",
+            "source": "makerworks",
+            "status": "completed",
+            "callback": {"delivered_status": "started"},
+        },
+        {
+            "id": "job-2",
+            "source": "makerworks",
+            "status": "completed",
+            "callback": {"delivered_status": "completed"},
+        },
+    ]
+    scheduled: list[tuple[str, bool]] = []
+    monkeypatch.setattr(service, "_makerworks_job_callback_config", lambda: {"enabled": True})
+    monkeypatch.setattr(service, "_schedule_submitted_job_callback", lambda job_id, *, force=False: scheduled.append((job_id, force)))
+
+    service._schedule_pending_submitted_job_callbacks()
+
+    assert scheduled == [("job-1", False)]
+
+
 def test_timeline_entries_are_copied_to_audit_log() -> None:
     service = _service()
     service._record_timeline("queue_add", "Queued widget.", actor="tester", details={"queue_item_id": "q-1"})

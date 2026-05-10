@@ -1454,6 +1454,8 @@ class PrinterService:
         return None
 
     def queue_snapshot(self) -> dict[str, Any]:
+        self._reconcile_submitted_jobs_with_successful_gcodes()
+        self._prune_completed_queue_items()
         next_item = self._queue_items[0] if self._queue_items else None
         return {
             "count": len(self._queue_items),
@@ -1595,6 +1597,24 @@ class PrinterService:
                 record,
                 message=f"Reconciled completed print for {record.get('file_name') or 'model'}.",
             )
+
+    def _prune_completed_queue_items(self) -> None:
+        if not self._queue_items:
+            return
+        terminal_job_ids = {
+            str(job.get("id") or "").strip()
+            for job in self._submitted_jobs
+            if str(job.get("id") or "").strip()
+            and str(job.get("source") or "").strip().lower() == "makerworks"
+            and str(job.get("status") or "").strip().lower() in {"completed", "failed", "cancelled", "submit_failed"}
+        }
+        if not terminal_job_ids:
+            return
+        remaining = [item for item in self._queue_items if str(item.get("job_id") or "").strip() not in terminal_job_ids]
+        if len(remaining) == len(self._queue_items):
+            return
+        self._queue_items = remaining
+        self._save_queue()
 
     @staticmethod
     def _youtube_upload_succeeded(youtube: dict[str, Any]) -> bool:
@@ -3374,6 +3394,21 @@ class PrinterService:
                 pass
             self._main_loop.call_soon_threadsafe(lambda: asyncio.create_task(_runner()))
 
+    def _schedule_pending_submitted_job_callbacks(self) -> None:
+        cfg = self._makerworks_job_callback_config()
+        if not cfg["enabled"]:
+            return
+        for job in self._submitted_jobs[:200]:
+            job_id = str(job.get("id") or "").strip()
+            if not job_id or str(job.get("source") or "").strip().lower() != "makerworks":
+                continue
+            current_status = str(job.get("status") or "").strip().lower()
+            callback = job.get("callback") or {}
+            delivered_status = str(callback.get("delivered_status") or "").strip().lower()
+            last_error = str(callback.get("last_error") or "").strip()
+            if delivered_status != current_status or last_error:
+                self._schedule_submitted_job_callback(job_id)
+
     async def _sync_successful_gcode_to_makerworks(self, record: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
         cfg = self._makerworks_attach_config()
         if not cfg["enabled"]:
@@ -4142,6 +4177,7 @@ class PrinterService:
                 self._queue_task = asyncio.create_task(self._queue_worker())
             if self._job_monitor_task is None or self._job_monitor_task.done():
                 self._job_monitor_task = asyncio.create_task(self._monitor_print_jobs())
+            self._schedule_pending_submitted_job_callbacks()
             self._schedule_pending_youtube_uploads()
             LOGGER.info("Connected to printer %s", cfg["serial"])
         except Exception as exc:
