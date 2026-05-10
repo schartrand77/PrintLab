@@ -1500,6 +1500,102 @@ class PrinterService:
     def _active_submitted_job_ids(self) -> list[str]:
         return list(dict.fromkeys(str(item.get("job_id") or "").strip() for item in self._active_submitted_job_contexts() if item.get("job_id")))
 
+    def _submitted_job_matches_successful_record(self, job: dict[str, Any], record: dict[str, Any]) -> bool:
+        status = str(job.get("status") or "").strip().lower()
+        if status not in {"queued", "started"}:
+            return False
+        if str(job.get("source") or "").strip().lower() != "makerworks":
+            return False
+        if str(job.get("successful_gcode_id") or "").strip():
+            return False
+
+        job_printer_id = str(job.get("printer_id") or "").strip()
+        record_printer_id = str(record.get("printer_id") or "").strip()
+        if job_printer_id and job_printer_id != self.printer_id:
+            return False
+        if record_printer_id and record_printer_id != self.printer_id:
+            return False
+
+        connected_print = job.get("connected_current_print")
+        if status != "started" and not isinstance(connected_print, dict):
+            return False
+
+        completed_at = self._parse_iso_timestamp(record.get("completed_at"))
+        started_at = self._parse_iso_timestamp(job.get("started_at"))
+        if started_at and completed_at:
+            if completed_at < started_at - timedelta(minutes=5):
+                return False
+            if completed_at > started_at + timedelta(hours=36):
+                return False
+
+        job_paths = {
+            str(job.get("file_path") or "").strip(),
+            str(job.get("file_name") or "").strip(),
+            str(job.get("subtask_name") or "").strip(),
+        }
+        if isinstance(connected_print, dict):
+            job_paths.update(
+                {
+                    str(connected_print.get("file") or "").strip(),
+                    str(connected_print.get("file_path") or "").strip(),
+                    str(connected_print.get("subtask_name") or "").strip(),
+                }
+            )
+        record_paths = {
+            str(record.get("file_path") or "").strip(),
+            str(record.get("file_name") or "").strip(),
+            str(record.get("subtask_name") or "").strip(),
+        }
+        if any(path and path in record_paths for path in job_paths):
+            return True
+
+        job_key = self._normalize_model_key(str(job.get("model_name") or job.get("file_name") or ""))
+        record_text = " ".join(str(record.get(key) or "") for key in ("model_name", "file_name", "subtask_name"))
+        record_key = self._normalize_model_key(record_text)
+        if job_key and (job_key in record_key or record_key in job_key):
+            return True
+
+        return isinstance(connected_print, dict)
+
+    def _submitted_job_ids_for_successful_record(self, record: dict[str, Any]) -> list[str]:
+        ids = self._active_submitted_job_ids()
+        for job in self._submitted_jobs:
+            job_id = str(job.get("id") or "").strip()
+            if job_id and self._submitted_job_matches_successful_record(job, record):
+                ids.append(job_id)
+        return list(dict.fromkeys(ids))
+
+    def _mark_submitted_jobs_completed_for_record(self, record: dict[str, Any], *, message: str | None = None) -> None:
+        completed_at = str(record.get("completed_at") or "").strip() or datetime.now(timezone.utc).isoformat()
+        for job_id in self._submitted_job_ids_for_successful_record(record):
+            try:
+                job = self.submitted_job(job_id)
+            except ValueError:
+                continue
+            if str(job.get("status") or "").strip().lower() == "completed" and str(job.get("successful_gcode_id") or "").strip():
+                continue
+            self.update_submitted_job(
+                job_id,
+                status="completed",
+                message=message or f"Print completed for {record.get('file_name') or 'model'}.",
+                details={"record_id": record.get("id"), "file_path": record.get("file_path")},
+                extra={"completed_at": completed_at, "successful_gcode_id": record.get("id")},
+            )
+
+    def _reconcile_submitted_jobs_with_successful_gcodes(self) -> None:
+        if not self._submitted_jobs or not self._successful_gcodes:
+            return
+        for record in self._successful_gcodes[:50]:
+            if not isinstance(record, dict):
+                continue
+            state = str(record.get("state") or "").upper()
+            if "FINISH" not in state and "COMPLETE" not in state:
+                continue
+            self._mark_submitted_jobs_completed_for_record(
+                record,
+                message=f"Reconciled completed print for {record.get('file_name') or 'model'}.",
+            )
+
     @staticmethod
     def _youtube_upload_succeeded(youtube: dict[str, Any]) -> bool:
         return bool(
@@ -1764,6 +1860,7 @@ class PrinterService:
         }
 
     def submitted_jobs_snapshot(self, *, status: str | None = None) -> list[dict[str, Any]]:
+        self._reconcile_submitted_jobs_with_successful_gcodes()
         if not status:
             return list(self._submitted_jobs[:200])
         target = status.strip().lower()
@@ -3648,14 +3745,7 @@ class PrinterService:
             except Exception:
                 pass
         self._schedule_youtube_upload(str(record.get("id") or ""))
-        for job_id in self._active_submitted_job_ids():
-            self.update_submitted_job(
-                job_id,
-                status="completed",
-                message=f"Print completed for {record.get('file_name') or 'model'}.",
-                details={"record_id": record.get("id"), "file_path": record.get("file_path")},
-                extra={"completed_at": completed_at, "successful_gcode_id": record.get("id")},
-            )
+        self._mark_submitted_jobs_completed_for_record(record, message=f"Print completed for {record.get('file_name') or 'model'}.")
 
     def _merge_active_job_snapshot(self, snapshot: dict[str, Any], *, previously_busy: bool) -> None:
         context = self._active_job_context or {}
