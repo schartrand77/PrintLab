@@ -56,6 +56,16 @@ def test_routing_board_connections_redraw_on_lane_scroll() -> None:
     assert "window.addEventListener('resize', scheduleDrawConnections)" in routing_section
 
 
+def test_routing_board_exposes_verified_completed_jobs() -> None:
+    html = Path("app/views.py").read_text(encoding="utf-8")
+    routing_section = html.split("def render_makerworks_routing_html()", 1)[1]
+
+    assert "let completedJobs = [];" in routing_section
+    assert "fetch('/api/jobs?status=verified_completed')" in routing_section
+    assert 'id="completedStack"' in routing_section
+    assert "Verified Completed" in routing_section
+
+
 def test_dashboard_exposes_youtube_runtime_upload_setting() -> None:
     html = Path("app/dashboard.html").read_text(encoding="utf-8")
 

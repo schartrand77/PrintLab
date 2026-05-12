@@ -1890,6 +1890,13 @@ class PrinterService:
                 for item in self._submitted_jobs[:200]
                 if str(item.get("status") or "").lower() in {"queued", "started"}
             ]
+        if target == "verified_completed":
+            return [
+                item
+                for item in self._submitted_jobs[:200]
+                if str(item.get("status") or "").lower() == "completed"
+                and str(item.get("successful_gcode_id") or "").strip()
+            ]
         return [item for item in self._submitted_jobs[:200] if str(item.get("status") or "").lower() == target]
 
     def submitted_job(self, job_id: str) -> dict[str, Any]:

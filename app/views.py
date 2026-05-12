@@ -1566,6 +1566,9 @@ def render_makerworks_routing_html() -> str:
       filter: drop-shadow(0 0 6px rgba(45,148,255,.28));
       vector-effect: non-scaling-stroke;
     }
+    .completed-panel { margin-top:18px; border:1px solid var(--line); border-radius:14px; background:var(--panel); padding:14px; }
+    .completed-stack { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px; margin-top:10px; }
+    .completed-node { cursor:default; }
     @keyframes wireFlow { from { stroke-dashoffset: 24; } to { stroke-dashoffset: 0; } }
     @keyframes queueFreshPulse {
       0% { box-shadow: inset 0 -12px 22px rgba(50,150,255,.10), 0 10px 22px rgba(50,150,255,.12); }
@@ -1610,6 +1613,7 @@ def render_makerworks_routing_html() -> str:
     <div class="status-row">
       <span id="chosenCount" class="pill">0 chosen</span>
       <span id="queuedCount" class="pill">0 queued jobs</span>
+      <span id="completedCount" class="pill">0 completed jobs</span>
       <span id="printerCount" class="pill">0 available printers</span>
     </div>
     <div class="batch-actions">
@@ -1646,6 +1650,10 @@ def render_makerworks_routing_html() -> str:
         </div>
       </div>
     </section>
+    <section class="completed-panel" aria-labelledby="completedJobsTitle">
+      <div id="completedJobsTitle" class="lane-title">Verified Completed</div>
+      <div id="completedStack" class="completed-stack"></div>
+    </section>
   </div>
   <script>
     const slicerTarget = __SLICER_TARGET__;
@@ -1657,6 +1665,7 @@ def render_makerworks_routing_html() -> str:
     const queueFreshWindowMs = 12000;
     let chosenModels = [];
     let submittedJobs = [];
+    let completedJobs = [];
     let printers = [];
     let activeLeft = null;
     let draftAssignments = {};
@@ -1806,6 +1815,7 @@ def render_makerworks_routing_html() -> str:
       });
       updateCount('chosenCount', visibleChosen, chosenModels.length, 'chosen');
       updateCount('queuedCount', visibleJobs, submittedJobs.length, 'queued jobs');
+      updateCount('completedCount', completedJobs.length, completedJobs.length, 'completed jobs');
       updateCount('printerCount', visiblePrinters, availablePrinters().length, 'available printers');
       let leftEmpty = leftStack.querySelector('[data-empty-state="left"]');
       const hasVisibleLeft = visibleChosen + visibleJobs > 0;
@@ -2192,9 +2202,40 @@ def render_makerworks_routing_html() -> str:
       }
       svg.innerHTML = lines.join('');
     }
+    function completedJobTitle(item) {
+      return item.model_name || item.file_name || item.source_job_id || item.id || 'Completed job';
+    }
+    function completedJobMeta(item) {
+      const parts = [
+        item.completed_at ? `Completed ${item.completed_at}` : 'Completion recorded',
+        item.printer_name || item.printer_id || '',
+        item.successful_gcode_id ? `Record ${item.successful_gcode_id}` : '',
+      ].filter(Boolean);
+      return parts.join(' - ');
+    }
+    function renderCompletedJobs() {
+      const stack = document.getElementById('completedStack');
+      if (!stack) return;
+      if (!completedJobs.length) {
+        stack.innerHTML = "<div class='node completed-node'><div class='node-title'>No verified completed jobs</div><div class='node-meta'>Completed MakerWorks jobs will stay here after PrintLab records a successful print.</div></div>";
+        return;
+      }
+      stack.innerHTML = completedJobs.map((item) => `
+        <article class="node completed-node">
+          <div class="node-title">${escapeHtml(completedJobTitle(item))}</div>
+          <div class="node-meta">${escapeHtml(completedJobMeta(item))}</div>
+          <div class="node-meta">${escapeHtml(item.source_job_id || item.source_order_id || item.id || '')}</div>
+          <div class="node-actions queued-meta-row">
+            <button class="btn secondary" type="button" onclick="syncSubmittedJob('${escapeHtml(String(item.id || ''))}')">Resend Callback</button>
+            <span class="node-meta path">${escapeHtml(String(item.file_path || ''))}</span>
+          </div>
+        </article>
+      `).join('');
+    }
     function renderBoard() {
       document.getElementById('chosenCount').textContent = `${chosenModels.length} chosen`;
       document.getElementById('queuedCount').textContent = `${submittedJobs.length} queued jobs`;
+      document.getElementById('completedCount').textContent = `${completedJobs.length} completed jobs`;
       document.getElementById('printerCount').textContent = `${availablePrinters().length} available printers`;
       const leftItems = [
         ...chosenModels.map((item) => ({ kind: 'chosen', id: leftNodeId('chosen', item.id), item })),
@@ -2262,18 +2303,22 @@ def render_makerworks_routing_html() -> str:
       upgradeCards();
       applyBoardFilters();
       updateBatchControls();
+      renderCompletedJobs();
       scheduleDrawConnections();
     }
     async function refreshBoard() {
       const previousSubmittedIds = new Set(submittedJobs.map((item) => String(item.id || '')));
       chosenModels = getChosenModels();
-      const [printerRes, jobRes] = await Promise.all([fetch('/api/printers'), fetch('/api/jobs?status=routing')]);
+      const [printerRes, jobRes, completedJobRes] = await Promise.all([fetch('/api/printers'), fetch('/api/jobs?status=routing'), fetch('/api/jobs?status=verified_completed')]);
       const printerData = await printerRes.json();
       const jobData = await jobRes.json();
+      const completedJobData = await completedJobRes.json();
       if (!printerRes.ok) throw new Error(printerData?.detail || `HTTP ${printerRes.status}`);
       if (!jobRes.ok) throw new Error(jobData?.detail || `HTTP ${jobRes.status}`);
+      if (!completedJobRes.ok) throw new Error(completedJobData?.detail || `HTTP ${completedJobRes.status}`);
       printers = Array.isArray(printerData.items) ? printerData.items : [];
       submittedJobs = (Array.isArray(jobData.items) ? jobData.items : []).filter((item) => String(item.source || '').toLowerCase() === 'makerworks');
+      completedJobs = (Array.isArray(completedJobData.items) ? completedJobData.items : []).filter((item) => String(item.source || '').toLowerCase() === 'makerworks');
       const liveSubmittedIds = new Set(submittedJobs.map((item) => String(item.id || '')));
       selectedJobIds = Object.fromEntries(Object.entries(selectedJobIds).filter(([jobId]) => liveSubmittedIds.has(jobId)));
       const now = Date.now();

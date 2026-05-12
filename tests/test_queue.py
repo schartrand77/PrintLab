@@ -123,6 +123,32 @@ def test_submitted_jobs_snapshot_reconciles_started_job_with_recorded_completion
     assert updated["completed_at"] == "2026-05-09T16:56:51+00:00"
 
 
+def test_submitted_jobs_snapshot_verified_completed_only_returns_recorded_completions() -> None:
+    service = _service()
+    service._submitted_jobs = [
+        {
+            "id": "job-verified",
+            "source": "makerworks",
+            "status": "completed",
+            "successful_gcode_id": "record-1",
+        },
+        {
+            "id": "job-manual",
+            "source": "makerworks",
+            "status": "completed",
+        },
+        {
+            "id": "job-started",
+            "source": "makerworks",
+            "status": "started",
+        },
+    ]
+
+    snapshot = service.submitted_jobs_snapshot(status="verified_completed")
+
+    assert [item["id"] for item in snapshot] == ["job-verified"]
+
+
 def test_queue_snapshot_removes_completed_makerworks_queue_item() -> None:
     service = _service()
     service._queue_items = [
