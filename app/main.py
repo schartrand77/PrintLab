@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from app.auth import auth_router, register_admin_auth, validate_auth_configuration
 from app.errors import ApiError, api_error, from_http_exception
 from app.routers.api import router as api_router
+from app.routers.settings import router as settings_router
 from app.routers.ui import router as ui_router
 from app.runtime import start_runtime, stop_runtime
 from app.services import data_root
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     app.include_router(auth_router)
     app.include_router(ui_router)
+    app.include_router(settings_router)
     app.include_router(api_router)
 
     @app.exception_handler(ApiError)
