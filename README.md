@@ -110,7 +110,11 @@ Interactive API docs are published at:
 
 ## Works integration config
 
-Configure each external system in `.env`:
+Minimal boot environment stays in `.env`: admin/session secrets, printer access, storage paths, and any values needed before the app can start. Configure MakerWorks, StockWorks, YouTube upload, callback, and allowlist settings from the authenticated **Settings -> Suite Integrations** screen wherever possible.
+
+Environment variables remain supported as legacy overrides and still win over `/data/config.json` or `/config/config.json`. Remove an env value only after saving and testing the matching in-app setting.
+
+Runtime settings that can be configured in app:
 
 - `MAKERWORKS_BASE_URL`, `MAKERWORKS_API_KEY`, `MAKERWORKS_BEARER_TOKEN`, `MAKERWORKS_ADMIN_USERNAME`, `MAKERWORKS_ADMIN_PASSWORD`, `MAKERWORKS_AUTH_HEADER`, `MAKERWORKS_VERIFY_SSL`, `MAKERWORKS_ALLOWED_PATHS`, `MAKERWORKS_ALLOWED_METHODS`
 - Optional MakerWorks job callbacks:
