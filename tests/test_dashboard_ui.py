@@ -54,3 +54,10 @@ def test_routing_board_connections_redraw_on_lane_scroll() -> None:
     assert "document.querySelectorAll('#routingBoard .lane-frame').forEach((lane)" in routing_section
     assert "lane.addEventListener('scroll', scheduleDrawConnections" in routing_section
     assert "window.addEventListener('resize', scheduleDrawConnections)" in routing_section
+
+
+def test_dashboard_exposes_youtube_runtime_upload_setting() -> None:
+    html = Path("app/dashboard.html").read_text(encoding="utf-8")
+
+    assert "settingsYoutubeUploadEnabled" in html
+    assert "upload_enabled: value(\"settingsYoutubeUploadEnabled\")" in html

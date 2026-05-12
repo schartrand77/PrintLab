@@ -1684,6 +1684,13 @@
               <label class="label">YouTube client ID
                 <input id="settingsYoutubeClientId" class="field" type="text">
               </label>
+              <label class="label">YouTube upload enabled
+                <select id="settingsYoutubeUploadEnabled" class="field">
+                  <option value="auto">Auto</option>
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled</option>
+                </select>
+              </label>
               <label class="label">YouTube client secret
                 <input id="settingsYoutubeClientSecret" class="field" type="password" placeholder="Configured secrets are hidden">
               </label>
@@ -2152,6 +2159,7 @@
         setValue("settingsMakerworksBaseUrl", "makerworks", "base_url");
         setValue("settingsStockworksBaseUrl", "stockworks", "base_url");
         setValue("settingsYoutubeClientId", "youtube", "client_id");
+        setValue("settingsYoutubeUploadEnabled", "youtube", "upload_enabled");
         setValue("settingsYoutubePrivacyStatus", "youtube", "privacy_status");
         if (status) status.textContent = "Integration settings loaded.";
       } catch (error) {
@@ -2176,6 +2184,7 @@
           api_key: value("settingsStockworksApiKey"),
         },
         youtube: {
+          upload_enabled: value("settingsYoutubeUploadEnabled"),
           client_id: value("settingsYoutubeClientId"),
           client_secret: value("settingsYoutubeClientSecret"),
           refresh_token: value("settingsYoutubeRefreshToken"),

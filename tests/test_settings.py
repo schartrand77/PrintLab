@@ -26,3 +26,8 @@ def test_redacted_settings_hide_youtube_refresh_token():
     redacted = redact_settings({"youtube": {"refresh_token": "refresh-token-123456"}})
     assert redacted["youtube"]["refresh_token"]["configured"] is True
     assert "refresh-token-123456" not in str(redacted)
+
+
+def test_merges_youtube_upload_enabled_setting():
+    result = merge_settings_payload({}, {"youtube": {"upload_enabled": "auto"}})
+    assert result["youtube"]["upload_enabled"] == "auto"
