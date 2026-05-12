@@ -214,6 +214,7 @@ async def list_printers(request: Request) -> dict[str, Any]:
     for entry in printer_manager.list_items():
         svc = service_or_404(entry["id"])
         state = await svc.state()
+        device_type = (state.get("printer") or {}).get("device_type") or (entry.get("config") or {}).get("device_type")
         job = state.get("job") or {}
         queue = state.get("queue") or {}
         health = state.get("health") or {}
@@ -226,7 +227,7 @@ async def list_printers(request: Request) -> dict[str, Any]:
                 "connected": state.get("connected"),
                 "configured": state.get("configured"),
                 "serial": (state.get("printer") or {}).get("serial") if is_admin else None,
-                "device_type": (state.get("printer") or {}).get("device_type"),
+                "device_type": device_type,
                 "last_error": state.get("last_error"),
                 "job": {
                     "state": job.get("state"),

@@ -484,7 +484,8 @@ def render_gallery_html() -> str:
 
     function renderPrinterCard(item) {
       const tone = statusTone(item);
-      const preview = item.job?.thumbnail_url || printerThumbnailUrl(item.device_type);
+      const previewFallback = printerThumbnailUrl(item.device_type);
+      const preview = item.job?.thumbnail_url || previewFallback;
       const progress = Math.max(0, Math.min(100, Number(item.job?.progress_percent ?? 0)));
       const queueCount = Number(item.queue?.count ?? 0);
       const healthScore = item.health?.score ?? '-';
@@ -493,7 +494,7 @@ def render_gallery_html() -> str:
         <article class="card">
           <a href="/printer/${encodeURIComponent(item.id)}">
             <div class="printer-media">
-              <img class="printer-art" src="${escapeHtml(preview)}" alt="${escapeHtml(item.name)} preview" onerror="this.onerror=null;this.src=printerThumbnailUrl(item.device_type)">
+              <img class="printer-art" src="${escapeHtml(preview)}" alt="${escapeHtml(item.name)} preview" onerror="this.onerror=null;this.src='${escapeHtml(previewFallback)}'">
               <div class="status-stack">
                 <div class="status-badges">
                   <span class="badge ${tone}">${escapeHtml(statusLabel(item))}</span>
