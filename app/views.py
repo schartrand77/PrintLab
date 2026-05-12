@@ -400,6 +400,27 @@ def render_gallery_html() -> str:
       }[char]));
     }
 
+    function printerThumbnailUrl(deviceType) {
+      const normalized = String(deviceType || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+      const thumbnails = {
+        a1: '/static/printers/a1.svg',
+        a1mini: '/static/printers/a1mini.svg',
+        bambulaba1mini: '/static/printers/a1mini.svg',
+        h2c: '/static/printers/h2c.svg',
+        h2d: '/static/printers/h2d.svg',
+        h2dpro: '/static/printers/h2dpro.svg',
+        h2s: '/static/printers/h2s.svg',
+        p1p: '/static/printers/p1p.svg',
+        p1s: '/static/printers/p1s.svg',
+        p2s: '/static/printers/p2s.svg',
+        x1: '/static/printers/x1.svg',
+        x1c: '/static/printers/x1c.svg',
+        x1carbon: '/static/printers/x1c.svg',
+        x1e: '/static/printers/x1e.svg'
+      };
+      return thumbnails[normalized] || '/static/printers/x1c.svg';
+    }
+
     function formatRemainingMinutes(value) {
       const minutes = Number(value);
       if (!Number.isFinite(minutes) || minutes < 0) return '-';
@@ -463,7 +484,7 @@ def render_gallery_html() -> str:
 
     function renderPrinterCard(item) {
       const tone = statusTone(item);
-      const preview = item.job?.thumbnail_url || '/static/printers/x1c.jpg';
+      const preview = item.job?.thumbnail_url || printerThumbnailUrl(item.device_type);
       const progress = Math.max(0, Math.min(100, Number(item.job?.progress_percent ?? 0)));
       const queueCount = Number(item.queue?.count ?? 0);
       const healthScore = item.health?.score ?? '-';
@@ -472,7 +493,7 @@ def render_gallery_html() -> str:
         <article class="card">
           <a href="/printer/${encodeURIComponent(item.id)}">
             <div class="printer-media">
-              <img class="printer-art" src="${escapeHtml(preview)}" alt="${escapeHtml(item.name)} preview" onerror="this.onerror=null;this.src='/static/printers/x1c.jpg'">
+              <img class="printer-art" src="${escapeHtml(preview)}" alt="${escapeHtml(item.name)} preview" onerror="this.onerror=null;this.src=printerThumbnailUrl(item.device_type)">
               <div class="status-stack">
                 <div class="status-badges">
                   <span class="badge ${tone}">${escapeHtml(statusLabel(item))}</span>
@@ -659,7 +680,7 @@ def render_add_printer_html() -> str:
     .panel-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
     .form-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
     .field label { display:block; font-size:12px; color:#496986; margin-bottom:4px; }
-    .field input { width:100%; box-sizing:border-box; border:1px solid var(--field-border); border-radius:10px; padding:10px; font-size:14px; background:var(--field-bg); color:var(--text); }
+    .field input, .field select { width:100%; box-sizing:border-box; border:1px solid var(--field-border); border-radius:10px; padding:10px; font-size:14px; background:var(--field-bg); color:var(--text); }
     .field input[readonly] { opacity:.72; cursor:not-allowed; }
     .check-row { display:flex; gap:14px; flex-wrap:wrap; margin-top:6px; }
     .check { display:flex; align-items:center; gap:8px; font-size:13px; color:#2f4f6d; }
@@ -725,6 +746,23 @@ def render_add_printer_html() -> str:
           <div class="field">
             <label for="printerName">Printer Name</label>
             <input id="printerName" type="text" placeholder="X1C-002">
+          </div>
+          <div class="field">
+            <label for="printerDeviceType">Bambu Model</label>
+            <select id="printerDeviceType">
+              <option value="X1C">X1 Carbon</option>
+              <option value="X1">X1</option>
+              <option value="X1E">X1E</option>
+              <option value="P1S">P1S</option>
+              <option value="P1P">P1P</option>
+              <option value="P2S">P2S</option>
+              <option value="A1">A1</option>
+              <option value="A1MINI">A1 mini</option>
+              <option value="H2S">H2S</option>
+              <option value="H2D">H2D</option>
+              <option value="H2DPRO">H2D Pro</option>
+              <option value="H2C">H2C</option>
+            </select>
           </div>
           <div class="field">
             <label for="printerId">Printer ID</label>
@@ -856,6 +894,7 @@ def render_add_printer_html() -> str:
       document.getElementById('printerSerial').value = '';
       document.getElementById('printerAccessCode').value = '';
       document.getElementById('printerId').value = '';
+      document.getElementById('printerDeviceType').value = 'X1C';
       document.getElementById('printerLocalMqtt').checked = true;
       document.getElementById('printerEnableCamera').checked = true;
       document.getElementById('printerDisableSslVerify').checked = false;
@@ -882,6 +921,7 @@ def render_add_printer_html() -> str:
         document.getElementById('printerSerial').value = settings.serial || '';
         document.getElementById('printerAccessCode').value = settings.access_code || '';
         document.getElementById('printerId').value = item.id || '';
+        document.getElementById('printerDeviceType').value = settings.device_type || 'X1C';
         document.getElementById('printerLocalMqtt').checked = !!settings.local_mqtt;
         document.getElementById('printerEnableCamera').checked = !!settings.enable_camera;
         document.getElementById('printerDisableSslVerify').checked = !!settings.disable_ssl_verify;
@@ -951,7 +991,7 @@ def render_add_printer_html() -> str:
         host: document.getElementById('printerHost').value.trim(),
         serial: document.getElementById('printerSerial').value.trim(),
         access_code: document.getElementById('printerAccessCode').value.trim(),
-        device_type: 'unknown',
+        device_type: document.getElementById('printerDeviceType').value,
         local_mqtt: document.getElementById('printerLocalMqtt').checked,
         enable_camera: document.getElementById('printerEnableCamera').checked,
         disable_ssl_verify: document.getElementById('printerDisableSslVerify').checked
