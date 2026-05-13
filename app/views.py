@@ -16,7 +16,7 @@ def render_gallery_html() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <meta id="themeColorMeta" name="theme-color" content="#cfe2f7">
+  <meta id="themeColorMeta" name="theme-color" content="#1f2026">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -29,7 +29,7 @@ def render_gallery_html() -> str:
   <title>PrintLab - Printers</title>
   <script>
     (function() {
-      const theme = localStorage.getItem("printlab-theme") === "dark" ? "dark" : "light";
+      const theme = localStorage.getItem("printlab-theme") === "light" ? "light" : "dark";
       document.documentElement.dataset.theme = theme;
     })();
   </script>
@@ -39,48 +39,48 @@ def render_gallery_html() -> str:
       --safe-right: env(safe-area-inset-right, 0px);
       --safe-bottom: env(safe-area-inset-bottom, 0px);
       --safe-left: env(safe-area-inset-left, 0px);
-      --bg: #e6f0fb;
-      --text: #213245;
-      --panel: linear-gradient(180deg, #f4f8fc 0%, #eaf2fb 100%);
-      --panel-border: #cfe0f3;
+      --bg: #1f2026;
+      --text: #f3f5f7;
+      --panel: linear-gradient(180deg, #2b2d33 0%, #2b2d33 100%);
+      --panel-border: #444852;
       --panel-shadow: 18px 0 30px rgba(21,50,80,.18);
       --overlay: rgba(18,34,52,.36);
-      --card: #fff;
+      --card: #2b2d33;
       --card-shadow: 0 10px 30px rgba(42,90,138,.16);
-      --muted: #5d738a;
-      --button-bg: #1f4f7b;
-      --button-text: #fff;
-      --tab-bg: #edf4fb;
-      --tab-border: #bdd2e8;
-      --tab-text: #375a79;
-      --tab-hover: #e3eef9;
-      --toggle-bg: #dbe9f7;
-      --toggle-text: #244563;
-      --toggle-hover: #c6dbef;
-      --close-text: #365877;
-      --theme-color: #cfe2f7;
+      --muted: #9aa0aa;
+      --button-bg: #20c465;
+      --button-text: #2b2d33;
+      --tab-bg: #343741;
+      --tab-border: #444852;
+      --tab-text: #c7ccd3;
+      --tab-hover: #3b3e47;
+      --toggle-bg: #343741;
+      --toggle-text: #f3f5f7;
+      --toggle-hover: #3b3e47;
+      --close-text: #c7ccd3;
+      --theme-color: #1f2026;
     }
     :root[data-theme="dark"] {
-      --bg: #0e1723;
-      --text: #edf5ff;
-      --panel: linear-gradient(180deg, #132131 0%, #0f1b2a 100%);
-      --panel-border: #24384d;
+      --bg: #1f2026;
+      --text: #f3f5f7;
+      --panel: linear-gradient(180deg, #2b2d33 0%, #1a1b20 100%);
+      --panel-border: #444852;
       --panel-shadow: 18px 0 36px rgba(1,6,14,.48);
       --overlay: rgba(4,10,18,.68);
-      --card: #162231;
+      --card: #2b2d33;
       --card-shadow: 0 14px 34px rgba(1,6,14,.32);
-      --muted: #9db5cf;
-      --button-bg: #2c6aa0;
-      --button-text: #f5faff;
-      --tab-bg: #172536;
-      --tab-border: #2a4158;
-      --tab-text: #d7e7f8;
-      --tab-hover: #203247;
-      --toggle-bg: #1f3146;
-      --toggle-text: #d9ebfd;
-      --toggle-hover: #28415d;
-      --close-text: #d0e4f8;
-      --theme-color: #0e1723;
+      --muted: #9aa0aa;
+      --button-bg: #20c465;
+      --button-text: #07170e;
+      --tab-bg: #343741;
+      --tab-border: #444852;
+      --tab-text: #c7ccd3;
+      --tab-hover: #3b3e47;
+      --toggle-bg: #343741;
+      --toggle-text: #c7ccd3;
+      --toggle-hover: #3b3e47;
+      --close-text: #c7ccd3;
+      --theme-color: #1f2026;
     }
     * { box-sizing:border-box; }
     html { color-scheme: light; min-height:100%; background:var(--bg); }
@@ -136,7 +136,7 @@ def render_gallery_html() -> str:
     }
     .badge.ok { background:rgba(229,247,238,.92); color:#2f8b56; }
     .badge.bad { background:rgba(253,236,235,.94); color:#a0413b; }
-    .badge.info { background:rgba(237,244,251,.94); color:#375a79; }
+    .badge.info { background:rgba(237,244,251,.94); color:#c7ccd3; }
     .badge.warning { background:rgba(255,242,215,.96); color:#926125; }
     .name-row { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; flex-wrap:wrap; }
     .name-block { min-width:0; flex:1 1 180px; }
@@ -313,17 +313,17 @@ def render_gallery_html() -> str:
     };
 
     function applyTheme(theme) {
-      const nextTheme = theme === 'dark' ? 'dark' : 'light';
+      const nextTheme = theme === 'light' ? 'light' : 'dark';
       document.documentElement.dataset.theme = nextTheme;
       localStorage.setItem(themeStorageKey, nextTheme);
       const toggle = document.getElementById('themeToggle');
       if (toggle) toggle.textContent = nextTheme === 'dark' ? 'Light' : 'Dark';
       const meta = document.getElementById('themeColorMeta');
-      if (meta) meta.setAttribute('content', nextTheme === 'dark' ? '#0e1723' : '#cfe2f7');
+      if (meta) meta.setAttribute('content', '#1f2026');
     }
 
     function toggleTheme() {
-      const current = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+      const current = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
       applyTheme(current === 'dark' ? 'light' : 'dark');
     }
 
@@ -571,7 +571,7 @@ def render_add_printer_html() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <meta id="themeColorMeta" name="theme-color" content="#cfe2f7">
+  <meta id="themeColorMeta" name="theme-color" content="#1f2026">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -584,7 +584,7 @@ def render_add_printer_html() -> str:
   <title>PrintLab - Add Printer</title>
   <script>
     (function() {
-      const theme = localStorage.getItem("printlab-theme") === "dark" ? "dark" : "light";
+      const theme = localStorage.getItem("printlab-theme") === "light" ? "light" : "dark";
       document.documentElement.dataset.theme = theme;
     })();
   </script>
@@ -594,58 +594,58 @@ def render_add_printer_html() -> str:
       --safe-right: env(safe-area-inset-right, 0px);
       --safe-bottom: env(safe-area-inset-bottom, 0px);
       --safe-left: env(safe-area-inset-left, 0px);
-      --bg: #e6f0fb;
-      --text: #213245;
-      --panel: linear-gradient(180deg, #f4f8fc 0%, #eaf2fb 100%);
-      --panel-border: #cfe0f3;
+      --bg: #1f2026;
+      --text: #f3f5f7;
+      --panel: linear-gradient(180deg, #2b2d33 0%, #2b2d33 100%);
+      --panel-border: #444852;
       --panel-shadow: 18px 0 30px rgba(21,50,80,.18);
       --overlay: rgba(18,34,52,.36);
-      --card: #fff;
+      --card: #2b2d33;
       --card-shadow: 0 10px 30px rgba(42,90,138,.16);
-      --muted: #5d738a;
-      --button-bg: #1f4f7b;
-      --button-text: #fff;
-      --tab-bg: #edf4fb;
-      --tab-border: #bdd2e8;
-      --tab-text: #375a79;
-      --tab-active-bg: #1f4f7b;
-      --tab-active-border: #1f4f7b;
-      --tab-active-text: #fff;
-      --toggle-bg: #dbe9f7;
-      --toggle-text: #244563;
-      --toggle-hover: #c6dbef;
-      --close-text: #365877;
-      --field-bg: #fff;
-      --field-border: #c4d9ee;
-      --item-bg: #f9fcff;
-      --item-border: #d6e4f2;
+      --muted: #9aa0aa;
+      --button-bg: #20c465;
+      --button-text: #2b2d33;
+      --tab-bg: #343741;
+      --tab-border: #444852;
+      --tab-text: #c7ccd3;
+      --tab-active-bg: #20c465;
+      --tab-active-border: #20c465;
+      --tab-active-text: #2b2d33;
+      --toggle-bg: #343741;
+      --toggle-text: #f3f5f7;
+      --toggle-hover: #3b3e47;
+      --close-text: #c7ccd3;
+      --field-bg: #2b2d33;
+      --field-border: #444852;
+      --item-bg: #2b2d33;
+      --item-border: #444852;
     }
     :root[data-theme="dark"] {
-      --bg: #0e1723;
-      --text: #edf5ff;
-      --panel: linear-gradient(180deg, #132131 0%, #0f1b2a 100%);
-      --panel-border: #24384d;
+      --bg: #1f2026;
+      --text: #f3f5f7;
+      --panel: linear-gradient(180deg, #2b2d33 0%, #1a1b20 100%);
+      --panel-border: #444852;
       --panel-shadow: 18px 0 36px rgba(1,6,14,.48);
       --overlay: rgba(4,10,18,.68);
-      --card: #162231;
+      --card: #2b2d33;
       --card-shadow: 0 14px 34px rgba(1,6,14,.32);
-      --muted: #9db5cf;
-      --button-bg: #2c6aa0;
-      --button-text: #f5faff;
-      --tab-bg: #172536;
-      --tab-border: #2a4158;
-      --tab-text: #d7e7f8;
-      --tab-active-bg: #2c6aa0;
-      --tab-active-border: #2c6aa0;
-      --tab-active-text: #f5faff;
-      --toggle-bg: #1f3146;
-      --toggle-text: #d9ebfd;
-      --toggle-hover: #28415d;
-      --close-text: #d0e4f8;
-      --field-bg: #0f1b2a;
-      --field-border: #2a4158;
-      --item-bg: #122031;
-      --item-border: #29425a;
+      --muted: #9aa0aa;
+      --button-bg: #20c465;
+      --button-text: #07170e;
+      --tab-bg: #343741;
+      --tab-border: #444852;
+      --tab-text: #c7ccd3;
+      --tab-active-bg: #20c465;
+      --tab-active-border: #20c465;
+      --tab-active-text: #07170e;
+      --toggle-bg: #343741;
+      --toggle-text: #c7ccd3;
+      --toggle-hover: #3b3e47;
+      --close-text: #c7ccd3;
+      --field-bg: #1a1b20;
+      --field-border: #444852;
+      --item-bg: #2b2d33;
+      --item-border: #444852;
     }
     * { box-sizing:border-box; }
     html { color-scheme: light; min-height:100%; background:var(--bg); }
@@ -680,18 +680,18 @@ def render_add_printer_html() -> str:
     .panel p { margin:0 0 14px; color:var(--muted); }
     .panel-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
     .form-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
-    .field label { display:block; font-size:12px; color:#496986; margin-bottom:4px; }
+    .field label { display:block; font-size:12px; color:#9aa0aa; margin-bottom:4px; }
     .field input, .field select { width:100%; box-sizing:border-box; border:1px solid var(--field-border); border-radius:10px; padding:10px; font-size:14px; background:var(--field-bg); color:var(--text); }
     .field input[readonly] { opacity:.72; cursor:not-allowed; }
     .check-row { display:flex; gap:14px; flex-wrap:wrap; margin-top:6px; }
-    .check { display:flex; align-items:center; gap:8px; font-size:13px; color:#2f4f6d; }
+    .check { display:flex; align-items:center; gap:8px; font-size:13px; color:#c7ccd3; }
     .actions { display:flex; gap:8px; margin-top:14px; }
     .btn { border:0; border-radius:10px; padding:10px 14px; cursor:pointer; font-weight:600; }
     .btn-primary { background:var(--button-bg); color:var(--button-text); }
     .btn-light { background:var(--toggle-bg); color:var(--toggle-text); }
-    .btn-danger { background:#b8433b; color:#fff; }
+    .btn-danger { background:#b8433b; color:#2b2d33; }
     .btn-danger[disabled] { opacity:.55; cursor:not-allowed; }
-    .status { min-height:18px; margin-top:10px; color:#496986; font-size:12px; }
+    .status { min-height:18px; margin-top:10px; color:#9aa0aa; font-size:12px; }
     .status.error { color:#8f3d36; }
     .printer-list { display:grid; gap:10px; margin-top:14px; }
     .printer-item { border:1px solid var(--item-border); border-radius:12px; padding:12px; background:var(--item-bg); }
@@ -834,17 +834,17 @@ def render_add_printer_html() -> str:
     };
 
     function applyTheme(theme) {
-      const nextTheme = theme === 'dark' ? 'dark' : 'light';
+      const nextTheme = theme === 'light' ? 'light' : 'dark';
       document.documentElement.dataset.theme = nextTheme;
       localStorage.setItem(themeStorageKey, nextTheme);
       const toggle = document.getElementById('themeToggle');
       if (toggle) toggle.textContent = nextTheme === 'dark' ? 'Light' : 'Dark';
       const meta = document.getElementById('themeColorMeta');
-      if (meta) meta.setAttribute('content', nextTheme === 'dark' ? '#0e1723' : '#cfe2f7');
+      if (meta) meta.setAttribute('content', '#1f2026');
     }
 
     function toggleTheme() {
-      const current = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+      const current = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
       applyTheme(current === 'dark' ? 'light' : 'dark');
     }
 
@@ -1053,7 +1053,7 @@ def render_makerworks_search_html() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <meta id="themeColorMeta" name="theme-color" content="#e6f0fb">
+  <meta id="themeColorMeta" name="theme-color" content="#1f2026">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1066,13 +1066,13 @@ def render_makerworks_search_html() -> str:
   <title>PrintLab - MakerWorks Search</title>
   <script>
     (function() {
-      const theme = localStorage.getItem("printlab-theme") === "dark" ? "dark" : "light";
+      const theme = localStorage.getItem("printlab-theme") === "light" ? "light" : "dark";
       document.documentElement.dataset.theme = theme;
     })();
   </script>
   <style>
-    :root { --safe-top:env(safe-area-inset-top, 0px); --safe-right:env(safe-area-inset-right, 0px); --safe-bottom:env(safe-area-inset-bottom, 0px); --safe-left:env(safe-area-inset-left, 0px); --bg:#e6f0fb; --text:#213245; --panel:#fff; --line:#cfe0f3; --soft:#edf4fb; --muted:#5d738a; --button:#1f4f7b; --button-text:#fff; --accent:#1f84ea; }
-    :root[data-theme="dark"] { --bg:#0e1723; --text:#edf5ff; --panel:#162231; --line:#24384d; --soft:#132131; --muted:#9db5cf; --button:#2c6aa0; --button-text:#f5faff; --accent:#63b3ff; }
+    :root { --safe-top:env(safe-area-inset-top, 0px); --safe-right:env(safe-area-inset-right, 0px); --safe-bottom:env(safe-area-inset-bottom, 0px); --safe-left:env(safe-area-inset-left, 0px); --bg:#1f2026; --text:#f3f5f7; --panel:#2b2d33; --line:#444852; --soft:#343741; --muted:#9aa0aa; --button:#20c465; --button-text:#2b2d33; --accent:#20c465; }
+    :root[data-theme="dark"] { --bg:#1f2026; --text:#f3f5f7; --panel:#2b2d33; --line:#444852; --soft:#2b2d33; --muted:#9aa0aa; --button:#20c465; --button-text:#07170e; --accent:#20c465; }
     * { box-sizing:border-box; }
     html { min-height:100%; background:var(--bg); }
     body { margin:0; font-family:"Segoe UI",sans-serif; background:var(--bg); color:var(--text); min-height:100vh; min-height:100dvh; }
@@ -1227,7 +1227,7 @@ def render_makerworks_search_html() -> str:
     function escapeHtml(value) { return String(value ?? '').replace(/[&<>\"']/g, (char) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;' }[char])); }
     function makerworksPlaceholder(item) {
       const label = String(item?.name || 'MakerWorks').slice(0, 32);
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320" viewBox="0 0 480 320"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#edf5fd"/><stop offset="1" stop-color="#d6e8f7"/></linearGradient></defs><rect width="480" height="320" fill="url(#g)"/><rect x="32" y="32" width="416" height="256" rx="22" fill="#ffffff" fill-opacity=".55" stroke="#8fb2cf" stroke-opacity=".55"/><text x="240" y="162" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="28" font-weight="700" fill="#23405c">${escapeHtml(label)}</text></svg>`;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320" viewBox="0 0 480 320"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#2b2d33"/><stop offset="1" stop-color="#1a1b20"/></linearGradient></defs><rect width="480" height="320" fill="url(#g)"/><rect x="32" y="32" width="416" height="256" rx="22" fill="#343741" fill-opacity=".75" stroke="#444852" stroke-opacity=".9"/><text x="240" y="162" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="28" font-weight="700" fill="#f3f5f7">${escapeHtml(label)}</text></svg>`;
       return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
     }
     function getRoutingModels() { try { return JSON.parse(localStorage.getItem(routingKey) || '[]'); } catch (_error) { return []; } }
@@ -1444,7 +1444,7 @@ def render_makerworks_routing_html() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <meta id="themeColorMeta" name="theme-color" content="#ecf3fb">
+  <meta id="themeColorMeta" name="theme-color" content="#1f2026">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1457,13 +1457,13 @@ def render_makerworks_routing_html() -> str:
   <title>PrintLab - Routing Board</title>
   <script>
     (function() {
-      const theme = localStorage.getItem("printlab-theme") === "dark" ? "dark" : "light";
+      const theme = localStorage.getItem("printlab-theme") === "light" ? "light" : "dark";
       document.documentElement.dataset.theme = theme;
     })();
   </script>
   <style>
-    :root { --safe-top:env(safe-area-inset-top, 0px); --safe-right:env(safe-area-inset-right, 0px); --safe-bottom:env(safe-area-inset-bottom, 0px); --safe-left:env(safe-area-inset-left, 0px); --bg:#ecf3fb; --text:#1d2f45; --panel:#fff; --line:#cbddef; --soft:#eff5fb; --button:#1f4f7b; --button-text:#fff; --muted:#617991; --accent:#2d94ff; --success:#2f9b65; --queue-fresh:#3296ff; }
-    :root[data-theme="dark"] { --bg:#0d1722; --text:#edf5ff; --panel:#162231; --line:#294056; --soft:#122031; --button:#2c6aa0; --button-text:#fff; --muted:#9fb8d0; --accent:#63b3ff; --success:#6fd39f; --queue-fresh:#78c2ff; }
+    :root { --safe-top:env(safe-area-inset-top, 0px); --safe-right:env(safe-area-inset-right, 0px); --safe-bottom:env(safe-area-inset-bottom, 0px); --safe-left:env(safe-area-inset-left, 0px); --bg:#1f2026; --text:#f3f5f7; --panel:#2b2d33; --line:#444852; --soft:#343741; --button:#20c465; --button-text:#2b2d33; --muted:#9aa0aa; --accent:#20c465; --success:#2f9b65; --queue-fresh:#3296ff; }
+    :root[data-theme="dark"] { --bg:#1f2026; --text:#f3f5f7; --panel:#2b2d33; --line:#444852; --soft:#2b2d33; --button:#20c465; --button-text:#2b2d33; --muted:#9aa0aa; --accent:#20c465; --success:#6fd39f; --queue-fresh:#78c2ff; }
     * { box-sizing:border-box; }
     html { min-height:100%; background:var(--bg); }
     body { margin:0; font-family:"Segoe UI",sans-serif; background:radial-gradient(circle at top left, rgba(45,148,255,.08), transparent 32%), var(--bg); color:var(--text); min-height:100vh; min-height:100dvh; }
@@ -2391,7 +2391,7 @@ def render_conversion_html() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <meta id="themeColorMeta" name="theme-color" content="#cfe2f7">
+  <meta id="themeColorMeta" name="theme-color" content="#1f2026">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -2404,7 +2404,7 @@ def render_conversion_html() -> str:
   <title>PrintLab - 3D Conversion</title>
   <script>
     (function() {
-      const theme = localStorage.getItem("printlab-theme") === "dark" ? "dark" : "light";
+      const theme = localStorage.getItem("printlab-theme") === "light" ? "light" : "dark";
       document.documentElement.dataset.theme = theme;
     })();
   </script>
@@ -2414,25 +2414,25 @@ def render_conversion_html() -> str:
       --safe-right: env(safe-area-inset-right, 0px);
       --safe-bottom: env(safe-area-inset-bottom, 0px);
       --safe-left: env(safe-area-inset-left, 0px);
-      --bg: #e7f0fa;
-      --bg-2: #d6e5f7;
-      --text: #203043;
-      --muted: #5e758c;
+      --bg: #1f2026;
+      --bg-2: #1a1b20;
+      --text: #f3f5f7;
+      --muted: #9aa0aa;
       --card: rgba(255, 255, 255, 0.72);
       --line: rgba(89, 126, 164, 0.2);
-      --button: #1f84ea;
-      --button-text: #ffffff;
+      --button: #20c465;
+      --button-text: #07170e;
       --soft: rgba(255, 255, 255, 0.68);
       --shadow: 0 18px 38px rgba(31, 72, 116, 0.16);
     }
     :root[data-theme="dark"] {
-      --bg: #101925;
-      --bg-2: #172537;
-      --text: #ecf4ff;
-      --muted: #9fb6cf;
+      --bg: #1f2026;
+      --bg-2: #1a1b20;
+      --text: #f3f5f7;
+      --muted: #9aa0aa;
       --card: rgba(16, 28, 42, 0.82);
       --line: rgba(136, 164, 194, 0.2);
-      --button: #54aaf5;
+      --button: #20c465;
       --button-text: #09131d;
       --soft: rgba(255, 255, 255, 0.08);
       --shadow: 0 24px 44px rgba(1, 8, 17, 0.4);
@@ -2569,7 +2569,7 @@ def render_conversion_html() -> str:
       background: #f3f8fe;
     }
     :root[data-theme="dark"] .select option {
-      color: #edf5ff;
+      color: #f3f5f7;
       background: #162638;
     }
     .dropzone {
@@ -2799,13 +2799,13 @@ def render_conversion_html() -> str:
     };
 
     function applyTheme(theme) {
-      const nextTheme = theme === "dark" ? "dark" : "light";
+      const nextTheme = theme === "light" ? "light" : "dark";
       document.documentElement.dataset.theme = nextTheme;
       localStorage.setItem("printlab-theme", nextTheme);
       const toggle = document.getElementById("themeToggle");
       if (toggle) toggle.textContent = nextTheme === "dark" ? "Light" : "Dark";
       const meta = document.getElementById("themeColorMeta");
-      if (meta) meta.setAttribute("content", nextTheme === "dark" ? "#101925" : "#cfe2f7");
+      if (meta) meta.setAttribute("content", "#1f2026");
     }
 
     function toggleTheme() {

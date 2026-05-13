@@ -3,13 +3,25 @@
   "short_name": "PrintLab",
   "id": "/",
   "description": "Monitor and control your printer from a mobile home app.",
+  "lang": "en",
+  "dir": "ltr",
   "start_url": "/",
   "scope": "/",
   "display_override": ["standalone", "minimal-ui"],
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#dfeaf8",
-  "theme_color": "#cfe2f7",
+  "background_color": "#1f2026",
+  "theme_color": "#1f2026",
+  "categories": ["productivity", "utilities"],
+  "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "Open the printer dashboard.",
+      "url": "/"
+    }
+  ],
   "icons": [
     {
       "src": "/icon-192.png",

@@ -386,18 +386,25 @@ def _login_html(next_path: str) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="application-name" content="PrintLab">
+  <meta name="theme-color" content="#1f2026">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PrintLab">
   <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+  <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" sizes="152x152" href="/apple-touch-icon-152x152.png">
   <link rel="apple-touch-icon" sizes="167x167" href="/apple-touch-icon-167x167.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-180x180.png">
   <title>PrintLab Login</title>
   <style>
     :root {{
-      --bg: linear-gradient(160deg, #eef4fb 0%, #d7e6f7 100%);
+      --bg: linear-gradient(160deg, #1f2026 0%, #1a1b20 100%);
       --panel: rgba(255,255,255,.94);
-      --text: #183149;
-      --muted: #5f768e;
-      --accent: #1f4f7b;
+      --text: #f3f5f7;
+      --muted: #9aa0aa;
+      --accent: #20c465;
       --border: #c8d9eb;
       --shadow: 0 28px 70px rgba(24,49,73,.18);
     }}
@@ -408,7 +415,7 @@ def _login_html(next_path: str) -> str:
     p {{ margin: 0 0 18px; color: var(--muted); }}
     label {{ display: block; margin: 0 0 6px; font-size: 13px; font-weight: 600; }}
     input {{ width: 100%; margin: 0 0 14px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); font-size: 15px; }}
-    button {{ width: 100%; border: 0; border-radius: 12px; padding: 12px 14px; background: var(--accent); color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; }}
+    button {{ width: 100%; border: 0; border-radius: 12px; padding: 12px 14px; background: var(--accent); color: #2b2d33; font-size: 15px; font-weight: 700; cursor: pointer; }}
     #status {{ min-height: 20px; margin-top: 12px; color: #9d2d2d; font-size: 13px; }}
   </style>
 </head>

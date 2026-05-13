@@ -4,6 +4,20 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import app.routers.api as api_routes
+from app.views import render_add_printer_html, render_conversion_html, render_gallery_html
+
+
+def test_live_printlab_pages_default_to_suite_control_panel_theme() -> None:
+    pages = [
+        render_gallery_html(),
+        render_add_printer_html(),
+        render_conversion_html(),
+    ]
+
+    for html in pages:
+        assert 'const theme = localStorage.getItem("printlab-theme") === "light" ? "light" : "dark";' in html
+        assert "--bg: #1f2026" in html
+        assert "#e6f0fb" not in html
 
 
 def test_makerworks_library_cards_use_proxied_thumbnails() -> None:
