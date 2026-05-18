@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 
 import pytest
 from fastapi import FastAPI, Request
@@ -122,6 +123,19 @@ def test_login_sets_session_and_session_endpoint_returns_csrf(monkeypatch) -> No
     assert session.json()["csrf_token"]
     assert session.json()["username"] == "admin"
     assert session.json()["role"] == "admin"
+
+
+def test_login_page_panel_sets_readable_text_color(monkeypatch) -> None:
+    _set_admin_auth(monkeypatch)
+    app = _build_app()
+
+    with TestClient(app) as client:
+        response = client.get("/login")
+
+    assert response.status_code == 200
+    assert "<h1>PrintLab</h1>" in response.text
+    assert "--panel-text: #2b2d33;" in response.text
+    assert re.search(r"\.panel \{[^}]*color: var\(--panel-text\);", response.text)
 
 
 def test_login_accepts_admin_email(monkeypatch) -> None:

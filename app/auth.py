@@ -402,6 +402,7 @@ def _login_html(next_path: str) -> str:
     :root {{
       --bg: linear-gradient(160deg, #1f2026 0%, #1a1b20 100%);
       --panel: rgba(255,255,255,.94);
+      --panel-text: #2b2d33;
       --text: #f3f5f7;
       --muted: #9aa0aa;
       --accent: #20c465;
@@ -410,7 +411,7 @@ def _login_html(next_path: str) -> str:
     }}
     * {{ box-sizing: border-box; }}
     body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--text); font-family: "Segoe UI", sans-serif; }}
-    .panel {{ width: min(420px, calc(100vw - 32px)); background: var(--panel); border: 1px solid var(--border); border-radius: 20px; padding: 28px; box-shadow: var(--shadow); }}
+    .panel {{ width: min(420px, calc(100vw - 32px)); background: var(--panel); color: var(--panel-text); border: 1px solid var(--border); border-radius: 20px; padding: 28px; box-shadow: var(--shadow); }}
     h1 {{ margin: 0 0 8px; }}
     p {{ margin: 0 0 18px; color: var(--muted); }}
     label {{ display: block; margin: 0 0 6px; font-size: 13px; font-weight: 600; }}
