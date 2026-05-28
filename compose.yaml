@@ -111,3 +111,10 @@ services:
       - "${APP_PORT:-8080}:8080"
     volumes:
       - ./data:/data
+    networks:
+      - makerworks-net
+
+networks:
+  makerworks-net:
+    name: makerworks-net
+    external: true
