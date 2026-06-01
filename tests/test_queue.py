@@ -708,6 +708,47 @@ def test_print_job_manager_uses_order_storage_path_for_asset_download() -> None:
     assert result["status"] == "queued"
 
 
+def test_print_job_manager_route_only_keeps_filament_mismatch_for_human_routing() -> None:
+    printer = _FakePrinter(
+        "printer-1",
+        connected=True,
+        busy=False,
+        queue_count=0,
+        loaded_filament={"type": "PETG", "name": "PETG Black", "color_name": "Black", "color_hex": "#000000"},
+    )
+
+    class _PlaLibraryWorks(_FakeWorksService):
+        async def makerworks_library_item(self, model_id: str, *, include_raw: bool = False) -> dict[str, object]:
+            result = await super().makerworks_library_item(model_id, include_raw=include_raw)
+            result["item"]["materials"] = ["PLA"]
+            return result
+
+    manager = PrintJobManager(_FakePrinterManager([printer]), _PlaLibraryWorks())
+
+    result = asyncio.run(
+        manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(
+                model_id="widget-1",
+                idempotency_key="mw-human-route",
+                source_job_id="source-job-1",
+                source_order_id="source-order-1",
+                route_only=True,
+                metadata={"material": "PLA", "colors": ["Charcoal #000000"]},
+            ),
+            actor="makerworks",
+        )
+    )
+
+    assert result["status"] == "queued"
+    assert result["routing_hold"] is True
+    assert result["printer_id"] is None
+    assert result["preflight"]["selected_printer_id"] is None
+    assert result["preflight"]["qualified_printer_count"] == 0
+    assert result["preflight"]["candidates"][0]["qualifies"] is False
+    assert "Required filament not available" in result["preflight"]["candidates"][0]["reason"]
+    assert printer.created_jobs[0]["idempotency_key"] == "mw-human-route"
+
+
 def test_print_job_manager_preflight_warns_when_loaded_filament_is_low() -> None:
     printer = _FakePrinter(
         "printer-1",

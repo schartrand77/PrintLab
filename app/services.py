@@ -6088,7 +6088,9 @@ class PrintJobManager:
                 }
             else:
                 preflight = await self.makerworks_preflight(payload.model_id, printer_id=payload.printer_id, metadata=payload.metadata)
-                if payload.printer_id:
+                if payload.route_only:
+                    target_printer = None
+                elif payload.printer_id:
                     selected = next((item for item in preflight["candidates"] if item.get("printer_id") == payload.printer_id), None)
                     if not selected or not selected.get("qualifies"):
                         raise ValueError((selected or {}).get("reason") or f"Printer {payload.printer_id} did not pass preflight.")
@@ -6132,6 +6134,8 @@ class PrintJobManager:
                             "selected_printer_id": preflight.get("selected_printer_id"),
                             "qualified_printer_count": preflight.get("qualified_printer_count"),
                             "approval_required": preflight.get("approval_required"),
+                            "requirements": preflight.get("requirements"),
+                            "candidates": preflight.get("candidates") or [],
                         },
                         "plate_gcode": payload.plate_gcode,
                         "start_at": payload.start_at,
