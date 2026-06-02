@@ -351,6 +351,8 @@ class _FakeWorksService:
                 "name": "Widget",
                 "model_url": "https://makerworks.local/models/widget",
                 "download_url": "https://makerworks.local/files/widget.3mf",
+                "thumbnail_url": "https://makerworks.local/files/widget-cover.webp",
+                "thumbnail_proxy_url": "/api/works/makerworks/asset?url=https%3A%2F%2Fmakerworks.local%2Ffiles%2Fwidget-cover.webp",
                 "file_type": "3mf",
                 "queue_supported": True,
                 "materials": [],
@@ -409,6 +411,9 @@ def test_print_job_manager_route_only_submission_waits_for_routing() -> None:
     assert result["queue_item_id"] is None
     assert result["file_path"] is None
     assert result["routing_hold"] is True
+    assert result["model_name"] == "Widget"
+    assert result["thumbnail_url"] == "https://makerworks.local/files/widget-cover.webp"
+    assert result["thumbnail_proxy_url"].startswith("/api/works/makerworks/asset")
     assert printer._queue_count == 0
 
 

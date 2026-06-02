@@ -1510,6 +1510,10 @@ def render_makerworks_routing_html() -> str:
     .node.collapsed { padding-top:8px; padding-bottom:8px; }
     .node-header { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; min-width:0; }
     .node-heading { display:grid; gap:4px; min-width:0; }
+    .node-summary { display:grid; grid-template-columns:52px minmax(0,1fr); gap:8px; align-items:start; min-width:0; }
+    .node-summary.no-thumb { grid-template-columns:minmax(0,1fr); }
+    .node-thumb { width:52px; height:52px; border-radius:8px; border:1px solid var(--line); background:var(--soft); object-fit:cover; }
+    .node-summary-text { display:grid; gap:4px; min-width:0; }
     .empty-state { border:1px dashed var(--line); border-radius:14px; padding:12px; color:var(--muted); font-size:12px; text-align:center; }
     :root[data-theme="dark"] .node { background:linear-gradient(180deg, rgba(22,34,49,.98), rgba(18,32,49,.98)); }
     .node.selected { border-color:var(--accent); box-shadow:0 0 0 2px rgba(45,148,255,.18); }
@@ -1758,21 +1762,23 @@ def render_makerworks_routing_html() -> str:
       document.querySelectorAll('#leftStack article.node.routeable, #rightStack article.node[data-printer-id]').forEach((card) => {
         const cardId = String(card.id || '');
         const handle = card.querySelector('.drag-handle, .dot');
+        const summaryBlock = card.querySelector(':scope > .node-summary');
         const title = card.querySelector(':scope > .node-title');
-        if (!title) {
+        const headingContent = summaryBlock || title;
+        if (!headingContent) {
           card.classList.toggle('collapsed', isCollapsed(cardId));
           const existingToggle = card.querySelector('.collapse-toggle');
           if (existingToggle) existingToggle.textContent = isCollapsed(cardId) ? 'Expand' : 'Collapse';
           return;
         }
-        const summary = title.nextElementSibling && title.nextElementSibling.classList.contains('node-meta')
+        const summary = !summaryBlock && title && title.nextElementSibling && title.nextElementSibling.classList.contains('node-meta')
           ? title.nextElementSibling
           : null;
         const header = document.createElement('div');
         header.className = 'node-header';
         const heading = document.createElement('div');
         heading.className = 'node-heading';
-        heading.appendChild(title);
+        heading.appendChild(headingContent);
         if (summary) heading.appendChild(summary);
         const toggle = document.createElement('button');
         toggle.type = 'button';
@@ -1783,7 +1789,7 @@ def render_makerworks_routing_html() -> str:
         header.appendChild(toggle);
         const body = document.createElement('div');
         body.className = 'node-body';
-        const remaining = Array.from(card.children).filter((child) => child !== handle && child !== title && child !== summary);
+        const remaining = Array.from(card.children).filter((child) => child !== handle && child !== headingContent && child !== summary);
         remaining.forEach((child) => body.appendChild(child));
         if (handle) card.appendChild(handle);
         card.appendChild(header);
@@ -2205,6 +2211,34 @@ def render_makerworks_routing_html() -> str:
     function completedJobTitle(item) {
       return item.model_name || item.file_name || item.source_job_id || item.id || 'Completed job';
     }
+    function routingJobTitle(item) {
+      return item.model_name || item.file_name || item.id || 'Queued job';
+    }
+    function routingJobNumber(item) {
+      return item.source_job_id || item.source_order_id || item.id || '';
+    }
+    function routingJobThumb(item) {
+      return String(item?.thumbnail_proxy_url || item?.thumbnail_url || '').trim();
+    }
+    function renderRoutingJobSummary(item, isChosen) {
+      if (isChosen) {
+        return `
+          <div class="node-title">${escapeHtml(item.name || 'Untitled model')}</div>
+          <div class="node-meta">${escapeHtml(`Chosen model - ${item.author || 'Unknown creator'}`)}</div>
+        `;
+      }
+      const thumb = routingJobThumb(item);
+      const jobNumber = routingJobNumber(item);
+      return `
+        <div class="node-summary ${thumb ? '' : 'no-thumb'}">
+          ${thumb ? `<img class="node-thumb" src="${escapeHtml(thumb)}" alt="" loading="lazy" onerror="this.remove(); this.closest('.node-summary')?.classList.add('no-thumb');" />` : ''}
+          <div class="node-summary-text">
+            <div class="node-title">${escapeHtml(routingJobTitle(item))}</div>
+            <div class="node-meta">${escapeHtml(`${String(item.status || 'queued').toUpperCase()}${jobNumber ? ` - Job ${jobNumber}` : ''}`)}</div>
+          </div>
+        </div>
+      `;
+    }
     function completedJobMeta(item) {
       const parts = [
         item.completed_at ? `Completed ${item.completed_at}` : 'Completion recorded',
@@ -2265,8 +2299,7 @@ def render_makerworks_routing_html() -> str:
                 <span class="drag-knob"></span>
               </span>
               ${isChosen || isStartedSubmitted ? '' : `<label class="batch-select-row" onclick="event.stopPropagation();"><input type="checkbox" ${isSelectedJob ? 'checked' : ''} onchange="toggleJobSelection('${escapeHtml(String(item.id || ''))}', this.checked)" />Batch route</label>`}
-              <div class="node-title">${escapeHtml(isChosen ? (item.name || 'Untitled model') : (item.model_name || item.file_name || item.id || 'Queued job'))}</div>
-              <div class="node-meta">${escapeHtml(isChosen ? `Chosen model • ${item.author || 'Unknown creator'}` : `${String(item.status || 'queued').toUpperCase()} • ${item.source_job_id || item.source_order_id || item.id}`)}</div>
+              ${renderRoutingJobSummary(item, isChosen)}
               <div class="node-meta">${escapeHtml(assignedPrinter ? `Connected to ${printers.find((printer) => printer.id === assignedPrinter)?.name || assignedPrinter}` : 'No printer connected yet')}</div>
               ${assignedPrinter ? `<div class="load-confirmation">Model Loaded</div>` : ''}
               ${isChosen ? `

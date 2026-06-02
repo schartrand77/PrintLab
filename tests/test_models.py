@@ -203,6 +203,11 @@ def test_render_makerworks_routing_page_contains_board_layout() -> None:
     assert "queued-routing-row" in html
     assert "queued-meta-row" in html
     assert "bambustudioopen://open?file=" in html
+    assert "function routingJobTitle(item)" in html
+    assert "function routingJobThumb(item)" in html
+    assert 'class="node-thumb"' in html
+    assert "item.model_name || item.file_name || item.id || 'Queued job'" in html
+    assert "Job ${jobNumber}" in html
 
 
 def test_render_makerworks_routing_page_contains_batch_current_print_controls() -> None:
