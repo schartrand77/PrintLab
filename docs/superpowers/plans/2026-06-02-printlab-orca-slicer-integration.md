@@ -385,6 +385,8 @@ Expected: pass.
 - Optional Modify: `README.md`
 - Optional Modify: `tests/test_slicer.py`
 
+**2026-06-02 status:** Blocked on a local built Orca executable. `.env` does not define `ORCASLICER_BINARY` or `ORCA_SLICER_BINARY`, `orca-slicer` / `orca-slicer.exe` were not found on PATH or common Windows install paths, and the sibling `slicerworks` repo does not contain a built Orca binary. PrintLab itself starts and `/api/slicer/capabilities` returns HTTP 200, but reports `engine_status.ready=false`, `binary="orca-slicer"`, `source="fallback"`, and `resolved_binary=""`.
+
 - [ ] **Step 1: Configure Orca binary locally**
 
 Set in `.env` or shell:
@@ -437,7 +439,7 @@ Record:
 **Files:**
 - All touched files.
 
-- [ ] **Step 1: Run Ruff**
+- [x] ~~**Step 1: Run Ruff**~~
 
 Run:
 
@@ -447,7 +449,7 @@ python -m ruff check app tests
 
 Expected: `All checks passed!`
 
-- [ ] **Step 2: Run full tests**
+- [x] ~~**Step 2: Run full tests**~~
 
 Run:
 
@@ -457,7 +459,7 @@ python -m pytest -q --basetemp C:\tmp\pytest-printlab-slicer
 
 Expected: all tests pass.
 
-- [ ] **Step 3: Confirm branch and diff**
+- [x] ~~**Step 3: Confirm branch and diff**~~
 
 Run:
 
