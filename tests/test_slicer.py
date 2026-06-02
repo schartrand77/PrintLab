@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -358,3 +361,49 @@ def test_save_slicer_job_api_rejects_completed_job_without_output_artifact(monke
 
     assert response.status_code == 400
     assert "output artifact" in response.text
+
+
+def test_real_orca_binary_smoke_slices_sample_model(tmp_path) -> None:
+    from app.slicer import OrcaSlicerAdapter, SlicerService
+
+    binary = os.environ.get("ORCASLICER_BINARY") or os.environ.get("ORCA_SLICER_BINARY")
+    if not binary:
+        pytest.skip("Set ORCASLICER_BINARY or ORCA_SLICER_BINARY to run the real Orca smoke test.")
+    binary_path = Path(binary)
+    if not binary_path.exists():
+        pytest.skip(f"Configured Orca binary does not exist: {binary_path}")
+
+    sample = tmp_path / "sample.stl"
+    sample.write_text(
+        "\n".join(
+            [
+                "solid printlab",
+                "facet normal 0 0 1",
+                "  outer loop",
+                "    vertex 0 0 0",
+                "    vertex 20 0 0",
+                "    vertex 0 20 0",
+                "  endloop",
+                "endfacet",
+                "facet normal 0 0 1",
+                "  outer loop",
+                "    vertex 20 0 0",
+                "    vertex 20 20 0",
+                "    vertex 0 20 0",
+                "  endloop",
+                "endfacet",
+                "endsolid printlab",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    service = SlicerService(root=tmp_path / "printlab-data", adapter=OrcaSlicerAdapter(binary=str(binary_path)))
+    job = service.create_from_routing_job({"id": "orca-smoke", "file_path": str(sample), "model_name": "Smoke STL"})
+
+    sliced = service.slice_job(job["id"])
+
+    assert sliced["status"] == "complete", sliced.get("stderr") or sliced.get("error_message")
+    output_artifact = next(item for item in sliced["artifacts"] if item["kind"] == "gcode_3mf")
+    assert output_artifact["size_bytes"] > 0

@@ -385,7 +385,7 @@ Expected: pass.
 - Optional Modify: `README.md`
 - Optional Modify: `tests/test_slicer.py`
 
-**2026-06-02 status:** Blocked on a local built Orca executable. `.env` does not define `ORCASLICER_BINARY` or `ORCA_SLICER_BINARY`, `orca-slicer` / `orca-slicer.exe` were not found on PATH or common Windows install paths, and the sibling `slicerworks` repo does not contain a built Orca binary. PrintLab itself starts and `/api/slicer/capabilities` returns HTTP 200, but reports `engine_status.ready=false`, `binary="orca-slicer"`, `source="fallback"`, and `resolved_binary=""`.
+**2026-06-02 status:** Blocked on a local built Orca executable. `.env` does not define `ORCASLICER_BINARY` or `ORCA_SLICER_BINARY`, `orca-slicer` / `orca-slicer.exe` were not found on PATH or common Windows install paths, and the sibling `slicerworks` repo does not contain a built Orca binary. PrintLab itself starts and `/api/slicer/capabilities` returns HTTP 200, but reports `engine_status.ready=false`, `binary="orca-slicer"`, `source="fallback"`, and `resolved_binary=""`. An optional pytest harness now exists at `tests/test_slicer.py::test_real_orca_binary_smoke_slices_sample_model`; it skips until one of the Orca binary env vars points to an existing executable.
 
 - [ ] **Step 1: Configure Orca binary locally**
 
