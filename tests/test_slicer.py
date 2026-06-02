@@ -311,6 +311,30 @@ def test_save_slicer_job_api_attaches_artifacts_to_routing_job(monkeypatch, tmp_
     assert attached["source_job_id"] == "route-1"
 
 
+def test_download_slicer_artifact_api_returns_recorded_output(monkeypatch, tmp_path) -> None:
+    import app.routers.api as api_routes
+    from app.slicer import OrcaSlicerAdapter, SlicerService
+
+    def runner(command: list[str]):
+        output_dir = command[command.index("--outputdir") + 1]
+        output_name = command[command.index("--export-3mf") + 1]
+        output_path = tmp_path / output_dir / output_name
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"real-orca-gcode-3mf")
+        return SimpleNamespace(returncode=0, stdout="sliced ok", stderr="")
+
+    service = SlicerService(root=tmp_path, adapter=OrcaSlicerAdapter(binary="orca-cli", runner=runner))
+    slicer_job = service.create_from_routing_job({"id": "route-1", "file_path": "/cache/widget.3mf"})
+    slicer_job = service.slice_job(slicer_job["id"])
+    monkeypatch.setattr(api_routes, "slicer_service", service)
+
+    response = TestClient(create_app()).get(f"/api/slicer/jobs/{slicer_job['id']}/artifacts/gcode_3mf/download")
+
+    assert response.status_code == 200
+    assert response.content == b"real-orca-gcode-3mf"
+    assert "output.gcode.3mf" in response.headers["content-disposition"]
+
+
 def test_save_slicer_job_api_rejects_completed_job_without_output_artifact(monkeypatch, tmp_path) -> None:
     import app.routers.api as api_routes
 

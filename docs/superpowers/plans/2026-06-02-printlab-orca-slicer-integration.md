@@ -338,7 +338,7 @@ Expected: pass.
 - Modify: `app/slicer.py`
 - Modify: `tests/test_slicer.py`
 
-- [ ] **Step 1: Add failing artifact download test**
+- [x] ~~**Step 1: Add failing artifact download test**~~
 
 In `tests/test_slicer.py`, create a slicer job with an output artifact and request:
 
@@ -354,11 +354,11 @@ assert response.content == b"real-orca-gcode-3mf"
 assert response.headers["content-disposition"] contains "output.gcode.3mf"
 ```
 
-- [ ] **Step 2: Add `SlicerService.artifact_path(job_id, kind)`**
+- [x] ~~**Step 2: Add `SlicerService.artifact_path(job_id, kind)`**~~
 
 Implementation rule: only return paths already recorded in the job's artifact list and still under the slicer job store.
 
-- [ ] **Step 3: Add FastAPI route**
+- [x] ~~**Step 3: Add FastAPI route**~~
 
 Add:
 
@@ -369,7 +369,7 @@ async def download_slicer_artifact(job_id: str, kind: str) -> FileResponse:
     return FileResponse(path, filename=path.name)
 ```
 
-- [ ] **Step 4: Run focused tests**
+- [x] ~~**Step 4: Run focused tests**~~
 
 Run:
 

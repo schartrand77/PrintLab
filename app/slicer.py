@@ -274,6 +274,19 @@ class SlicerService:
     def list_artifacts(self, job_id: str) -> list[dict[str, Any]]:
         return list(self.get_job(job_id).get("artifacts") or [])
 
+    def artifact_path(self, job_id: str, kind: str) -> Path:
+        job_dir = self._job_dir(job_id).resolve()
+        for artifact in self.list_artifacts(job_id):
+            if not isinstance(artifact, dict) or str(artifact.get("kind") or "") != kind:
+                continue
+            path = Path(str(artifact.get("path") or "")).resolve()
+            if job_dir not in path.parents and path != job_dir:
+                raise ValueError("Slicer artifact path resolved outside this slicer job.")
+            if not path.exists() or not path.is_file():
+                raise ValueError(f"Slicer artifact is missing: {kind}")
+            return path
+        raise ValueError(f"Unknown slicer artifact: {kind}")
+
     def slice_job(self, job_id: str) -> dict[str, Any]:
         job = self.get_job(job_id)
         job_dir = self._job_dir(job_id)

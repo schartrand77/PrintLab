@@ -7,7 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from app.auth import actor_from_request, require_role, role_from_request
 from app.conversion import (
@@ -638,6 +638,15 @@ async def slicer_job_artifacts(job_id: str) -> dict[str, Any]:
     try:
         items = slicer_service.list_artifacts(job_id)
         return {"items": items, "count": len(items)}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.get("/api/slicer/jobs/{job_id}/artifacts/{kind}/download")
+async def download_slicer_artifact(job_id: str, kind: str) -> FileResponse:
+    try:
+        path = slicer_service.artifact_path(job_id, kind)
+        return FileResponse(path, filename=path.name)
     except Exception as exc:
         _raise_api_error(exc)
 
