@@ -27,6 +27,39 @@ def test_orca_adapter_prefers_configured_binary_and_reports_ready(tmp_path) -> N
     assert status["source"] == "configured"
 
 
+def test_orca_adapter_reports_runtime_probe_failure(tmp_path) -> None:
+    from app.slicer import OrcaSlicerAdapter
+
+    configured = tmp_path / "orca-slicer"
+    configured.write_text("", encoding="utf-8")
+
+    def probe_runner(command: list[str]):
+        assert command == [str(configured), "--help"]
+        return SimpleNamespace(returncode=139, stdout="", stderr="Segmentation fault")
+
+    status = OrcaSlicerAdapter(binary=str(configured), probe_runner=probe_runner).engine_status()
+
+    assert status["ready"] is True
+    assert status["runtime_ready"] is False
+    assert status["probe_return_code"] == 139
+    assert "Segmentation fault" in status["probe_error"]
+
+
+def test_orca_adapter_reports_runtime_probe_success(tmp_path) -> None:
+    from app.slicer import OrcaSlicerAdapter
+
+    configured = tmp_path / "orca-slicer"
+    configured.write_text("", encoding="utf-8")
+
+    status = OrcaSlicerAdapter(
+        binary=str(configured),
+        probe_runner=lambda _command: SimpleNamespace(returncode=0, stdout="Usage: orca-slicer", stderr=""),
+    ).engine_status()
+
+    assert status["runtime_ready"] is True
+    assert status["probe_return_code"] == 0
+
+
 def test_orca_adapter_discovers_binary_from_common_install_paths(tmp_path) -> None:
     from app.slicer import OrcaSlicerAdapter
 

@@ -3552,14 +3552,17 @@ def render_slicer_html() -> str:
     }
 
     function renderEngineStatus(status) {
-      engineReady = Boolean(status?.ready);
+      const binaryReady = Boolean(status?.ready);
+      const runtimeReady = status?.runtime_ready !== false;
+      engineReady = binaryReady && runtimeReady;
       const badge = document.getElementById("orcaEngineStatus");
       const path = document.getElementById("orcaEnginePath");
-      badge.textContent = engineReady ? "Orca ready" : "Orca not found";
+      badge.textContent = engineReady ? "Orca ready" : (binaryReady ? "Orca launch failed" : "Orca not found");
       badge.className = engineReady ? "pill ready" : "pill warn";
       const source = status?.source ? ` (${status.source})` : "";
       const binary = status?.resolved_binary || status?.binary || "Set ORCASLICER_BINARY or ORCA_SLICER_BINARY.";
-      path.textContent = `${binary}${source}`;
+      const probe = status?.probe_error ? ` - ${status.probe_error}` : "";
+      path.textContent = `${binary}${source}${probe}`;
       updateSliceState();
     }
 

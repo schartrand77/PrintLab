@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from app.config import get_env
 
 Runner = Callable[[list[str]], Any]
+ProbeRunner = Callable[[list[str]], Any]
 EnvGetter = Callable[[str, str], str]
 PathFinder = Callable[[str], str | None]
 Downloader = Callable[[str], dict[str, Any]]
@@ -73,6 +74,7 @@ class OrcaSlicerAdapter:
         *,
         binary: str | None = None,
         runner: Runner | None = None,
+        probe_runner: ProbeRunner | None = None,
         env_getter: EnvGetter | None = None,
         path_finder: PathFinder | None = None,
         common_paths: Iterable[Path | str] | None = None,
@@ -84,12 +86,17 @@ class OrcaSlicerAdapter:
         self._binary_source = discovery["source"]
         self._resolved_binary = discovery["resolved_binary"]
         self.runner = runner or (lambda command: subprocess.run(command, capture_output=True, text=True, check=False))
+        self._probe_runner = probe_runner or (
+            lambda command: subprocess.run(command, capture_output=True, text=True, check=False, timeout=5)
+        )
 
     def engine_status(self) -> dict[str, Any]:
         resolved = self._resolve_binary(self.binary)
+        runtime_status = self._probe_runtime(resolved)
         return {
             "engine": "orca",
             "ready": bool(resolved),
+            **runtime_status,
             "binary": self.binary,
             "resolved_binary": resolved or "",
             "source": self._binary_source,
@@ -184,6 +191,22 @@ class OrcaSlicerAdapter:
         if path.exists():
             return str(path.resolve())
         return self._path_finder(value)
+
+    def _probe_runtime(self, resolved: str | None) -> dict[str, Any]:
+        if not resolved:
+            return {"runtime_ready": False, "probe_return_code": None, "probe_error": "OrcaSlicer binary was not resolved."}
+        try:
+            result = self._probe_runner([self.binary, "--help"])
+        except Exception as exc:
+            return {"runtime_ready": False, "probe_return_code": None, "probe_error": str(exc)}
+
+        return_code = int(getattr(result, "returncode", 0))
+        stdout = str(getattr(result, "stdout", "") or "")
+        stderr = str(getattr(result, "stderr", "") or "")
+        probe_error = ""
+        if return_code != 0:
+            probe_error = (stderr or stdout or f"Probe exited with code {return_code}.").strip()
+        return {"runtime_ready": return_code == 0, "probe_return_code": return_code, "probe_error": probe_error}
 
     @staticmethod
     def _default_common_paths() -> list[Path]:

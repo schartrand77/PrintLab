@@ -170,6 +170,7 @@ def test_render_slicer_page_contains_printlab_workspace() -> None:
     assert "/api/slicer/jobs/" in html
     assert "/artifacts/${encodeURIComponent(artifact.kind)}/download" in html
     assert "/api/slicer/routing-jobs/" in html
+    assert "runtime_ready" in html
     assert "activeSlicerJob" in html
     assert "renderSlicerArtifacts" in html
     assert "loadCapabilities" in html
