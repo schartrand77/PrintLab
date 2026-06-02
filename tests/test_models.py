@@ -160,6 +160,7 @@ def test_render_slicer_page_contains_printlab_workspace() -> None:
     assert 'id="orcaEngineStatus"' in html
     assert 'id="modelViewport"' in html
     assert 'id="slicerLog"' in html
+    assert 'id="slicerArtifactList"' in html
     assert 'id="sliceBtn"' in html
     assert 'id="saveToRoutingBtn"' in html
     assert 'id="refreshSlicerJobBtn"' in html
@@ -167,8 +168,10 @@ def test_render_slicer_page_contains_printlab_workspace() -> None:
     assert "/api/jobs/" in html
     assert "/api/slicer/capabilities" in html
     assert "/api/slicer/jobs/" in html
+    assert "/artifacts/${encodeURIComponent(artifact.kind)}/download" in html
     assert "/api/slicer/routing-jobs/" in html
     assert "activeSlicerJob" in html
+    assert "renderSlicerArtifacts" in html
     assert "loadCapabilities" in html
     assert "sliceRoutingJob" in html
     assert "refreshSlicerJob" in html

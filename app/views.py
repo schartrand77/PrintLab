@@ -3352,6 +3352,24 @@ def render_slicer_html() -> str:
       font-size:12px;
       white-space:pre-wrap;
     }
+    .artifact-list { display:grid; gap:8px; }
+    .artifact-link {
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      align-items:center;
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:var(--soft);
+      color:var(--text);
+      padding:9px 10px;
+      text-decoration:none;
+      font-size:12px;
+      font-weight:800;
+      min-width:0;
+    }
+    .artifact-link span { overflow-wrap:anywhere; }
+    .artifact-link small { color:var(--muted); font-weight:700; white-space:nowrap; }
     .pill { display:inline-flex; width:max-content; border-radius:999px; background:var(--soft); border:1px solid var(--line); padding:5px 9px; font-size:12px; font-weight:800; }
     .pill.ready { background:rgba(32,196,101,.14); border-color:rgba(32,196,101,.34); color:#6fd39f; }
     .pill.warn { background:rgba(198,163,74,.16); border-color:rgba(198,163,74,.38); color:#e1c36a; }
@@ -3460,6 +3478,7 @@ def render_slicer_html() -> str:
             <h2>Output</h2>
             <button id="refreshSlicerJobBtn" class="btn secondary" type="button" onclick="refreshSlicerJob()" disabled>Refresh Slice</button>
           </div>
+          <div id="slicerArtifactList" class="artifact-list" aria-live="polite"></div>
           <div id="slicerLog" class="log">Waiting for a PrintLab routing job.</div>
         </section>
       </aside>
@@ -3512,6 +3531,10 @@ def render_slicer_html() -> str:
 
     function setLog(message) {
       document.getElementById("slicerLog").textContent = message;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[char]));
     }
 
     function setStatus(text, ready = false) {
@@ -3597,6 +3620,20 @@ def render_slicer_html() -> str:
       };
     }
 
+    function renderSlicerArtifacts(job, artifacts) {
+      const list = document.getElementById("slicerArtifactList");
+      if (!job?.id || !artifacts.length) {
+        list.innerHTML = "";
+        return;
+      }
+      list.innerHTML = artifacts.map((artifact) => {
+        const href = `/api/slicer/jobs/${encodeURIComponent(job.id)}/artifacts/${encodeURIComponent(artifact.kind)}/download`;
+        const label = String(artifact.kind || "artifact").replace(/_/g, " ").toUpperCase();
+        const size = Number(artifact.size_bytes || 0);
+        return `<a class="artifact-link" href="${href}" download><span>${escapeHtml(label)}</span><small>${escapeHtml(String(size))} bytes</small></a>`;
+      }).join("");
+    }
+
     function renderSlicerJob(job) {
       activeSlicerJob = job;
       const artifacts = Array.isArray(job?.artifacts) ? job.artifacts : [];
@@ -3614,6 +3651,7 @@ def render_slicer_html() -> str:
         job?.stderr ? `stderr:\\n${job.stderr}` : "",
         job?.stdout ? `stdout:\\n${job.stdout}` : ""
       ].filter(Boolean).join("\\n"));
+      renderSlicerArtifacts(job, artifacts);
       updateSlicerJobRefreshState();
     }
 
