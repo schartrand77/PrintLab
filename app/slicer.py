@@ -7,8 +7,10 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
+from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
+import requests
 from pydantic import BaseModel, Field
 
 from app.config import get_env
@@ -16,6 +18,7 @@ from app.config import get_env
 Runner = Callable[[list[str]], Any]
 EnvGetter = Callable[[str, str], str]
 PathFinder = Callable[[str], str | None]
+Downloader = Callable[[str], dict[str, Any]]
 
 
 class SlicerSliceRequest(BaseModel):
@@ -52,6 +55,16 @@ class OrcaSlicerAdapter:
         "project_3mf": ".3mf",
         "slicedata": ".slicedata",
     }
+    profile_presets = {
+        "draft": {"layer_height": 0.28, "print_speed": 140},
+        "standard": {"layer_height": 0.2, "print_speed": 100},
+        "high_quality": {"layer_height": 0.12, "print_speed": 70},
+    }
+    material_presets = {
+        "PLA": {"nozzle_temperature": 220, "bed_temperature": 60},
+        "PETG": {"nozzle_temperature": 245, "bed_temperature": 80},
+        "ABS": {"nozzle_temperature": 255, "bed_temperature": 100},
+    }
 
     env_vars = ("ORCASLICER_BINARY", "ORCA_SLICER_BINARY")
 
@@ -86,7 +99,15 @@ class OrcaSlicerAdapter:
     def validate_settings(self, settings: dict[str, Any] | None) -> dict[str, Any]:
         if not settings:
             return {}
-        return {key: value for key, value in settings.items() if key in self.allowed_settings}
+        expanded: dict[str, Any] = {}
+        profile = str(settings.get("profile") or "").strip().lower()
+        if profile in self.profile_presets:
+            expanded.update(self.profile_presets[profile])
+        material = str(settings.get("material") or "").strip().upper()
+        if material in self.material_presets:
+            expanded.update(self.material_presets[material])
+        expanded.update({key: value for key, value in settings.items() if key in self.allowed_settings})
+        return expanded
 
     def validate_outputs(self, outputs: list[str] | None) -> list[str]:
         requested = outputs or ["gcode_3mf"]
@@ -96,9 +117,17 @@ class OrcaSlicerAdapter:
     def build_command(self, *, model_path: str, output_path: str, settings: dict[str, Any] | None, outputs: list[str] | None) -> list[str]:
         validated_settings = self.validate_settings(settings)
         validated_outputs = self.validate_outputs(outputs)
-        command = [self.binary, "slice", "--input", model_path, "--output", output_path, "--output-format", ",".join(validated_outputs)]
+        output = Path(output_path)
+        command = [self.binary, "--outputdir", str(output.parent)]
+        if any(item in {"gcode", "gcode_3mf", "slicedata"} for item in validated_outputs):
+            command.extend(["--slice", "0"])
+        if "gcode_3mf" in validated_outputs or "project_3mf" in validated_outputs:
+            command.extend(["--export-3mf", output.name])
+        if "slicedata" in validated_outputs:
+            command.extend(["--export-slicedata", f"{output.stem}.slicedata"])
         for key, value in validated_settings.items():
             command.extend([f"--{key.replace('_', '-')}", self._format_value(value)])
+        command.append(model_path)
         return command
 
     def slice(self, *, model_path: str, output_path: str, settings: dict[str, Any] | None, outputs: list[str] | None) -> dict[str, Any]:
@@ -135,7 +164,7 @@ class OrcaSlicerAdapter:
                     "resolved_binary": self._resolve_binary(configured) or "",
                 }
 
-        found = self._path_finder("orcaslicer") or self._path_finder("OrcaSlicer")
+        found = self._path_finder("orca-slicer") or self._path_finder("orca-slicer.exe") or self._path_finder("orcaslicer") or self._path_finder("OrcaSlicer")
         if found:
             return {"binary": found, "source": "path", "resolved_binary": found}
 
@@ -145,7 +174,7 @@ class OrcaSlicerAdapter:
                 resolved = str(candidate_path.resolve())
                 return {"binary": resolved, "source": "common_path", "resolved_binary": resolved}
 
-        return {"binary": "orcaslicer", "source": "fallback", "resolved_binary": ""}
+        return {"binary": "orca-slicer", "source": "fallback", "resolved_binary": ""}
 
     def _resolve_binary(self, binary: str) -> str | None:
         value = str(binary or "").strip()
@@ -159,12 +188,15 @@ class OrcaSlicerAdapter:
     @staticmethod
     def _default_common_paths() -> list[Path]:
         candidates = [
+            Path.home() / "AppData" / "Local" / "Programs" / "OrcaSlicer" / "orca-slicer.exe",
             Path.home() / "AppData" / "Local" / "Programs" / "OrcaSlicer" / "OrcaSlicer.exe",
+            Path.home() / "AppData" / "Local" / "OrcaSlicer" / "orca-slicer.exe",
             Path.home() / "AppData" / "Local" / "OrcaSlicer" / "OrcaSlicer.exe",
         ]
         for env_name in ("ProgramFiles", "ProgramFiles(x86)"):
             base = os.environ.get(env_name)
             if base:
+                candidates.append(Path(base) / "OrcaSlicer" / "orca-slicer.exe")
                 candidates.append(Path(base) / "OrcaSlicer" / "OrcaSlicer.exe")
         candidates.extend(
             [
@@ -177,10 +209,11 @@ class OrcaSlicerAdapter:
 
 
 class SlicerService:
-    def __init__(self, *, root: Path, adapter: OrcaSlicerAdapter | None = None) -> None:
+    def __init__(self, *, root: Path, adapter: OrcaSlicerAdapter | None = None, downloader: Downloader | None = None) -> None:
         self.root = Path(root)
         self.jobs_root = self.root / "slicer" / "jobs"
         self.adapter = adapter or OrcaSlicerAdapter()
+        self.downloader = downloader or self._download_url
 
     def capabilities(self) -> dict[str, Any]:
         return {
@@ -253,8 +286,9 @@ class SlicerService:
         self._save_job(job)
 
         try:
+            model_path = self._materialize_model(job, job_dir)
             result = self.adapter.slice(
-                model_path=str(job.get("model_path") or ""),
+                model_path=model_path,
                 output_path=str(output_path),
                 settings=job.get("settings") or {},
                 outputs=outputs,
@@ -268,7 +302,7 @@ class SlicerService:
                 job["status"] = "complete"
                 job["error_code"] = None
                 job["error_message"] = None
-                job["artifacts"] = [
+                job["artifacts"] = self._input_model_artifacts(job, job_dir) + [
                     self._artifact("command_manifest", self._manifest_path(job_id)),
                     self._artifact(primary_output, output_path),
                 ]
@@ -296,6 +330,33 @@ class SlicerService:
         job["updated_at"] = _utc_now()
         self._save_job(job)
         return job
+
+    def _materialize_model(self, job: dict[str, Any], job_dir: Path) -> str:
+        model_path = str(job.get("model_path") or "").strip()
+        if not self._is_remote_url(model_path):
+            return model_path
+        downloaded = self.downloader(model_path)
+        content = downloaded.get("content")
+        if not isinstance(content, bytes):
+            raise ValueError("Downloaded slicer model content must be bytes.")
+        filename = self._safe_input_filename(str(downloaded.get("filename") or self._filename_from_url(model_path) or "model.3mf"))
+        path = job_dir / filename
+        path.write_bytes(content)
+        job["model_path"] = str(path)
+        job["download_url"] = model_path
+        return str(path)
+
+    def _input_model_artifacts(self, job: dict[str, Any], job_dir: Path) -> list[dict[str, Any]]:
+        model_path = Path(str(job.get("model_path") or ""))
+        if not model_path.exists():
+            return []
+        try:
+            resolved = model_path.resolve()
+            if job_dir.resolve() not in resolved.parents and resolved != job_dir.resolve():
+                return []
+        except OSError:
+            return []
+        return [self._artifact("input_model", model_path)]
 
     def _write_manifest(self, job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         manifest = {
@@ -342,6 +403,30 @@ class SlicerService:
         path = self._job_path(str(job["id"]))
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(job, indent=2, sort_keys=True), encoding="utf-8")
+
+    @staticmethod
+    def _is_remote_url(value: str) -> bool:
+        parsed = urlparse(value)
+        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+    @staticmethod
+    def _filename_from_url(value: str) -> str:
+        name = Path(unquote(urlparse(value).path)).name
+        return name or "model.3mf"
+
+    @staticmethod
+    def _safe_input_filename(value: str) -> str:
+        raw = Path(value).name.strip() or "model.3mf"
+        safe = "".join(char for char in raw if char.isalnum() or char in {".", "-", "_"})[:96]
+        if not safe:
+            safe = "model.3mf"
+        return f"input-{safe}"
+
+    @staticmethod
+    def _download_url(url: str) -> dict[str, Any]:
+        response = requests.get(url, timeout=60)
+        response.raise_for_status()
+        return {"content": response.content, "filename": SlicerService._filename_from_url(url)}
 
 
 def _utc_now() -> str:

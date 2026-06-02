@@ -3456,7 +3456,10 @@ def render_slicer_html() -> str:
           </div>
         </section>
         <section class="panel">
-          <h2>Output</h2>
+          <div class="engine-line">
+            <h2>Output</h2>
+            <button id="refreshSlicerJobBtn" class="btn secondary" type="button" onclick="refreshSlicerJob()" disabled>Refresh Slice</button>
+          </div>
           <div id="slicerLog" class="log">Waiting for a PrintLab routing job.</div>
         </section>
       </aside>
@@ -3519,6 +3522,10 @@ def render_slicer_html() -> str:
 
     function updateSliceState() {
       document.getElementById("sliceBtn").disabled = !activeJob || !engineReady;
+    }
+
+    function updateSlicerJobRefreshState() {
+      document.getElementById("refreshSlicerJobBtn").disabled = !activeSlicerJob?.id;
     }
 
     function renderEngineStatus(status) {
@@ -3607,6 +3614,23 @@ def render_slicer_html() -> str:
         job?.stderr ? `stderr:\\n${job.stderr}` : "",
         job?.stdout ? `stdout:\\n${job.stdout}` : ""
       ].filter(Boolean).join("\\n"));
+      updateSlicerJobRefreshState();
+    }
+
+    async function refreshSlicerJob() {
+      if (!activeSlicerJob?.id) return;
+      const button = document.getElementById("refreshSlicerJobBtn");
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/slicer/jobs/${encodeURIComponent(activeSlicerJob.id)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.error?.message || data?.detail || `HTTP ${response.status}`);
+        renderSlicerJob(data.item || data);
+      } catch (error) {
+        setStatus("Refresh failed");
+        setLog(`${document.getElementById("slicerLog").textContent}\\nRefresh failed: ${String(error?.message || error)}`);
+        updateSlicerJobRefreshState();
+      }
     }
 
     async function sliceRoutingJob() {
@@ -3666,6 +3690,7 @@ def render_slicer_html() -> str:
       if (event.key === "Escape") closeSidebar();
     });
     updateSliceState();
+    updateSlicerJobRefreshState();
     loadCapabilities().catch(() => {});
     loadJob().catch((error) => {
       setStatus("Job load failed");

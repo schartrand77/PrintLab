@@ -162,12 +162,16 @@ def test_render_slicer_page_contains_printlab_workspace() -> None:
     assert 'id="slicerLog"' in html
     assert 'id="sliceBtn"' in html
     assert 'id="saveToRoutingBtn"' in html
+    assert 'id="refreshSlicerJobBtn"' in html
     assert 'new URLSearchParams(window.location.search).get("job_id")' in html
     assert "/api/jobs/" in html
     assert "/api/slicer/capabilities" in html
+    assert "/api/slicer/jobs/" in html
     assert "/api/slicer/routing-jobs/" in html
+    assert "activeSlicerJob" in html
     assert "loadCapabilities" in html
     assert "sliceRoutingJob" in html
+    assert "refreshSlicerJob" in html
     assert "Back To Routing" in html
 
 

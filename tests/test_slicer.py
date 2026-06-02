@@ -42,6 +42,18 @@ def test_orca_adapter_discovers_binary_from_common_install_paths(tmp_path) -> No
     assert adapter.engine_status()["source"] == "common_path"
 
 
+def test_orca_adapter_prefers_orca_slicer_command_on_path() -> None:
+    from app.slicer import OrcaSlicerAdapter
+
+    def path_finder(name: str) -> str | None:
+        return "C:/Tools/orca-slicer.exe" if name == "orca-slicer" else None
+
+    adapter = OrcaSlicerAdapter(binary=None, env_getter=lambda _name, default="": default, path_finder=path_finder, common_paths=[])
+
+    assert adapter.binary == "C:/Tools/orca-slicer.exe"
+    assert adapter.engine_status()["source"] == "path"
+
+
 def test_slicer_capabilities_include_engine_readiness(tmp_path) -> None:
     from app.slicer import OrcaSlicerAdapter, SlicerService
 
@@ -75,16 +87,44 @@ def test_orca_adapter_maps_common_settings_and_outputs() -> None:
         outputs=["gcode_3mf", "slicedata"],
     )
 
-    assert command[:4] == ["orca-cli", "slice", "--input", "/models/widget.3mf"]
+    assert command[0] == "orca-cli"
+    assert "--slice" in command
+    assert command[command.index("--slice") + 1] == "0"
+    assert "--export-3mf" in command
+    assert command[command.index("--export-3mf") + 1] == "widget.gcode.3mf"
+    assert "--outputdir" in command
+    assert command[command.index("--outputdir") + 1].replace("\\", "/").endswith("/gcode")
+    assert command[-1] == "/models/widget.3mf"
     assert "--layer-height" in command
     assert "--infill" in command
     assert "--supports" in command
     assert "true" in command
     assert "--wall-count" in command
     assert "--infill-pattern" in command
-    assert "--output-format" in command
-    assert "gcode_3mf,slicedata" in command
+    assert "--output-format" not in command
+    assert "gcode_3mf,slicedata" not in command
     assert "--unknown-raw-flag" not in command
+
+
+def test_orca_adapter_expands_profile_and_material_presets_with_explicit_overrides() -> None:
+    from app.slicer import OrcaSlicerAdapter
+
+    adapter = OrcaSlicerAdapter(binary="orca-cli")
+
+    command = adapter.build_command(
+        model_path="/models/widget.3mf",
+        output_path="/gcode/widget.gcode.3mf",
+        settings={"profile": "draft", "material": "PLA", "layer_height": 0.2, "infill": 15},
+        outputs=["gcode_3mf"],
+    )
+
+    assert command[command.index("--layer-height") + 1] == "0.2"
+    assert command[command.index("--infill") + 1] == "15"
+    assert command[command.index("--print-speed") + 1] == "140"
+    assert command[command.index("--nozzle-temperature") + 1] == "220"
+    assert command[command.index("--bed-temperature") + 1] == "60"
+    assert "--profile" not in command
+    assert "--material" not in command
 
 
 def test_slicer_service_writes_manifest_and_artifact(tmp_path) -> None:
@@ -129,7 +169,7 @@ def test_slicer_service_preserves_artifact_written_by_orca(tmp_path) -> None:
     from app.slicer import OrcaSlicerAdapter, SlicerService
 
     def runner(command: list[str]):
-        output_path = command[command.index("--output") + 1]
+        output_path = f"{command[command.index('--outputdir') + 1]}/{command[command.index('--export-3mf') + 1]}"
         with open(output_path, "wb") as output_file:
             output_file.write(b"real-orca-gcode-3mf")
         return SimpleNamespace(returncode=0, stdout="orca finished", stderr="")
@@ -143,6 +183,36 @@ def test_slicer_service_preserves_artifact_written_by_orca(tmp_path) -> None:
     with open(artifact_path, "rb") as artifact_file:
         assert artifact_file.read() == b"real-orca-gcode-3mf"
     assert sliced["artifacts"][1]["size_bytes"] == len(b"real-orca-gcode-3mf")
+
+
+def test_slicer_service_downloads_remote_model_before_invoking_orca(tmp_path) -> None:
+    from app.slicer import OrcaSlicerAdapter, SlicerService
+
+    calls: dict[str, object] = {}
+
+    def downloader(url: str) -> dict[str, object]:
+        calls["url"] = url
+        return {"content": b"remote-3mf", "filename": "widget.3mf"}
+
+    def runner(command: list[str]):
+        model_path = command[-1]
+        calls["model_path"] = model_path
+        with open(model_path, "rb") as model_file:
+            calls["model_bytes"] = model_file.read()
+        return SimpleNamespace(returncode=0, stdout="sliced ok", stderr="")
+
+    service = SlicerService(root=tmp_path, adapter=OrcaSlicerAdapter(binary="orca-cli", runner=runner), downloader=downloader)
+    job = service.create_from_routing_job({"id": "route-1", "download_url": "https://makerworks.local/files/widget.3mf"})
+
+    sliced = service.slice_job(job["id"])
+
+    assert calls["url"] == "https://makerworks.local/files/widget.3mf"
+    assert calls["model_bytes"] == b"remote-3mf"
+    assert str(calls["model_path"]).endswith("input-widget.3mf")
+    assert sliced["model_path"] == calls["model_path"]
+    assert sliced["artifacts"][0]["kind"] == "input_model"
+    assert sliced["artifacts"][1]["kind"] == "command_manifest"
+    assert sliced["artifacts"][2]["kind"] == "gcode_3mf"
 
 
 def test_slicer_service_returns_structured_missing_binary_failure(tmp_path) -> None:
