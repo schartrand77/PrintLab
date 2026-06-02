@@ -80,7 +80,9 @@ docker compose -p printlab-dev -f compose.yaml -f compose.dev.yaml up -d --build
 The image extracts the archive into `/opt/orca` and creates
 `/usr/local/bin/orca-slicer`, allowing PrintLab to discover Orca from `PATH`.
 The launcher prefers `/opt/orca/bin` for bundled Orca libraries before
-executing `/opt/orca/bin/orca-slicer`.
+executing `/opt/orca/bin/orca-slicer`. Orca's GTK/WebKit/GStreamer/OpenGL
+runtime packages are installed only when `ORCA_LINUXDIR_URL` is set, so the
+normal PrintLab Docker image does not carry that extra slicer runtime stack.
 
 As of 2026-06-02, the FULU `v1.0.0` Ubuntu 22.04 and Ubuntu 24.04 Linux
 release binaries can be installed into Docker, but their CLI exits with a

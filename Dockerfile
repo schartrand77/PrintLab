@@ -18,6 +18,8 @@ RUN apt-get update \
         curl \
         ffmpeg \
         git \
+    && if [ -n "${ORCA_LINUXDIR_URL}" ]; then \
+        apt-get install -y --no-install-recommends \
         libegl1 \
         libgstreamer-plugins-base1.0-0 \
         libgstreamer1.0-0 \
@@ -25,7 +27,8 @@ RUN apt-get update \
         libopengl0 \
         libwebkit2gtk-4.1-0 \
         libwebpdecoder3 \
-        libwebpdemux2 \
+        libwebpdemux2; \
+    fi \
     && rm -rf /var/lib/apt/lists/*
 
 RUN if [ -n "${ORCA_LINUXDIR_URL}" ]; then \

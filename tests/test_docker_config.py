@@ -33,3 +33,11 @@ def test_dockerfile_installs_orca_linux_runtime_libraries() -> None:
         "libopengl0",
     ):
         assert package in dockerfile
+
+
+def test_dockerfile_installs_orca_runtime_libraries_only_when_embedding_orca() -> None:
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+    base_install, _conditional_orca_install = dockerfile.split('&& if [ -n "${ORCA_LINUXDIR_URL}" ]; then', maxsplit=1)
+
+    assert "libwebkit2gtk-4.1-0" not in base_install
+    assert "libgtk-3-0t64" not in base_install

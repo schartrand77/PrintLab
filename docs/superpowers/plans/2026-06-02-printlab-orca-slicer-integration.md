@@ -31,6 +31,7 @@
 - ~~Add a repeatable Docker Desktop dev override for a `printlab-dev` container on port `8290`.~~
 - ~~Confirm FULU publishes Linux/Ubuntu OrcaSlicer builds and add optional Docker LinuxDir ingestion for Unraid/Docker deployments.~~ FULU `v1.0.0` Linux binaries currently fail headless Docker CLI smoke tests with signal 11.
 - ~~Add Orca runtime launch probing so a found-but-crashing binary disables slicing and reports the probe failure in `/slicer`.~~
+- ~~Install Orca GTK/WebKit/GStreamer/OpenGL Docker runtime packages only when `ORCA_LINUXDIR_URL` is set, keeping normal PrintLab images leaner.~~
 - [ ] Add production smoke test with a real built `schartrand77/OrcaSlicer-MakerWorks` installation and a sample 3MF/STL.
 - [ ] Commit and push the completed integration branch.
 
