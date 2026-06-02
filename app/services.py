@@ -1888,7 +1888,7 @@ class PrinterService:
             return [
                 item
                 for item in self._submitted_jobs[:200]
-                if str(item.get("status") or "").lower() in {"queued", "started"}
+                if str(item.get("status") or "").lower() in {"queued", "sliced", "started"}
             ]
         if target == "verified_completed":
             return [
@@ -6248,7 +6248,8 @@ class PrintJobManager:
             raise ValueError("Only MakerWorks submitted jobs can be queued from the routing board.")
         if job.get("queue_item_id"):
             return self._job_response(job)
-        if job.get("routing_hold"):
+        slicer_asset = self._saved_slicer_asset(job)
+        if job.get("routing_hold") and not slicer_asset:
             raise ValueError("MakerWorks routing holds must be manually sliced and connected to the current printer job.")
 
         target_printer = self._printer_manager.get(printer_id)
@@ -6282,9 +6283,13 @@ class PrintJobManager:
             layer_inspect=request.layer_inspect if request and request.layer_inspect is not None else True,
             metadata=metadata,
         )
-        asset = await self._works_service.download_asset("makerworks", str(source_item.get("download_url") or ""))
-        preferred_name = self._build_preferred_name(source_item, payload, asset)
-        staged = await target_printer.stage_project_bytes(bytes(asset["content"]), preferred_name)
+        if slicer_asset:
+            preferred_name = str(slicer_asset["file_name"])
+            staged = await target_printer.stage_project_bytes(bytes(slicer_asset["content"]), preferred_name)
+        else:
+            asset = await self._works_service.download_asset("makerworks", str(source_item.get("download_url") or ""))
+            preferred_name = self._build_preferred_name(source_item, payload, asset)
+            staged = await target_printer.stage_project_bytes(bytes(asset["content"]), preferred_name)
 
         queue_result = await target_printer.queue_print_job(
             QueuePrintJobRequest(
@@ -6309,6 +6314,8 @@ class PrintJobManager:
                 "source_model_url": source_item.get("model_url"),
                 "source_download_url": source_item.get("download_url"),
                 "source_file_type": source_item.get("file_type"),
+                "slicer_job_id": job.get("slicer_job_id"),
+                "slicer_artifact_path": slicer_asset.get("path") if slicer_asset else None,
                 "staged_file_name": staged.get("file_name"),
             },
         )
@@ -6328,6 +6335,10 @@ class PrintJobManager:
                 "file_type": source_item.get("file_type"),
                 "file_path": staged.get("file_path"),
                 "file_name": staged.get("file_name"),
+                "slicer_job_id": job.get("slicer_job_id"),
+                "slicer_status": job.get("slicer_status"),
+                "slicer_artifacts": job.get("slicer_artifacts") or [],
+                "slicer_settings": job.get("slicer_settings") or {},
                 "preflight": {
                     "selected_printer_id": target_printer.printer_id,
                     "qualified_printer_count": preflight.get("qualified_printer_count"),
@@ -6344,6 +6355,26 @@ class PrintJobManager:
             details={"job_id": job_id, "queue_item_id": queue_item.get("id"), "model_id": source_item.get("id")},
         )
         return self._job_response(updated)
+
+    def _saved_slicer_asset(self, job: dict[str, Any]) -> dict[str, Any] | None:
+        artifacts = job.get("slicer_artifacts")
+        if not isinstance(artifacts, list):
+            return None
+        preferred_kinds = ("gcode_3mf", "project_3mf", "gcode", "slicedata")
+        for kind in preferred_kinds:
+            artifact = next((item for item in artifacts if isinstance(item, dict) and str(item.get("kind") or "") == kind), None)
+            if not artifact:
+                continue
+            path = Path(str(artifact.get("path") or "")).expanduser()
+            if not path.exists() or not path.is_file():
+                raise ValueError(f"Saved slicer artifact is missing: {path}")
+            return {
+                "kind": kind,
+                "path": str(path),
+                "file_name": path.name,
+                "content": path.read_bytes(),
+            }
+        return None
 
     async def connect_submitted_job_to_current_print(
         self,
@@ -6441,6 +6472,29 @@ class PrintJobManager:
             except ValueError:
                 continue
         raise ValueError(f"Unknown submitted job: {job_id}")
+
+    def attach_slicer_job(self, slicer_job: dict[str, Any]) -> dict[str, Any]:
+        routing_job_id = str(slicer_job.get("source_job_id") or "").strip()
+        if not routing_job_id:
+            raise ValueError("Slicer job is missing its source routing job id.")
+        if str(slicer_job.get("status") or "").lower() != "complete":
+            raise ValueError("Only completed slicer jobs can be saved back to routing.")
+        owner, _job = self._find_submitted_job_owner(routing_job_id)
+        return owner.update_submitted_job(
+            routing_job_id,
+            status="sliced",
+            message="Sliced artifact saved from PrintLab Slicer.",
+            details={
+                "slicer_job_id": slicer_job.get("id"),
+                "artifacts": slicer_job.get("artifacts") or [],
+            },
+            extra={
+                "slicer_job_id": slicer_job.get("id"),
+                "slicer_status": slicer_job.get("status"),
+                "slicer_artifacts": slicer_job.get("artifacts") or [],
+                "slicer_settings": slicer_job.get("settings") or {},
+            },
+        )
 
     async def sync_job_to_makerworks(self, job_id: str, *, printer_id: str | None = None, force: bool = False) -> dict[str, Any]:
         if printer_id:

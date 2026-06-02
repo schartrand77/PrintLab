@@ -48,8 +48,10 @@ from app.services import (
     WorksRequest,
     data_root,
 )
+from app.slicer import SlicerService, SlicerSliceRequest
 
 router = APIRouter()
+slicer_service = SlicerService(root=data_root())
 
 LIVE_STREAM_FPS = 10
 LIVE_STREAM_READ_TIMEOUT_SECONDS = 2.5
@@ -599,6 +601,57 @@ async def list_jobs(status: str | None = None) -> dict[str, Any]:
 async def get_job(job_id: str) -> dict[str, Any]:
     try:
         return {"item": job_manager.get_job(job_id)}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.get("/api/slicer/capabilities")
+async def slicer_capabilities() -> dict[str, Any]:
+    return slicer_service.capabilities()
+
+
+@router.post("/api/slicer/routing-jobs/{job_id}/slice")
+async def slice_routing_job(job_id: str, request: Request, payload: SlicerSliceRequest) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        routing_job = job_manager.get_job(job_id)
+        slicer_job = slicer_service.create_from_routing_job(
+            routing_job,
+            settings=payload.settings,
+            outputs=payload.outputs,
+        )
+        return {"ok": True, "item": slicer_service.slice_job(str(slicer_job["id"]))}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.get("/api/slicer/jobs/{job_id}")
+async def slicer_job(job_id: str) -> dict[str, Any]:
+    try:
+        return {"item": slicer_service.get_job(job_id)}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.get("/api/slicer/jobs/{job_id}/artifacts")
+async def slicer_job_artifacts(job_id: str) -> dict[str, Any]:
+    try:
+        items = slicer_service.list_artifacts(job_id)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.post("/api/slicer/jobs/{job_id}/save-routing")
+async def save_slicer_job_to_routing(job_id: str, request: Request) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        slicer_job = slicer_service.get_job(job_id)
+        artifacts = slicer_job.get("artifacts") if isinstance(slicer_job.get("artifacts"), list) else []
+        has_output_artifact = any(isinstance(item, dict) and str(item.get("kind") or "") != "command_manifest" for item in artifacts)
+        if not has_output_artifact:
+            raise ValueError("Slicer job must include an output artifact before it can be saved to routing.")
+        return {"ok": True, "item": job_manager.attach_slicer_job(slicer_job)}
     except Exception as exc:
         _raise_api_error(exc)
 

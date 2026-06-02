@@ -13,6 +13,7 @@ from app.views import (
     render_makerworks_routing_html,
     render_makerworks_search_html,
     render_printer_dashboard,
+    render_slicer_html,
     static_dir,
 )
 
@@ -52,6 +53,11 @@ async def makerworks_page() -> str:
 @router.get("/makerworks-routing", response_class=HTMLResponse)
 async def makerworks_routing_page() -> str:
     return render_makerworks_routing_html()
+
+
+@router.get("/slicer", response_class=HTMLResponse)
+async def slicer_page() -> str:
+    return render_slicer_html()
 
 
 @router.get("/conversion", response_class=HTMLResponse)

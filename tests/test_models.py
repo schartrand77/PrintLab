@@ -64,13 +64,21 @@ def test_openapi_contains_queue_schema() -> None:
     assert "QueuePrintJobRequest" in schema["components"]["schemas"]
 
 
+def test_ui_routes_include_full_page_slicer_workspace() -> None:
+    routes = {route.path for route in create_app().routes}
+    assert "/slicer" in routes
+
+
 def test_sidebar_pages_include_makerworks_navigation() -> None:
     assert 'href="/conversion"' in render_gallery_html()
+    assert 'href="/slicer"' in render_gallery_html()
     assert 'href="/makerworks"' in render_gallery_html()
     assert 'href="/makerworks-routing"' in render_gallery_html()
     assert 'href="/conversion"' in render_add_printer_html()
+    assert 'href="/slicer"' in render_add_printer_html()
     assert 'href="/makerworks"' in render_add_printer_html()
     assert 'href="/conversion"' in render_makerworks_search_html()
+    assert 'href="/slicer"' in render_makerworks_search_html()
     assert 'href="/makerworks-routing"' in render_makerworks_search_html()
 
 
@@ -141,6 +149,28 @@ def test_render_conversion_page_contains_converter_controls() -> None:
     assert "Scene preservation" in html
 
 
+def test_render_slicer_page_contains_printlab_workspace() -> None:
+    assert hasattr(views, "render_slicer_html")
+    html = views.render_slicer_html()
+    assert '<title>PrintLab - Slicer</title>' in html
+    assert 'href="/slicer"' in html
+    assert 'class="sidebar-tab active" href="/slicer"' in html
+    assert 'id="slicerWorkspace"' in html
+    assert 'id="slicerJobId"' in html
+    assert 'id="orcaEngineStatus"' in html
+    assert 'id="modelViewport"' in html
+    assert 'id="slicerLog"' in html
+    assert 'id="sliceBtn"' in html
+    assert 'id="saveToRoutingBtn"' in html
+    assert 'new URLSearchParams(window.location.search).get("job_id")' in html
+    assert "/api/jobs/" in html
+    assert "/api/slicer/capabilities" in html
+    assert "/api/slicer/routing-jobs/" in html
+    assert "loadCapabilities" in html
+    assert "sliceRoutingJob" in html
+    assert "Back To Routing" in html
+
+
 def test_render_makerworks_search_page_contains_search_only_controls() -> None:
     html = render_makerworks_search_html()
     assert 'id="makerworksSearch"' in html
@@ -195,14 +225,19 @@ def test_render_makerworks_routing_page_contains_board_layout() -> None:
     assert ">Down<" in html
     assert ">Delete<" in html
     assert "Disconnect Printer" in html
+    assert "Route To Printer" in html
+    assert "routeSubmittedJobToPrinter" in html
+    assert "/api/jobs/${encodeURIComponent(jobId)}/queue" in html
     assert "Delete Queue" in html
-    assert "Send to slicer" in html
+    assert "Open Slicer" in html
+    assert "Send to slicer" not in html
     assert "Import revision" in html
     assert "sendQueuedJobToSlicer" in html
+    assert "openQueuedJobInSlicer" in html
     assert "importQueuedRevision" in html
     assert "queued-routing-row" in html
     assert "queued-meta-row" in html
-    assert "bambustudioopen://open?file=" in html
+    assert "/slicer?job_id=" in html
 
 
 def test_render_makerworks_routing_page_contains_batch_current_print_controls() -> None:
@@ -219,4 +254,5 @@ def test_render_makerworks_routing_page_can_target_orcaslicer(monkeypatch: pytes
     monkeypatch.setenv("SLICER_TARGET", "orca_slicer")
     html = views.render_makerworks_routing_html()
     assert 'const slicerTarget = "orca_slicer";' in html
-    assert "orcaslicer://open?file=" in html
+    assert "/slicer?job_id=" in html
+    assert "orcaslicer://open?file=" not in html

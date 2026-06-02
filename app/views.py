@@ -262,6 +262,7 @@ def render_gallery_html() -> str:
     <div class="sidebar-tabs">
       <a class="sidebar-tab" href="/">Dashboard</a>
       <a class="sidebar-tab" href="/conversion">3D Conversion</a>
+      <a class="sidebar-tab" href="/slicer">Slicer</a>
       <a class="sidebar-tab" href="/makerworks">MakerWorks</a>
       <a class="sidebar-tab" href="/makerworks-routing">Routing Board</a>
       <a class="sidebar-tab" href="/add-printer">Add Printer</a>
@@ -719,6 +720,7 @@ def render_add_printer_html() -> str:
     <div class="sidebar-tabs">
       <a class="sidebar-tab" href="/">Dashboard</a>
       <a class="sidebar-tab" href="/conversion">3D Conversion</a>
+      <a class="sidebar-tab" href="/slicer">Slicer</a>
       <a class="sidebar-tab" href="/makerworks">MakerWorks</a>
       <a class="sidebar-tab" href="/makerworks-routing">Routing Board</a>
       <a class="sidebar-tab active" href="/add-printer">Add Printer</a>
@@ -1138,6 +1140,7 @@ def render_makerworks_search_html() -> str:
     <div class="sidebar-tabs">
       <a class="sidebar-tab" href="/">Dashboard</a>
       <a class="sidebar-tab" href="/conversion">3D Conversion</a>
+      <a class="sidebar-tab" href="/slicer">Slicer</a>
       <a class="sidebar-tab active" href="/makerworks">MakerWorks Search</a>
       <a class="sidebar-tab" href="/makerworks-routing">Routing Board</a>
       <a class="sidebar-tab" href="/add-printer">Add Printer</a>
@@ -1591,6 +1594,7 @@ def render_makerworks_routing_html() -> str:
     <div class="sidebar-tabs">
       <a class="sidebar-tab" href="/">Dashboard</a>
       <a class="sidebar-tab" href="/conversion">3D Conversion</a>
+      <a class="sidebar-tab" href="/slicer">Slicer</a>
       <a class="sidebar-tab" href="/makerworks">MakerWorks Search</a>
       <a class="sidebar-tab active" href="/makerworks-routing">Routing Board</a>
       <a class="sidebar-tab" href="/add-printer">Add Printer</a>
@@ -1602,7 +1606,7 @@ def render_makerworks_routing_html() -> str:
         <button class="hamburger" type="button" aria-label="Open menu" onclick="openSidebar()"><div class="hamburger-lines"><span></span></div></button>
         <div>
         <h1 style="margin:0 0 8px;">MakerWorks Routing Board</h1>
-        <p style="margin:0;color:var(--muted);max-width:760px;">MakerWorks jobs stay in the left queue column until the model is manually sliced and started. Connect the queued job to the active print on the selected printer.</p>
+        <p style="margin:0;color:var(--muted);max-width:760px;">MakerWorks jobs stay in the left queue until they are opened in PrintLab Slicer, saved back to routing, and routed to the selected printer.</p>
         </div>
       </div>
       <div class="top-actions">
@@ -2056,6 +2060,28 @@ def render_makerworks_routing_html() -> str:
         showNotice(`Failed to connect routed job: ${String(error?.message || error)}`);
       }
     }
+    async function routeSubmittedJobToPrinter(nodeId, jobId) {
+      const printerId = draftAssignments[nodeId];
+      if (!printerId) {
+        showNotice('Connect the sliced job to a printer first.');
+        return;
+      }
+      try {
+        const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/queue`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ printer_id: printerId }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.detail || data?.error?.message || `HTTP ${response.status}`);
+        delete draftAssignments[nodeId];
+        saveDraftAssignments();
+        await refreshBoard();
+        showNotice(`${data.item?.model_name || 'Sliced job'} routed to ${printers.find((printer) => printer.id === printerId)?.name || printerId}.`);
+      } catch (error) {
+        showNotice(`Failed to route sliced job: ${String(error?.message || error)}`);
+      }
+    }
     async function connectSelectedJobsToCurrentPrint() {
       const jobIds = selectedJobIdList();
       if (!jobIds.length) {
@@ -2098,35 +2124,30 @@ def render_makerworks_routing_html() -> str:
       const opened = window.open(String(url), '_blank', 'noopener,noreferrer');
       return !!opened;
     }
-    function buildSlicerLaunchUrl(assetUrl) {
-      const url = String(assetUrl || '').trim();
-      if (!url) return '';
-      const encoded = encodeURIComponent(url);
-      if (slicerProtocolTemplate && slicerProtocolTemplate.includes('{url}')) {
-        return slicerProtocolTemplate.replace('{url}', encoded);
+    function buildSlicerLaunchUrl(item) {
+      const jobId = String(item?.id || '').trim();
+      if (!jobId) return '';
+      const params = new URLSearchParams();
+      const assetUrl = String(item?.download_url || '').trim();
+      if (assetUrl) params.set('asset', assetUrl);
+      const modelName = String(item?.model_name || item?.file_name || '').trim();
+      if (modelName) params.set('model_name', modelName);
+      const suffix = params.toString();
+      return `/slicer?job_id=${encodeURIComponent(jobId)}${suffix ? `&${suffix}` : ''}`;
+    }
+    function openQueuedJobInSlicer(encodedItem) {
+      const item = decodeRoutingItem(encodedItem);
+      const label = item?.model_name || item?.file_name || item?.id || 'Queued model';
+      const slicerUrl = buildSlicerLaunchUrl(item);
+      if (!slicerUrl) {
+        showNotice(`${label} does not have a PrintLab job id yet.`);
+        return;
       }
-      if (slicerTarget === 'orca' || slicerTarget === 'orca_slicer' || slicerTarget === 'orcaslicer') {
-        return `orcaslicer://open?file=${encoded}`;
-      }
-      if (slicerTarget === 'browser') {
-        return url;
-      }
-      return `bambustudioopen://open?file=${encoded}`;
+      window.location.assign(slicerUrl);
+      showNotice(`Opening ${label} in PrintLab Slicer.`);
     }
     function sendQueuedJobToSlicer(encodedItem) {
-      const item = decodeRoutingItem(encodedItem);
-      const assetUrl = String(item?.download_url || '').trim();
-      const label = item?.model_name || item?.file_name || item?.id || 'Queued model';
-      if (!assetUrl) {
-        showNotice(`${label} does not have a slicer asset URL yet.`);
-        return;
-      }
-      const slicerUrl = buildSlicerLaunchUrl(assetUrl);
-      if (!slicerUrl || !openExternalUrl(slicerUrl)) {
-        showNotice(`Popup blocked while opening ${label} in slicer.`);
-        return;
-      }
-      showNotice(`Sent ${label} to ${slicerTarget === 'browser' ? 'browser' : (slicerTarget.startsWith('orca') ? 'OrcaSlicer' : 'Bambu Studio')}.`);
+      openQueuedJobInSlicer(encodedItem);
     }
     function importQueuedRevision(encodedItem) {
       const item = decodeRoutingItem(encodedItem);
@@ -2256,7 +2277,9 @@ def render_makerworks_routing_html() -> str:
           const encodedItem = encodeURIComponent(JSON.stringify(item));
           const hasQueueItem = !isChosen && !!item.queue_item_id;
           const isStartedSubmitted = !isChosen && String(item.status || '').toLowerCase() === 'started';
+          const hasSlicerArtifact = !isChosen && Array.isArray(item.slicer_artifacts) && item.slicer_artifacts.some((artifact) => artifact && artifact.kind !== 'command_manifest');
           const canConnectSubmitted = !isChosen && !!assignedPrinter && !item.queue_item_id && !isStartedSubmitted;
+          const canRouteSlicedSubmitted = canConnectSubmitted && hasSlicerArtifact;
           const isSelectedJob = !isChosen && !!selectedJobIds[String(item.id || '')];
           return `
             <article id="${escapeHtml(entry.id)}" class="node routeable ${activeLeft === entry.id ? 'selected' : ''} ${assignedPrinter ? 'connected' : ''} ${queuedJobStateClass} ${isSelectedJob ? 'queue-selected' : ''}" onclick="selectLeftNode('${escapeHtml(entry.id)}')">
@@ -2278,9 +2301,9 @@ def render_makerworks_routing_html() -> str:
               ` : ''}
               <div class="node-actions">
                 ${assignedPrinter ? `<button class="btn secondary" type="button" onclick="event.stopPropagation(); disconnectPrinter('${escapeHtml(entry.id)}')">Disconnect Printer</button>` : (isChosen || !item.printer_id ? `<button class="btn secondary" type="button" disabled>No Printer Connected</button>` : `<a class="link-btn" href="/printer/${encodeURIComponent(item.printer_id || '')}" onclick="event.stopPropagation();">Open</a>`)}
-                ${isChosen ? `<button class="btn" type="button" onclick="event.stopPropagation(); submitChosenModel('${escapeHtml(entry.id)}')" ${assignedPrinter ? '' : 'disabled'}>Queue Now</button>` : (isStartedSubmitted ? `<button class="btn secondary" type="button" disabled>Current Print Synced</button>` : (canConnectSubmitted ? `<button class="btn" type="button" onclick="event.stopPropagation(); connectSubmittedJobToCurrentPrint('${escapeHtml(entry.id)}', '${escapeHtml(String(item.id || ''))}')">Connect Current Print</button>` : (hasQueueItem ? `<button class="btn secondary" type="button" onclick="event.stopPropagation(); deleteQueuedJob('${escapeHtml(entry.id)}', '${escapeHtml(String(item.queue_item_id || ''))}', '${escapeHtml(String(item.model_name || item.file_name || item.id || 'Queued job'))}')">Delete Queue</button>` : `<button class="btn secondary" type="button" disabled>Connect Printer</button>`)))}
+                ${isChosen ? `<button class="btn" type="button" onclick="event.stopPropagation(); submitChosenModel('${escapeHtml(entry.id)}')" ${assignedPrinter ? '' : 'disabled'}>Queue Now</button>` : (isStartedSubmitted ? `<button class="btn secondary" type="button" disabled>Current Print Synced</button>` : (canRouteSlicedSubmitted ? `<button class="btn" type="button" onclick="event.stopPropagation(); routeSubmittedJobToPrinter('${escapeHtml(entry.id)}', '${escapeHtml(String(item.id || ''))}')">Route To Printer</button>` : (canConnectSubmitted ? `<button class="btn" type="button" onclick="event.stopPropagation(); connectSubmittedJobToCurrentPrint('${escapeHtml(entry.id)}', '${escapeHtml(String(item.id || ''))}')">Connect Current Print</button>` : (hasQueueItem ? `<button class="btn secondary" type="button" onclick="event.stopPropagation(); deleteQueuedJob('${escapeHtml(entry.id)}', '${escapeHtml(String(item.queue_item_id || ''))}', '${escapeHtml(String(item.model_name || item.file_name || item.id || 'Queued job'))}')">Delete Queue</button>` : `<button class="btn secondary" type="button" disabled>Connect Printer</button>`))))}
               </div>
-              ${isChosen ? '' : `<div class="node-actions queued-routing-row"><button class="btn secondary" type="button" onclick="event.stopPropagation(); sendQueuedJobToSlicer('${escapeHtml(encodedItem)}')">Send to slicer</button><button class="btn secondary" type="button" onclick="event.stopPropagation(); importQueuedRevision('${escapeHtml(encodedItem)}')">Import revision</button></div>`}
+              ${isChosen ? '' : `<div class="node-actions queued-routing-row"><button class="btn secondary" type="button" onclick="event.stopPropagation(); openQueuedJobInSlicer('${escapeHtml(encodedItem)}')">Open Slicer</button><button class="btn secondary" type="button" onclick="event.stopPropagation(); importQueuedRevision('${escapeHtml(encodedItem)}')">Import revision</button></div>`}
               ${isChosen ? '' : `<div class="node-actions queued-meta-row"><button class="btn secondary" type="button" onclick="event.stopPropagation(); syncSubmittedJob('${escapeHtml(String(item.id || ''))}')">Resend Callback</button><span class="node-meta path">${escapeHtml(String(item.file_path || ''))}</span></div>`}
             </article>
           `;
@@ -2693,6 +2716,7 @@ def render_conversion_html() -> str:
     <div class="sidebar-tabs">
       <a class="sidebar-tab" href="/">Dashboard</a>
       <a class="sidebar-tab active" href="/conversion">3D Conversion</a>
+      <a class="sidebar-tab" href="/slicer">Slicer</a>
       <a class="sidebar-tab" href="/makerworks">MakerWorks Search</a>
       <a class="sidebar-tab" href="/makerworks-routing">Routing Board</a>
       <a class="sidebar-tab" href="/add-printer">Add Printer</a>
@@ -3110,6 +3134,546 @@ def render_conversion_html() -> str:
   </script>
 </body>
 </html>""".replace("__DEFAULT_SUPPORTED_FORMATS__", json.dumps(initial_formats)).replace("__TARGET_OPTIONS__", target_options_html).replace("__SOURCE_OPTIONS__", source_options_html)
+
+
+def render_slicer_html() -> str:
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta id="themeColorMeta" name="theme-color" content="#1f2026">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PrintLab">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" sizes="152x152" href="/apple-touch-icon-152x152.png">
+  <link rel="apple-touch-icon" sizes="167x167" href="/apple-touch-icon-167x167.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-180x180.png">
+  <title>PrintLab - Slicer</title>
+  <script>
+    (function() {
+      const theme = localStorage.getItem("printlab-theme") === "light" ? "light" : "dark";
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <style>
+    :root {
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
+      --bg:#1f2026;
+      --text:#f3f5f7;
+      --panel:#2b2d33;
+      --line:#444852;
+      --soft:#343741;
+      --muted:#9aa0aa;
+      --button:#20c465;
+      --button-text:#07170e;
+      --accent:#7f8cff;
+      --warning:#c6a34a;
+    }
+    * { box-sizing:border-box; }
+    html { min-height:100%; background:var(--bg); }
+    body {
+      margin:0;
+      font-family:"Segoe UI",sans-serif;
+      background:radial-gradient(circle at top left, rgba(127,140,255,.1), transparent 30%), var(--bg);
+      color:var(--text);
+      min-height:100vh;
+      min-height:100dvh;
+    }
+    .wrap {
+      max-width:1600px;
+      margin:0 auto;
+      min-height:100vh;
+      min-height:100dvh;
+      padding:calc(var(--safe-top) + 18px) calc(var(--safe-right) + 14px) calc(var(--safe-bottom) + 28px) calc(var(--safe-left) + 14px);
+      display:grid;
+      grid-template-rows:auto minmax(0, 1fr);
+      gap:14px;
+    }
+    .sidebar-backdrop { position:fixed; inset:0; background:rgba(4,10,18,.68); display:none; z-index:40; }
+    .sidebar-backdrop.open { display:block; }
+    .sidebar {
+      position:fixed;
+      z-index:41;
+      top:0;
+      left:0;
+      height:100vh;
+      height:100dvh;
+      width:320px;
+      max-width:85vw;
+      background:linear-gradient(180deg, #2b2d33 0%, #1a1b20 100%);
+      border-right:1px solid var(--line);
+      transform:translateX(-101%);
+      transition:transform .18s ease;
+      padding:calc(var(--safe-top) + 18px) calc(var(--safe-right) + 14px) calc(var(--safe-bottom) + 16px) calc(var(--safe-left) + 14px);
+      overflow:auto;
+    }
+    .sidebar.open { transform:translateX(0); }
+    .sidebar h2 { margin:0; font-size:20px; }
+    .sidebar-tabs { display:grid; gap:8px; margin-top:12px; }
+    .sidebar-tab {
+      display:block;
+      text-decoration:none;
+      border:1px solid var(--line);
+      background:var(--soft);
+      color:var(--text);
+      border-radius:999px;
+      padding:6px 10px;
+      font-size:12px;
+      font-weight:600;
+    }
+    .sidebar-tab.active { background:var(--button); color:var(--button-text); border-color:var(--button); }
+    .top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+    .top-head { display:grid; gap:10px; min-width:0; }
+    h1 { margin:0 0 8px; font-size:32px; line-height:1.05; }
+    p { margin:0; color:var(--muted); line-height:1.4; }
+    .hamburger { border:0; border-radius:10px; background:var(--button); color:var(--button-text); cursor:pointer; width:42px; height:34px; display:grid; place-items:center; box-shadow:0 8px 22px rgba(22,54,86,.34); }
+    .hamburger-lines { width:16px; height:12px; position:relative; }
+    .hamburger-lines::before, .hamburger-lines::after, .hamburger-lines span { content:""; position:absolute; left:0; right:0; height:2px; background:currentColor; border-radius:2px; }
+    .hamburger-lines::before { top:0; }
+    .hamburger-lines span { top:5px; }
+    .hamburger-lines::after { top:10px; }
+    .top-actions { display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; }
+    .btn, .link-btn {
+      border:0;
+      border-radius:10px;
+      background:var(--button);
+      color:var(--button-text);
+      padding:10px 12px;
+      font-weight:800;
+      font-size:13px;
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+      min-height:38px;
+    }
+    .btn.secondary, .link-btn.secondary { background:var(--soft); color:var(--text); border:1px solid var(--line); }
+    .btn:disabled { opacity:.55; cursor:not-allowed; }
+    .workspace {
+      display:grid;
+      grid-template-columns:minmax(0, 1.4fr) minmax(320px, .6fr);
+      gap:14px;
+      min-height:0;
+    }
+    .viewport, .panel {
+      border:1px solid var(--line);
+      border-radius:16px;
+      background:rgba(43,45,51,.96);
+      min-width:0;
+    }
+    .viewport {
+      min-height:560px;
+      display:grid;
+      grid-template-rows:auto minmax(0, 1fr) auto;
+      overflow:hidden;
+    }
+    .viewport-head, .viewport-foot {
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      align-items:center;
+      padding:12px;
+      border-bottom:1px solid var(--line);
+    }
+    .viewport-foot { border-top:1px solid var(--line); border-bottom:0; }
+    .model-stage {
+      position:relative;
+      display:grid;
+      place-items:center;
+      min-height:420px;
+      background:
+        linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px),
+        radial-gradient(circle at center, rgba(127,140,255,.14), transparent 44%);
+      background-size:32px 32px, 32px 32px, 100% 100%;
+    }
+    .model-placeholder {
+      width:min(34vw, 320px);
+      min-width:190px;
+      aspect-ratio:1;
+      border:1px solid rgba(127,140,255,.42);
+      border-radius:16px;
+      background:linear-gradient(145deg, rgba(127,140,255,.32), rgba(32,196,101,.16));
+      box-shadow:0 28px 80px rgba(0,0,0,.26);
+      transform:rotateX(58deg) rotateZ(42deg);
+    }
+    .side { display:grid; gap:12px; align-content:start; min-width:0; }
+    .panel { padding:14px; display:grid; gap:12px; }
+    .panel h2 { margin:0; font-size:15px; }
+    .meta-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .stat {
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:var(--soft);
+      padding:10px;
+      min-width:0;
+    }
+    .stat strong { display:block; font-size:11px; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
+    .stat span { display:block; font-size:13px; overflow-wrap:anywhere; }
+    .field { display:grid; gap:6px; }
+    .field label { color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; }
+    .field input, .field select {
+      width:100%;
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:#1f2026;
+      color:var(--text);
+      padding:10px;
+      font:inherit;
+      font-size:14px;
+    }
+    .actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .engine-status { display:grid; gap:8px; }
+    .engine-line { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .engine-path {
+      color:var(--muted);
+      font-family:Consolas, "Courier New", monospace;
+      font-size:12px;
+      overflow-wrap:anywhere;
+    }
+    .log {
+      min-height:120px;
+      max-height:220px;
+      overflow:auto;
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:#1a1b20;
+      padding:10px;
+      color:#c7ccd3;
+      font-family:Consolas, "Courier New", monospace;
+      font-size:12px;
+      white-space:pre-wrap;
+    }
+    .pill { display:inline-flex; width:max-content; border-radius:999px; background:var(--soft); border:1px solid var(--line); padding:5px 9px; font-size:12px; font-weight:800; }
+    .pill.ready { background:rgba(32,196,101,.14); border-color:rgba(32,196,101,.34); color:#6fd39f; }
+    .pill.warn { background:rgba(198,163,74,.16); border-color:rgba(198,163,74,.38); color:#e1c36a; }
+    @media (max-width: 980px) {
+      .workspace { grid-template-columns:1fr; }
+      .viewport { min-height:460px; }
+    }
+    @media (max-width: 540px) {
+      .top { display:grid; }
+      .top-actions, .actions, .meta-grid { grid-template-columns:1fr; display:grid; justify-content:stretch; }
+      h1 { font-size:26px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="sidebarBackdrop" class="sidebar-backdrop" onclick="closeSidebar()"></div>
+  <aside id="sidebar" class="sidebar" aria-hidden="true">
+    <h2>Menu</h2>
+    <div class="sidebar-tabs">
+      <a class="sidebar-tab" href="/">Dashboard</a>
+      <a class="sidebar-tab" href="/conversion">3D Conversion</a>
+      <a class="sidebar-tab active" href="/slicer">Slicer</a>
+      <a class="sidebar-tab" href="/makerworks">MakerWorks Search</a>
+      <a class="sidebar-tab" href="/makerworks-routing">Routing Board</a>
+      <a class="sidebar-tab" href="/add-printer">Add Printer</a>
+    </div>
+  </aside>
+  <main class="wrap">
+    <header class="top">
+      <div class="top-head">
+        <button class="hamburger" type="button" aria-label="Open menu" onclick="openSidebar()"><div class="hamburger-lines"><span></span></div></button>
+        <div>
+          <h1>PrintLab Slicer</h1>
+          <p>Open queued routing jobs here, tune slicing settings, and save the sliced artifact back to the routing workflow.</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <a class="link-btn secondary" href="/makerworks-routing">Back To Routing</a>
+        <button id="refreshJobBtn" class="btn secondary" type="button" onclick="loadJob()">Refresh Job</button>
+      </div>
+    </header>
+    <section id="slicerWorkspace" class="workspace">
+      <section id="modelViewport" class="viewport" aria-label="Model viewport">
+        <div class="viewport-head">
+          <span id="jobStatus" class="pill warn">No job loaded</span>
+          <span id="modelSource" class="pill">PrintLab</span>
+        </div>
+        <div class="model-stage">
+          <div class="model-placeholder" aria-hidden="true"></div>
+        </div>
+        <div class="viewport-foot">
+          <span id="modelName">Open from the routing board to load a model.</span>
+          <span id="modelFile">-</span>
+        </div>
+      </section>
+      <aside class="side" aria-label="Slicer controls">
+        <section class="panel engine-status">
+          <div class="engine-line">
+            <h2>Orca Engine</h2>
+            <span id="orcaEngineStatus" class="pill warn">Checking</span>
+          </div>
+          <div id="orcaEnginePath" class="engine-path">Resolving OrcaSlicer...</div>
+        </section>
+        <section class="panel">
+          <h2>Job Context</h2>
+          <div class="meta-grid">
+            <div class="stat"><strong>Job</strong><span id="slicerJobId">-</span></div>
+            <div class="stat"><strong>Printer</strong><span id="printerId">Unassigned</span></div>
+            <div class="stat"><strong>Model</strong><span id="modelId">-</span></div>
+            <div class="stat"><strong>Source</strong><span id="sourceJobId">-</span></div>
+          </div>
+        </section>
+        <section class="panel">
+          <h2>Slice Setup</h2>
+          <div class="field">
+            <label for="profileSelect">Profile</label>
+            <select id="profileSelect">
+              <option value="standard">Standard</option>
+              <option value="draft">Draft</option>
+              <option value="high_quality">High Quality</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="materialSelect">Material</label>
+            <select id="materialSelect">
+              <option value="PLA">PLA</option>
+              <option value="PETG">PETG</option>
+              <option value="ABS">ABS</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="layerHeightInput">Layer Height</label>
+            <input id="layerHeightInput" type="number" min="0.05" max="0.4" step="0.01" value="0.2">
+          </div>
+          <div class="field">
+            <label for="infillInput">Infill</label>
+            <input id="infillInput" type="number" min="0" max="100" step="1" value="15">
+          </div>
+          <div class="actions">
+            <button id="sliceBtn" class="btn" type="button" onclick="sliceRoutingJob()">Slice</button>
+            <button id="saveToRoutingBtn" class="btn secondary" type="button" onclick="saveToRouting()" disabled>Save To Routing</button>
+          </div>
+        </section>
+        <section class="panel">
+          <h2>Output</h2>
+          <div id="slicerLog" class="log">Waiting for a PrintLab routing job.</div>
+        </section>
+      </aside>
+    </section>
+  </main>
+  <script>
+    const nativeFetch = window.fetch.bind(window);
+    const jobId = new URLSearchParams(window.location.search).get("job_id");
+    let activeJob = null;
+    let activeSlicerJob = null;
+    let slicedArtifact = null;
+    let engineReady = false;
+
+    function readCookie(name) {
+      const prefix = `${name}=`;
+      return document.cookie.split(";").map((item) => item.trim()).find((item) => item.startsWith(prefix))?.slice(prefix.length) || "";
+    }
+
+    window.fetch = function(input, init = {}) {
+      const next = { ...init, credentials: "same-origin" };
+      const method = String(next.method || "GET").toUpperCase();
+      if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+        const headers = new Headers(next.headers || {});
+        const csrf = readCookie("printlab_csrf");
+        if (csrf && !headers.has("X-CSRF-Token")) headers.set("X-CSRF-Token", csrf);
+        next.headers = headers;
+      }
+      return nativeFetch(input, next).then((response) => {
+        const targetUrl = typeof input === "string" ? input : (input && "url" in input ? input.url : "");
+        const sameOrigin = !targetUrl || targetUrl.startsWith("/") || targetUrl.startsWith(window.location.origin);
+        if (sameOrigin && response.status === 401 && !targetUrl.includes("/auth/login") && !targetUrl.includes("/auth/session")) {
+          const nextPath = `${window.location.pathname}${window.location.search || ""}`;
+          window.location.assign(`/login?next=${encodeURIComponent(nextPath)}`);
+        }
+        return response;
+      });
+    };
+
+    function openSidebar() {
+      document.getElementById("sidebar").classList.add("open");
+      document.getElementById("sidebarBackdrop").classList.add("open");
+      document.getElementById("sidebar").setAttribute("aria-hidden", "false");
+    }
+
+    function closeSidebar() {
+      document.getElementById("sidebar").classList.remove("open");
+      document.getElementById("sidebarBackdrop").classList.remove("open");
+      document.getElementById("sidebar").setAttribute("aria-hidden", "true");
+    }
+
+    function setLog(message) {
+      document.getElementById("slicerLog").textContent = message;
+    }
+
+    function setStatus(text, ready = false) {
+      const status = document.getElementById("jobStatus");
+      status.textContent = text;
+      status.className = ready ? "pill ready" : "pill warn";
+    }
+
+    function updateSliceState() {
+      document.getElementById("sliceBtn").disabled = !activeJob || !engineReady;
+    }
+
+    function renderEngineStatus(status) {
+      engineReady = Boolean(status?.ready);
+      const badge = document.getElementById("orcaEngineStatus");
+      const path = document.getElementById("orcaEnginePath");
+      badge.textContent = engineReady ? "Orca ready" : "Orca not found";
+      badge.className = engineReady ? "pill ready" : "pill warn";
+      const source = status?.source ? ` (${status.source})` : "";
+      const binary = status?.resolved_binary || status?.binary || "Set ORCASLICER_BINARY or ORCA_SLICER_BINARY.";
+      path.textContent = `${binary}${source}`;
+      updateSliceState();
+    }
+
+    async function loadCapabilities() {
+      try {
+        const response = await fetch("/api/slicer/capabilities");
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.error?.message || data?.detail || `HTTP ${response.status}`);
+        renderEngineStatus(data.engine_status || {});
+      } catch (error) {
+        engineReady = false;
+        document.getElementById("orcaEngineStatus").textContent = "Status failed";
+        document.getElementById("orcaEngineStatus").className = "pill warn";
+        document.getElementById("orcaEnginePath").textContent = String(error?.message || error);
+        updateSliceState();
+      }
+    }
+
+    function renderJob(job) {
+      activeJob = job;
+      document.getElementById("slicerJobId").textContent = job?.id || jobId || "-";
+      document.getElementById("printerId").textContent = job?.printer_id || "Unassigned";
+      document.getElementById("modelId").textContent = job?.model_id || "-";
+      document.getElementById("sourceJobId").textContent = job?.source_job_id || job?.source_order_id || "-";
+      document.getElementById("modelName").textContent = job?.model_name || job?.file_name || "Queued model";
+      document.getElementById("modelFile").textContent = job?.file_path || job?.download_url || "-";
+      document.getElementById("modelSource").textContent = job?.source || "PrintLab";
+      setStatus(String(job?.status || "Loaded").toUpperCase(), true);
+      setLog(`Loaded PrintLab job ${job?.id || jobId}.\\nChoose slicing settings, then slice.`);
+      updateSliceState();
+    }
+
+    async function loadJob() {
+      if (!jobId) {
+        setStatus("No job loaded");
+        setLog("Open Slicer from a routing-board job to load its PrintLab context.");
+        updateSliceState();
+        return;
+      }
+      setStatus("Loading job");
+      setLog(`Loading PrintLab job ${jobId}...`);
+      const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+      const data = await response.json();
+      if (!response.ok) {
+        setStatus("Job load failed");
+        setLog(`Failed to load /api/jobs/${jobId}: ${data?.error?.message || data?.detail || response.status}`);
+        return;
+      }
+      renderJob(data.item || data);
+    }
+
+    function currentSettings() {
+      return {
+        profile: document.getElementById("profileSelect").value,
+        material: document.getElementById("materialSelect").value,
+        layer_height: Number(document.getElementById("layerHeightInput").value || 0.2),
+        infill: Number(document.getElementById("infillInput").value || 15)
+      };
+    }
+
+    function renderSlicerJob(job) {
+      activeSlicerJob = job;
+      const artifacts = Array.isArray(job?.artifacts) ? job.artifacts : [];
+      const artifactLines = artifacts.length
+        ? artifacts.map((artifact) => `Artifact: ${artifact.kind} (${artifact.size_bytes || 0} bytes)`).join("\\n")
+        : "No artifacts returned.";
+      document.getElementById("saveToRoutingBtn").disabled = String(job?.status || "") !== "complete";
+      setStatus(String(job?.status || "Slicer job").replace(/_/g, " ").toUpperCase(), String(job?.status || "") === "complete");
+      setLog([
+        `Slicer job ${job?.id || "-"}`,
+        `Routing job ${job?.source_job_id || activeJob?.id || jobId || "-"}`,
+        `Status: ${job?.status || "-"}`,
+        job?.error_code ? `Error: ${job.error_code} - ${job.error_message || ""}` : "Orca command completed.",
+        artifactLines,
+        job?.stderr ? `stderr:\\n${job.stderr}` : "",
+        job?.stdout ? `stdout:\\n${job.stdout}` : ""
+      ].filter(Boolean).join("\\n"));
+    }
+
+    async function sliceRoutingJob() {
+      if (!activeJob) {
+        setLog("Load a routing job before slicing.");
+        return;
+      }
+      if (!engineReady) {
+        setLog("OrcaSlicer is not ready. Configure ORCASLICER_BINARY or ORCA_SLICER_BINARY, then refresh.");
+        return;
+      }
+      const button = document.getElementById("sliceBtn");
+      button.disabled = true;
+      setStatus("Slicing");
+      setLog(`Submitting ${activeJob.model_name || activeJob.file_name || activeJob.id} to PrintLab Slicer...`);
+      const settings = currentSettings();
+      try {
+        const response = await fetch(`/api/slicer/routing-jobs/${encodeURIComponent(activeJob.id)}/slice`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ settings, outputs: ["gcode_3mf"] })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.error?.message || data?.detail || `HTTP ${response.status}`);
+        slicedArtifact = data.item;
+        renderSlicerJob(data.item);
+      } catch (error) {
+        setStatus("Slice failed");
+        setLog(`Slice request failed: ${String(error?.message || error)}`);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function saveToRouting() {
+      if (!slicedArtifact || String(slicedArtifact.status || "") !== "complete") {
+        setLog("Slice the job before saving it back to routing.");
+        return;
+      }
+      const button = document.getElementById("saveToRoutingBtn");
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/slicer/jobs/${encodeURIComponent(slicedArtifact.id)}/save-routing`, { method: "POST" });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.error?.message || data?.detail || `HTTP ${response.status}`);
+        const artifacts = Array.isArray(slicedArtifact.artifacts) ? slicedArtifact.artifacts.map((item) => item.kind).join(", ") : "artifact";
+        setLog(`${document.getElementById("slicerLog").textContent}\\nSaved ${artifacts} to routing job ${data.item?.id || activeJob?.id || jobId}.`);
+        setStatus("Ready To Route", true);
+      } catch (error) {
+        button.disabled = false;
+        setStatus("Save failed");
+        setLog(`${document.getElementById("slicerLog").textContent}\\nSave failed: ${String(error?.message || error)}`);
+      }
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeSidebar();
+    });
+    updateSliceState();
+    loadCapabilities().catch(() => {});
+    loadJob().catch((error) => {
+      setStatus("Job load failed");
+      setLog(`Failed to initialize slicer workspace: ${String(error?.message || error)}`);
+    });
+  </script>
+</body>
+</html>"""
 
 
 def render_printer_dashboard(printer_id: str) -> str:

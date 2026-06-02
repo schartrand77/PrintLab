@@ -469,6 +469,57 @@ def test_print_job_manager_rejects_queueing_route_only_submission_after_assignme
     assert printer._queue_count == 0
 
 
+def test_print_job_manager_queues_route_only_submission_after_slicer_save(tmp_path) -> None:
+    class _SlicedPrinter(_FakePrinter):
+        async def stage_project_bytes(self, content: bytes, preferred_name: str) -> dict[str, object]:
+            assert content == b"sliced-gcode-3mf"
+            assert preferred_name == "output.gcode.3mf"
+            return {"file_name": preferred_name, "file_path": f"/cache/{preferred_name}"}
+
+    class _NoDownloadWorks(_FakeWorksService):
+        async def download_asset(self, service: str, asset_url: str) -> dict[str, object]:
+            raise AssertionError("saved slicer artifact should be staged without downloading the source model")
+
+    artifact_path = tmp_path / "output.gcode.3mf"
+    artifact_path.write_bytes(b"sliced-gcode-3mf")
+    printer = _SlicedPrinter("printer-1", connected=True, busy=False, queue_count=0)
+    manager = PrintJobManager(_FakePrinterManager([printer]), _NoDownloadWorks())
+    held = asyncio.run(
+        manager.submit_makerworks_job(
+            MakerworksSubmitJobRequest(
+                model_id="widget-1",
+                idempotency_key="mw-route-only-sliced",
+                source_job_id="source-job-1",
+                source_order_id="source-order-1",
+                route_only=True,
+            ),
+            actor="makerworks",
+        )
+    )
+    manager.attach_slicer_job(
+        {
+            "id": "slicer-job-1",
+            "source_job_id": held["id"],
+            "status": "complete",
+            "settings": {"layer_height": 0.2},
+            "artifacts": [
+                {"kind": "command_manifest", "path": str(tmp_path / "command_manifest.json")},
+                {"kind": "gcode_3mf", "path": str(artifact_path), "size_bytes": artifact_path.stat().st_size},
+            ],
+        }
+    )
+
+    result = asyncio.run(manager.queue_submitted_job(str(held["id"]), printer_id="printer-1", actor="operator"))
+
+    assert result["status"] == "queued"
+    assert result["queue_item_id"] == "queue-1"
+    assert result["file_path"] == "/cache/output.gcode.3mf"
+    assert result["file_name"] == "output.gcode.3mf"
+    assert result["routing_hold"] is False
+    assert result["slicer_artifacts"][1]["path"] == str(artifact_path)
+    assert printer._queue_count == 1
+
+
 def test_print_job_manager_connects_route_only_submission_to_current_busy_print_without_queueing() -> None:
     printer = _FakePrinter(
         "printer-1",
