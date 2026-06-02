@@ -25,8 +25,10 @@
 - ~~Materialize remote `download_url` models into local slicer job storage before invoking Orca.~~
 - ~~Confirm the exact OrcaSlicer CLI arguments from the `schartrand77/OrcaSlicer-MakerWorks` source and adjust `OrcaSlicerAdapter.build_command()`.~~ Built binary smoke testing is still pending because no local `orca-slicer` executable was found on PATH or common Windows install paths on 2026-06-02.
 - ~~Add profile/material preset mapping instead of sending only generic raw settings.~~
-- [ ] Add slicer job progress/status refresh in the `/slicer` UI.
-- [ ] Add artifact download/view API for generated `.gcode.3mf`, manifest, and input model files.
+- ~~Add slicer job progress/status refresh in the `/slicer` UI.~~
+- ~~Add artifact download/view API for generated `.gcode.3mf`, manifest, and input model files.~~
+- ~~Add `/slicer` artifact download links for generated outputs, manifests, and staged input models.~~
+- ~~Add a repeatable Docker Desktop dev override for a `printlab-dev` container on port `8290`.~~
 - [ ] Add production smoke test with a real built `schartrand77/OrcaSlicer-MakerWorks` installation and a sample 3MF/STL.
 - [ ] Commit and push the completed integration branch.
 

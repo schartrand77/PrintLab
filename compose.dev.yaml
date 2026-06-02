@@ -1,0 +1,9 @@
+services:
+  printlab:
+    container_name: printlab-dev
+    image: printlab-dev:local
+    environment:
+      LOG_LEVEL: INFO
+      REQUIRE_AUTH: "false"
+      ADMIN_PASSWORD_HASH: ""
+      SESSION_COOKIE_SECURE: "false"

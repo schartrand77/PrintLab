@@ -48,6 +48,26 @@ docker compose up -d --build
 http://localhost:8080
 ```
 
+### Docker Desktop dev instance
+
+To run a separate local dev container named `printlab-dev` without replacing an
+existing `printlab` container:
+
+```powershell
+$env:APP_PORT="8290"
+docker compose -p printlab-dev -f compose.yaml -f compose.dev.yaml up -d --build
+```
+
+Open:
+
+```text
+http://localhost:8290
+```
+
+The dev override disables auth for local iteration and clears
+`ADMIN_PASSWORD_HASH`, which avoids failures when a development `.env` contains
+a placeholder or stale hash.
+
 ## API endpoints
 
 Interactive API docs are published at:
