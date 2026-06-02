@@ -1,6 +1,9 @@
 services:
   printlab:
     container_name: printlab-dev
+    build:
+      args:
+        ORCA_LINUXDIR_URL: ${ORCA_LINUXDIR_URL:-}
     image: printlab-dev:local
     environment:
       LOG_LEVEL: INFO

@@ -29,6 +29,7 @@
 - ~~Add artifact download/view API for generated `.gcode.3mf`, manifest, and input model files.~~
 - ~~Add `/slicer` artifact download links for generated outputs, manifests, and staged input models.~~
 - ~~Add a repeatable Docker Desktop dev override for a `printlab-dev` container on port `8290`.~~
+- ~~Confirm FULU publishes Linux/Ubuntu OrcaSlicer builds and add optional Docker LinuxDir ingestion for Unraid/Docker deployments.~~ FULU `v1.0.0` Linux binaries currently fail headless Docker CLI smoke tests with signal 11.
 - [ ] Add production smoke test with a real built `schartrand77/OrcaSlicer-MakerWorks` installation and a sample 3MF/STL.
 - [ ] Commit and push the completed integration branch.
 
@@ -387,7 +388,17 @@ Expected: pass.
 - Optional Modify: `README.md`
 - Optional Modify: `tests/test_slicer.py`
 
-**2026-06-02 status:** Blocked on a local built Orca executable. `.env` does not define `ORCASLICER_BINARY` or `ORCA_SLICER_BINARY`, `orca-slicer` / `orca-slicer.exe` were not found on PATH or common Windows install paths, and the sibling `slicerworks` repo does not contain a built Orca binary. PrintLab itself starts and `/api/slicer/capabilities` returns HTTP 200, but reports `engine_status.ready=false`, `binary="orca-slicer"`, `source="fallback"`, and `resolved_binary=""`. An optional pytest harness now exists at `tests/test_slicer.py::test_real_orca_binary_smoke_slices_sample_model`; it skips until one of the Orca binary env vars points to an existing executable.
+**2026-06-02 status:** FULU publishes Linux/Ubuntu builds. Release `v1.0.0` includes LinuxDir, AppImage, and `.deb` assets for Ubuntu 22.04 and 24.04. The LinuxDir archive contains `bin/orca-slicer`; PrintLab Docker images can optionally ingest it with `ORCA_LINUXDIR_URL`, extract it to `/opt/orca`, and expose `/usr/local/bin/orca-slicer` for existing PATH discovery. The Docker launcher sets `LD_LIBRARY_PATH=/opt/orca/bin` so bundled LinuxDir libraries are preferred.
+
+Docker binary smoke evidence:
+
+- Ubuntu 24.04 LinuxDir installs and `ldd` resolves after adding GTK/WebKit/GStreamer/OpenGL runtime libraries, but `orca-slicer --help`, `--info`, `--export-stl`, and `--slice 0 --export-3mf` exit with `139` in headless Docker.
+- Ubuntu 22.04 LinuxDir also exits with `139` on `--info`.
+- Ubuntu 24.04 `.deb` installs `orca-slicer-bmcu`, but the packaged binary also exits with `139` on `--info` after using its bundled library path.
+- `xvfb-run` does not clear the crash.
+- `gdb` shows the crash in `Slic3r::CLI::run(int, char**)`, not in PrintLab command construction.
+
+An optional pytest harness exists at `tests/test_slicer.py::test_real_orca_binary_smoke_slices_sample_model`; it skips until one of the Orca binary env vars points to an existing executable. Do not mark the real Orca smoke task complete until an Orca build passes a real slice in the target Docker/Unraid image.
 
 - [ ] **Step 1: Configure Orca binary locally**
 

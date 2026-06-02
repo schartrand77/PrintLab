@@ -68,6 +68,26 @@ The dev override disables auth for local iteration and clears
 `ADMIN_PASSWORD_HASH`, which avoids failures when a development `.env` contains
 a placeholder or stale hash.
 
+To bake a Linux OrcaSlicer build into the Docker image for Docker/Unraid, set
+`ORCA_LINUXDIR_URL` to a LinuxDir tarball before building:
+
+```powershell
+$env:APP_PORT="8290"
+$env:ORCA_LINUXDIR_URL="https://github.com/FULU-Foundation/OrcaSlicer-bambulab/releases/download/v1.0.0/OrcaSlicer-BMCU_LinuxDir_ubuntu24.04_amd64_1.0.0.tar.gz"
+docker compose -p printlab-dev -f compose.yaml -f compose.dev.yaml up -d --build
+```
+
+The image extracts the archive into `/opt/orca` and creates
+`/usr/local/bin/orca-slicer`, allowing PrintLab to discover Orca from `PATH`.
+The launcher prefers `/opt/orca/bin` for bundled Orca libraries before
+executing `/opt/orca/bin/orca-slicer`.
+
+As of 2026-06-02, the FULU `v1.0.0` Ubuntu 22.04 and Ubuntu 24.04 Linux
+release binaries can be installed into Docker, but their CLI exits with a
+segmentation fault in headless container smoke tests. Keep
+`ORCA_LINUXDIR_URL` unset for production unless the selected Orca build passes
+a real slice smoke test in the target Docker/Unraid image.
+
 ## API endpoints
 
 Interactive API docs are published at:
