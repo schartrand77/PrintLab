@@ -2488,7 +2488,7 @@ def test_delete_all_timelapses_hides_deleted_upload_records() -> None:
     assert snapshot["items"] == []
 
 
-def test_delete_all_timelapses_clears_upload_cards_when_inventory_is_unavailable() -> None:
+def test_delete_all_timelapses_keeps_upload_cards_when_inventory_is_unavailable() -> None:
     service = PrinterService(
         config={"host": "127.0.0.1", "serial": "SERIAL", "access_code": "CODE"},
         printer_id="printer-1",
@@ -2519,9 +2519,10 @@ def test_delete_all_timelapses_clears_upload_cards_when_inventory_is_unavailable
     connection = service.youtube_connection_status()
 
     assert result["deleted"] == 0
-    assert result["cleared"] == 1
-    assert snapshot["items"] == []
-    assert connection["uploaded_count"] == 0
+    assert result["cleared"] == 0
+    assert len(snapshot["items"]) == 1
+    assert snapshot["items"][0]["record_id"] == "record-1"
+    assert connection["uploaded_count"] == 1
 
 
 def test_ftp_list_timestamp_without_year_survives_deprecation_warnings() -> None:

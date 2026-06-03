@@ -3537,12 +3537,6 @@ class PrinterService:
                     if self._mark_youtube_record_deleted(record):
                         cleared += 1
                         changed = True
-        for record in self._successful_gcodes:
-            if not isinstance(record, dict):
-                continue
-            if self._mark_youtube_record_deleted(record):
-                cleared += 1
-                changed = True
         if changed:
             self._save_successful_gcodes()
         return {"deleted": len(deleted), "cleared": cleared, "items": deleted}
