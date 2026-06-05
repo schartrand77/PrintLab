@@ -887,7 +887,7 @@ Expected: commit succeeds with only these two files staged.
 **Files:**
 - All files touched by Tasks 1-4.
 
-- [ ] **Step 1: Run focused tests**
+- [x] **Step 1: Run focused tests**
 
 Run:
 
@@ -897,7 +897,7 @@ python -m pytest tests/test_orca_profiles.py tests/test_slicer.py tests/test_mod
 
 Expected: all focused tests pass.
 
-- [ ] **Step 2: Run Ruff on touched app/test files**
+- [x] **Step 2: Run Ruff on touched app/test files**
 
 Run:
 
@@ -907,7 +907,7 @@ python -m ruff check app/orca_profiles.py app/runtime.py app/routers/api.py app/
 
 Expected: `All checks passed!`
 
-- [ ] **Step 3: Run the full test suite**
+- [x] **Step 3: Run the full test suite**
 
 Run:
 
@@ -917,7 +917,7 @@ python -m pytest -q --basetemp C:\tmp\pytest-printlab-plus-full
 
 Expected: full suite passes, with any real Orca binary smoke test skipped unless `ORCASLICER_BINARY` or `ORCA_SLICER_BINARY` is configured.
 
-- [ ] **Step 4: Inspect final diff**
+- [x] **Step 4: Inspect final diff**
 
 Run:
 
