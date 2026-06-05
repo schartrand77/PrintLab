@@ -744,7 +744,7 @@ Expected: commit succeeds with only these three files staged.
 - Modify: `app/views.py`
 - Test: `tests/test_models.py`
 
-- [ ] **Step 1: Add failing render assertions**
+- [x] **Step 1: Add failing render assertions**
 
 Modify `tests/test_models.py::test_render_slicer_page_contains_printlab_workspace` to include:
 
@@ -757,7 +757,7 @@ assert "filamentPresetsInput" in html
 assert "processPresetInput" in html
 ```
 
-- [ ] **Step 2: Run the render test to verify it fails**
+- [x] **Step 2: Run the render test to verify it fails**
 
 Run:
 
@@ -767,7 +767,7 @@ python -m pytest tests/test_models.py::test_render_slicer_page_contains_printlab
 
 Expected: fails on the first missing `orcaProfilePanel` assertion.
 
-- [ ] **Step 3: Add profile panel markup to `render_slicer_html()`**
+- [x] **Step 3: Add profile panel markup to `render_slicer_html()`**
 
 In `app/views.py`, inside the `/slicer` workspace controls near the existing profile/material controls, add:
 
@@ -793,7 +793,7 @@ In `app/views.py`, inside the `/slicer` workspace controls near the existing pro
 </section>
 ```
 
-- [ ] **Step 4: Add profile panel JavaScript**
+- [x] **Step 4: Add profile panel JavaScript**
 
 In the `/slicer` script block in `app/views.py`, add these functions:
 
@@ -851,7 +851,7 @@ In the existing page initialization path, call:
 loadPlusPrinters().catch((error) => appendLog(`Printer profile load failed: ${error.message}`));
 ```
 
-- [ ] **Step 5: Include selected printer in slice payload**
+- [x] **Step 5: Include selected printer in slice payload**
 
 In the existing slice request payload in `app/views.py`, add:
 
@@ -859,7 +859,7 @@ In the existing slice request payload in `app/views.py`, add:
 printer_id: selectedPlusPrinter?.id || null,
 ```
 
-- [ ] **Step 6: Run focused UI tests**
+- [x] **Step 6: Run focused UI tests**
 
 Run:
 
@@ -869,7 +869,7 @@ python -m pytest tests/test_models.py::test_render_slicer_page_contains_printlab
 
 Expected: test passes.
 
-- [ ] **Step 7: Commit Task 4**
+- [x] **Step 7: Commit Task 4**
 
 Run:
 

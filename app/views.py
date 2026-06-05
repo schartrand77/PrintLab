@@ -3330,6 +3330,16 @@ def render_slicer_html() -> str:
       font:inherit;
       font-size:14px;
     }
+    .check-field {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      color:var(--muted);
+      font-size:12px;
+      font-weight:800;
+      text-transform:uppercase;
+    }
+    .check-field input { width:16px; height:16px; margin:0; }
     .actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
     .engine-status { display:grid; gap:8px; }
     .engine-line { display:flex; align-items:center; justify-content:space-between; gap:10px; }
@@ -3473,6 +3483,35 @@ def render_slicer_html() -> str:
             <button id="saveToRoutingBtn" class="btn secondary" type="button" onclick="saveToRouting()" disabled>Save To Routing</button>
           </div>
         </section>
+        <section id="orcaProfilePanel" class="panel">
+          <h2>Printer Slicer Profile</h2>
+          <p id="orcaProfileStatus">Select a printer to check Orca setup.</p>
+          <div class="field">
+            <label for="orcaPrinterSelect">Printer</label>
+            <select id="orcaPrinterSelect" onchange="selectOrcaPrinter(this.value)"></select>
+          </div>
+          <div class="field">
+            <label for="orcaMachinePresetInput">Machine preset</label>
+            <input id="orcaMachinePresetInput" type="text" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="nozzleDiameterInput">Nozzle diameter</label>
+            <input id="nozzleDiameterInput" type="number" min="0.1" max="2" step="0.05" value="0.4">
+          </div>
+          <label class="check-field">
+            <input id="amsEnabledInput" type="checkbox">
+            <span>AMS enabled</span>
+          </label>
+          <div class="field">
+            <label for="filamentPresetsInput">Filament presets</label>
+            <input id="filamentPresetsInput" type="text" autocomplete="off" placeholder="Bambu PLA Basic @BBL X1C">
+          </div>
+          <div class="field">
+            <label for="processPresetInput">Process preset</label>
+            <input id="processPresetInput" type="text" autocomplete="off" placeholder="0.20mm Standard @BBL X1C">
+          </div>
+          <button class="btn secondary" type="button" onclick="saveOrcaProfile()">Save Slicer Profile</button>
+        </section>
         <section class="panel">
           <div class="engine-line">
             <h2>Output</h2>
@@ -3491,6 +3530,8 @@ def render_slicer_html() -> str:
     let activeSlicerJob = null;
     let slicedArtifact = null;
     let engineReady = false;
+    let plusPrinters = [];
+    let selectedPlusPrinter = null;
 
     function readCookie(name) {
       const prefix = `${name}=`;
@@ -3581,6 +3622,62 @@ def render_slicer_html() -> str:
       }
     }
 
+    async function loadPlusPrinters() {
+      const response = await fetch("/api/plus/printers");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error?.message || data?.detail || `HTTP ${response.status}`);
+      plusPrinters = Array.isArray(data.items) ? data.items : [];
+      const select = document.getElementById("orcaPrinterSelect");
+      if (!select) return;
+      select.innerHTML = plusPrinters.map((printer) => {
+        const id = escapeHtml(printer.id || "");
+        const label = escapeHtml(printer.name || printer.id || "Printer");
+        return `<option value="${id}">${label}</option>`;
+      }).join("");
+      const preferredPrinterId = activeJob?.printer_id || plusPrinters[0]?.id || "";
+      if (preferredPrinterId) {
+        select.value = preferredPrinterId;
+        selectOrcaPrinter(preferredPrinterId);
+      } else {
+        document.getElementById("orcaProfileStatus").textContent = "No PrintLab printers are configured.";
+      }
+    }
+
+    function selectOrcaPrinter(printerId) {
+      selectedPlusPrinter = plusPrinters.find((printer) => printer.id === printerId) || null;
+      const profile = selectedPlusPrinter?.orca_profile || {};
+      document.getElementById("orcaMachinePresetInput").value = profile.orca_machine_preset || "";
+      document.getElementById("nozzleDiameterInput").value = profile.nozzle_diameter || 0.4;
+      document.getElementById("amsEnabledInput").checked = Boolean(profile.ams_enabled);
+      document.getElementById("filamentPresetsInput").value = (profile.filament_presets || []).join(", ");
+      document.getElementById("processPresetInput").value = profile.process_preset || "";
+      const status = profile.status === "ready" ? "Ready for Orca slicing." : "Needs slicer profile before printer-targeted slicing.";
+      document.getElementById("orcaProfileStatus").textContent = status;
+      if (selectedPlusPrinter) {
+        document.getElementById("orcaPrinterSelect").value = selectedPlusPrinter.id;
+      }
+    }
+
+    async function saveOrcaProfile() {
+      if (!selectedPlusPrinter?.id) return;
+      const payload = {
+        orca_machine_preset: document.getElementById("orcaMachinePresetInput").value.trim(),
+        nozzle_diameter: Number(document.getElementById("nozzleDiameterInput").value || 0.4),
+        ams_enabled: document.getElementById("amsEnabledInput").checked,
+        filament_presets: document.getElementById("filamentPresetsInput").value.split(",").map((item) => item.trim()).filter(Boolean),
+        process_preset: document.getElementById("processPresetInput").value.trim()
+      };
+      const response = await fetch(`/api/plus/printers/${encodeURIComponent(selectedPlusPrinter.id)}/orca-profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error?.message || data?.detail || `HTTP ${response.status}`);
+      selectedPlusPrinter.orca_profile = data.item;
+      selectOrcaPrinter(selectedPlusPrinter.id);
+    }
+
     function renderJob(job) {
       activeJob = job;
       document.getElementById("slicerJobId").textContent = job?.id || jobId || "-";
@@ -3592,6 +3689,7 @@ def render_slicer_html() -> str:
       document.getElementById("modelSource").textContent = job?.source || "PrintLab";
       setStatus(String(job?.status || "Loaded").toUpperCase(), true);
       setLog(`Loaded PrintLab job ${job?.id || jobId}.\\nChoose slicing settings, then slice.`);
+      if (job?.printer_id && plusPrinters.length) selectOrcaPrinter(job.printer_id);
       updateSliceState();
     }
 
@@ -3692,7 +3790,7 @@ def render_slicer_html() -> str:
         const response = await fetch(`/api/slicer/routing-jobs/${encodeURIComponent(activeJob.id)}/slice`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ settings, outputs: ["gcode_3mf"] })
+          body: JSON.stringify({ printer_id: selectedPlusPrinter?.id || null, settings, outputs: ["gcode_3mf"] })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data?.error?.message || data?.detail || `HTTP ${response.status}`);
@@ -3733,6 +3831,7 @@ def render_slicer_html() -> str:
     updateSliceState();
     updateSlicerJobRefreshState();
     loadCapabilities().catch(() => {});
+    loadPlusPrinters().catch((error) => setLog(`Printer profile load failed: ${String(error?.message || error)}`));
     loadJob().catch((error) => {
       setStatus("Job load failed");
       setLog(`Failed to initialize slicer workspace: ${String(error?.message || error)}`);

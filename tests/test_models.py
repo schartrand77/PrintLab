@@ -164,6 +164,12 @@ def test_render_slicer_page_contains_printlab_workspace() -> None:
     assert 'id="sliceBtn"' in html
     assert 'id="saveToRoutingBtn"' in html
     assert 'id="refreshSlicerJobBtn"' in html
+    assert "orcaProfilePanel" in html
+    assert "/api/plus/printers" in html
+    assert "saveOrcaProfile" in html
+    assert "orcaMachinePresetInput" in html
+    assert "filamentPresetsInput" in html
+    assert "processPresetInput" in html
     assert 'new URLSearchParams(window.location.search).get("job_id")' in html
     assert "/api/jobs/" in html
     assert "/api/slicer/capabilities" in html
