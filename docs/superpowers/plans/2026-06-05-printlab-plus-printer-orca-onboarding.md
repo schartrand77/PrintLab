@@ -379,7 +379,7 @@ Expected: commit succeeds with only these two files staged.
 - Modify: `app/routers/api.py`
 - Test: `tests/test_orca_profiles.py`
 
-- [ ] **Step 1: Add failing API tests**
+- [x] **Step 1: Add failing API tests**
 
 Append to `tests/test_orca_profiles.py`:
 
@@ -437,7 +437,7 @@ def test_plus_printer_profile_api_confirms_profile(monkeypatch, tmp_path: Path) 
     assert manager.require_confirmed_profile("printer-1")["filament_presets"] == ["Bambu PLA Basic @BBL X1C"]
 ```
 
-- [ ] **Step 2: Run API tests to verify they fail**
+- [x] **Step 2: Run API tests to verify they fail**
 
 Run:
 
@@ -447,7 +447,7 @@ python -m pytest tests/test_orca_profiles.py::test_plus_printer_profiles_api_lis
 
 Expected: fails with missing `orca_profile_manager` or `404 Not Found`.
 
-- [ ] **Step 3: Instantiate the profile manager in runtime**
+- [x] **Step 3: Instantiate the profile manager in runtime**
 
 Modify `app/runtime.py`:
 
@@ -461,7 +461,7 @@ job_manager = PrintJobManager(printer_manager, works_service)
 orca_profile_manager = OrcaProfileManager(root=data_root(), printer_manager=printer_manager)
 ```
 
-- [ ] **Step 4: Wire the API router imports and slicer service**
+- [x] **Step 4: Wire the API router imports and slicer service**
 
 Modify the imports and global services near the top of `app/routers/api.py`:
 
@@ -474,7 +474,7 @@ router = APIRouter()
 slicer_service = SlicerService(root=data_root(), orca_profiles=orca_profile_manager)
 ```
 
-- [ ] **Step 5: Add Plus printer/profile endpoints**
+- [x] **Step 5: Add Plus printer/profile endpoints**
 
 Add these routes after `list_printers()` in `app/routers/api.py`:
 
@@ -506,7 +506,7 @@ async def update_plus_printer_orca_profile(
         _raise_api_error(exc)
 ```
 
-- [ ] **Step 6: Run API tests**
+- [x] **Step 6: Run API tests**
 
 Run:
 
@@ -516,7 +516,7 @@ python -m pytest tests/test_orca_profiles.py -q --basetemp C:\tmp\pytest-printla
 
 Expected: all profile and API tests pass.
 
-- [ ] **Step 7: Commit Task 2**
+- [x] **Step 7: Commit Task 2**
 
 Run:
 
@@ -536,7 +536,7 @@ Expected: commit succeeds with only these three files staged.
 - Modify: `app/routers/api.py`
 - Test: `tests/test_slicer.py`
 
-- [ ] **Step 1: Add failing slicer tests**
+- [x] **Step 1: Add failing slicer tests**
 
 Append to `tests/test_slicer.py`:
 
@@ -598,7 +598,7 @@ def test_slicer_service_manifest_includes_confirmed_orca_profile(tmp_path) -> No
     assert sliced["command_manifest"]["orca_profile"]["filament_presets"] == ["Bambu PLA Basic @BBL X1C"]
 ```
 
-- [ ] **Step 2: Run slicer tests to verify they fail**
+- [x] **Step 2: Run slicer tests to verify they fail**
 
 Run:
 
@@ -608,7 +608,7 @@ python -m pytest tests/test_slicer.py::test_slicer_service_rejects_printer_targe
 
 Expected: fails because `SlicerService.__init__()` has no `orca_profiles` argument.
 
-- [ ] **Step 3: Extend `SlicerSliceRequest` and `SlicerService`**
+- [x] **Step 3: Extend `SlicerSliceRequest` and `SlicerService`**
 
 Modify `app/slicer.py`:
 
@@ -660,7 +660,7 @@ In `_write_manifest()`, add:
 "orca_profile": job.get("orca_profile"),
 ```
 
-- [ ] **Step 4: Pass request-selected printer id in the API**
+- [x] **Step 4: Pass request-selected printer id in the API**
 
 Modify `slice_routing_job()` in `app/routers/api.py`:
 
@@ -675,7 +675,7 @@ slicer_job = slicer_service.create_from_routing_job(
 )
 ```
 
-- [ ] **Step 5: Add API setup-required test**
+- [x] **Step 5: Add API setup-required test**
 
 Append to `tests/test_slicer.py`:
 
@@ -715,7 +715,7 @@ def test_slice_routing_job_api_returns_setup_required_for_missing_orca_profile(m
     assert response.json()["error"]["details"]["printer_id"] == "printer-1"
 ```
 
-- [ ] **Step 6: Run focused slicer tests**
+- [x] **Step 6: Run focused slicer tests**
 
 Run:
 
@@ -725,7 +725,7 @@ python -m pytest tests/test_slicer.py -q --basetemp C:\tmp\pytest-printlab-plus-
 
 Expected: all slicer tests pass.
 
-- [ ] **Step 7: Commit Task 3**
+- [x] **Step 7: Commit Task 3**
 
 Run:
 

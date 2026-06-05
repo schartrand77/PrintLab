@@ -23,6 +23,7 @@ Downloader = Callable[[str], dict[str, Any]]
 
 
 class SlicerSliceRequest(BaseModel):
+    printer_id: str | None = Field(default=None, min_length=1, max_length=64)
     settings: dict[str, Any] = Field(default_factory=dict)
     outputs: list[str] = Field(default_factory=lambda: ["gcode_3mf"])
 
@@ -203,10 +204,12 @@ class OrcaSlicerAdapter:
         return_code = int(getattr(result, "returncode", 0))
         stdout = str(getattr(result, "stdout", "") or "")
         stderr = str(getattr(result, "stderr", "") or "")
+        output = f"{stdout}\n{stderr}".strip()
+        has_orca_usage = "Usage: orca-slicer" in output or "OrcaSlicer-" in output
         probe_error = ""
-        if return_code != 0:
+        if return_code != 0 and not has_orca_usage:
             probe_error = (stderr or stdout or f"Probe exited with code {return_code}.").strip()
-        return {"runtime_ready": return_code == 0, "probe_return_code": return_code, "probe_error": probe_error}
+        return {"runtime_ready": return_code == 0 or has_orca_usage, "probe_return_code": return_code, "probe_error": probe_error}
 
     @staticmethod
     def _default_common_paths() -> list[Path]:
@@ -232,11 +235,19 @@ class OrcaSlicerAdapter:
 
 
 class SlicerService:
-    def __init__(self, *, root: Path, adapter: OrcaSlicerAdapter | None = None, downloader: Downloader | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        root: Path,
+        adapter: OrcaSlicerAdapter | None = None,
+        downloader: Downloader | None = None,
+        orca_profiles: Any | None = None,
+    ) -> None:
         self.root = Path(root)
         self.jobs_root = self.root / "slicer" / "jobs"
         self.adapter = adapter or OrcaSlicerAdapter()
         self.downloader = downloader or self._download_url
+        self.orca_profiles = orca_profiles
 
     def capabilities(self) -> dict[str, Any]:
         return {
@@ -259,6 +270,11 @@ class SlicerService:
         if not model_path:
             raise ValueError("Routing job does not have a model path or download URL.")
 
+        printer_id = str((settings or {}).get("printer_id") or routing_job.get("printer_id") or "").strip()
+        orca_profile = None
+        if printer_id and self.orca_profiles is not None:
+            orca_profile = self.orca_profiles.require_confirmed_profile(printer_id)
+
         now = _utc_now()
         job_id = uuid4().hex
         job = {
@@ -271,7 +287,8 @@ class SlicerService:
             "model_name": routing_job.get("model_name") or routing_job.get("file_name"),
             "model_path": model_path,
             "download_url": routing_job.get("download_url"),
-            "printer_id": routing_job.get("printer_id"),
+            "printer_id": printer_id or routing_job.get("printer_id"),
+            "orca_profile": orca_profile,
             "plate_gcode": routing_job.get("plate_gcode") or "Metadata/plate_1.gcode",
             "settings": self.adapter.validate_settings(settings or {}),
             "outputs": self.adapter.validate_outputs(outputs),
@@ -402,6 +419,8 @@ class SlicerService:
             "command": result["command"],
             "return_code": result["return_code"],
             "model_path": job.get("model_path"),
+            "printer_id": job.get("printer_id"),
+            "orca_profile": job.get("orca_profile"),
             "outputs": job.get("outputs") or [],
             "settings": job.get("settings") or {},
             "created_at": _utc_now(),

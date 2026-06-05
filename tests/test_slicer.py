@@ -60,6 +60,26 @@ def test_orca_adapter_reports_runtime_probe_success(tmp_path) -> None:
     assert status["probe_return_code"] == 0
 
 
+def test_orca_adapter_accepts_usage_probe_from_headless_linux_build(tmp_path) -> None:
+    from app.slicer import OrcaSlicerAdapter
+
+    configured = tmp_path / "orca-slicer"
+    configured.write_text("", encoding="utf-8")
+
+    status = OrcaSlicerAdapter(
+        binary=str(configured),
+        probe_runner=lambda _command: SimpleNamespace(
+            returncode=139,
+            stdout="OrcaSlicer-2.4.0-dev:\nUsage: orca-slicer [ OPTIONS ]",
+            stderr="Segmentation fault (core dumped)",
+        ),
+    ).engine_status()
+
+    assert status["runtime_ready"] is True
+    assert status["probe_return_code"] == 139
+    assert status["probe_error"] == ""
+
+
 def test_orca_adapter_discovers_binary_from_common_install_paths(tmp_path) -> None:
     from app.slicer import OrcaSlicerAdapter
 
@@ -440,3 +460,95 @@ def test_real_orca_binary_smoke_slices_sample_model(tmp_path) -> None:
     assert sliced["status"] == "complete", sliced.get("stderr") or sliced.get("error_message")
     output_artifact = next(item for item in sliced["artifacts"] if item["kind"] == "gcode_3mf")
     assert output_artifact["size_bytes"] > 0
+
+
+def test_slicer_service_rejects_printer_target_without_confirmed_orca_profile(tmp_path) -> None:
+    from app.errors import ApiError
+    from app.slicer import OrcaSlicerAdapter, SlicerService
+
+    class FakeProfiles:
+        def require_confirmed_profile(self, printer_id: str) -> dict[str, object]:
+            raise ApiError(
+                code="orca_profile_required",
+                message="Printer needs an Orca slicer profile before slicing.",
+                status_code=409,
+                details={"printer_id": printer_id},
+            )
+
+    service = SlicerService(root=tmp_path, adapter=OrcaSlicerAdapter(binary="orca-cli"), orca_profiles=FakeProfiles())
+
+    with pytest.raises(ApiError) as excinfo:
+        service.create_from_routing_job({"id": "route-1", "file_path": "/cache/widget.3mf", "printer_id": "printer-1"})
+
+    assert excinfo.value.code == "orca_profile_required"
+    assert excinfo.value.status_code == 409
+
+
+def test_slicer_service_manifest_includes_confirmed_orca_profile(tmp_path) -> None:
+    from app.slicer import OrcaSlicerAdapter, SlicerService
+
+    class FakeProfiles:
+        def require_confirmed_profile(self, printer_id: str) -> dict[str, object]:
+            return {
+                "printer_id": printer_id,
+                "orca_machine_preset": "Bambu Lab X1 Carbon 0.4 nozzle",
+                "nozzle_diameter": 0.4,
+                "ams_enabled": True,
+                "filament_presets": ["Bambu PLA Basic @BBL X1C"],
+                "process_preset": "0.20mm Standard @BBL X1C",
+                "status": "ready",
+            }
+
+    def runner(_command: list[str]):
+        return SimpleNamespace(returncode=0, stdout="sliced ok", stderr="")
+
+    service = SlicerService(
+        root=tmp_path,
+        adapter=OrcaSlicerAdapter(binary="orca-cli", runner=runner),
+        orca_profiles=FakeProfiles(),
+    )
+    job = service.create_from_routing_job(
+        {"id": "route-1", "file_path": "/cache/widget.3mf", "printer_id": "printer-1"},
+        settings={"layer_height": 0.2},
+    )
+
+    sliced = service.slice_job(job["id"])
+
+    assert sliced["printer_id"] == "printer-1"
+    assert sliced["orca_profile"]["process_preset"] == "0.20mm Standard @BBL X1C"
+    assert sliced["command_manifest"]["orca_profile"]["filament_presets"] == ["Bambu PLA Basic @BBL X1C"]
+
+
+def test_slice_routing_job_api_returns_setup_required_for_missing_orca_profile(monkeypatch, tmp_path) -> None:
+    import app.routers.api as api_routes
+    from app.errors import ApiError
+    from app.slicer import OrcaSlicerAdapter, SlicerService
+
+    class FakeProfiles:
+        def require_confirmed_profile(self, printer_id: str) -> dict[str, object]:
+            raise ApiError(
+                code="orca_profile_required",
+                message="Printer needs an Orca slicer profile before slicing.",
+                status_code=409,
+                details={"printer_id": printer_id},
+            )
+
+    monkeypatch.setattr(
+        api_routes,
+        "job_manager",
+        SimpleNamespace(get_job=lambda job_id: {"id": job_id, "file_path": "/cache/widget.3mf"}),
+    )
+    monkeypatch.setattr(
+        api_routes,
+        "slicer_service",
+        SlicerService(root=tmp_path, adapter=OrcaSlicerAdapter(binary="orca-cli"), orca_profiles=FakeProfiles()),
+    )
+
+    response = TestClient(create_app()).post(
+        "/api/slicer/routing-jobs/route-1/slice",
+        json={"printer_id": "printer-1", "settings": {"layer_height": 0.2}, "outputs": ["gcode_3mf"]},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "orca_profile_required"
+    assert response.json()["error"]["details"]["printer_id"] == "printer-1"

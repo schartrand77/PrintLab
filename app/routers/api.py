@@ -52,7 +52,7 @@ from app.services import (
 from app.slicer import SlicerService, SlicerSliceRequest
 
 router = APIRouter()
-slicer_service = SlicerService(root=data_root())
+slicer_service = SlicerService(root=data_root(), orca_profiles=orca_profile_manager)
 
 LIVE_STREAM_FPS = 10
 LIVE_STREAM_READ_TIMEOUT_SECONDS = 2.5
@@ -642,7 +642,9 @@ async def slicer_capabilities() -> dict[str, Any]:
 async def slice_routing_job(job_id: str, request: Request, payload: SlicerSliceRequest) -> dict[str, Any]:
     _require_operator(request)
     try:
-        routing_job = job_manager.get_job(job_id)
+        routing_job = dict(job_manager.get_job(job_id))
+        if payload.printer_id:
+            routing_job["printer_id"] = payload.printer_id
         slicer_job = slicer_service.create_from_routing_job(
             routing_job,
             settings=payload.settings,
