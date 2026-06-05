@@ -29,7 +29,7 @@
 - Create: `app/orca_profiles.py`
 - Test: `tests/test_orca_profiles.py`
 
-- [ ] **Step 1: Write failing tests for auto-discovered pending profiles**
+- [x] **Step 1: Write failing tests for auto-discovered pending profiles**
 
 Create `tests/test_orca_profiles.py`:
 
@@ -155,7 +155,7 @@ def test_removed_printer_binding_is_not_listed_as_active(tmp_path: Path) -> None
     assert empty_manager.profile_for("printer-1")["status"] == "stale_printer"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -165,7 +165,7 @@ python -m pytest tests/test_orca_profiles.py -q --basetemp C:\tmp\pytest-printla
 
 Expected: fails with `ModuleNotFoundError: No module named 'app.orca_profiles'`.
 
-- [ ] **Step 3: Implement `app/orca_profiles.py`**
+- [x] **Step 3: Implement `app/orca_profiles.py`**
 
 Create `app/orca_profiles.py`:
 
@@ -349,7 +349,7 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 ```
 
-- [ ] **Step 4: Run profile tests**
+- [x] **Step 4: Run profile tests**
 
 Run:
 
@@ -359,7 +359,7 @@ python -m pytest tests/test_orca_profiles.py -q --basetemp C:\tmp\pytest-printla
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 Run:
 

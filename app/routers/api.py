@@ -18,7 +18,8 @@ from app.conversion import (
     supported_conversion_formats,
 )
 from app.errors import api_error, from_exception
-from app.runtime import job_manager, printer_manager, service_or_404, works_service
+from app.orca_profiles import OrcaProfileUpdateRequest
+from app.runtime import job_manager, orca_profile_manager, printer_manager, service_or_404, works_service
 from app.services import (
     AddPrinterRequest,
     AlertRuleRequest,
@@ -256,6 +257,33 @@ async def list_printers(request: Request) -> dict[str, Any]:
             }
         )
     return {"default_id": printer_manager.default_id, "items": items}
+
+
+@router.get("/api/plus/printers")
+async def list_plus_printers() -> dict[str, Any]:
+    items = orca_profile_manager.list_plus_printers()
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/api/plus/printers/{printer_id}/orca-profile")
+async def plus_printer_orca_profile(printer_id: str) -> dict[str, Any]:
+    try:
+        return {"item": orca_profile_manager.profile_for(printer_id)}
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
+@router.patch("/api/plus/printers/{printer_id}/orca-profile")
+async def update_plus_printer_orca_profile(
+    printer_id: str,
+    request: Request,
+    payload: OrcaProfileUpdateRequest,
+) -> dict[str, Any]:
+    _require_operator(request)
+    try:
+        return {"ok": True, "item": orca_profile_manager.update_profile(printer_id, payload)}
+    except Exception as exc:
+        _raise_api_error(exc)
 
 
 @router.get("/api/printers/{printer_id}/settings")

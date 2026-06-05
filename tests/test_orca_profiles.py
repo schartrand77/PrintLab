@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+
+from fastapi.testclient import TestClient
+
+from app.main import create_app
 
 
 class FakePrinterManager:
@@ -117,3 +122,51 @@ def test_removed_printer_binding_is_not_listed_as_active(tmp_path: Path) -> None
 
     assert empty_manager.list_plus_printers() == []
     assert empty_manager.profile_for("printer-1")["status"] == "stale_printer"
+
+
+def test_plus_printer_profiles_api_lists_existing_printers(monkeypatch, tmp_path: Path) -> None:
+    import app.routers.api as api_routes
+    from app.orca_profiles import OrcaProfileManager
+
+    fake_printers = FakePrinterManager(
+        [{"id": "printer-1", "name": "Shop X1C", "is_added": False, "config": {"device_type": "x1c"}}]
+    )
+    monkeypatch.setattr(api_routes, "printer_manager", fake_printers)
+    monkeypatch.setattr(api_routes, "orca_profile_manager", OrcaProfileManager(root=tmp_path, printer_manager=fake_printers))
+    monkeypatch.setattr(api_routes, "works_service", SimpleNamespace(list_services=lambda: []))
+
+    response = TestClient(create_app()).get("/api/plus/printers")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 1
+    assert body["items"][0]["id"] == "printer-1"
+    assert body["items"][0]["orca_profile"]["status"] == "needs_slicer_profile"
+
+
+def test_plus_printer_profile_api_confirms_profile(monkeypatch, tmp_path: Path) -> None:
+    import app.routers.api as api_routes
+    from app.orca_profiles import OrcaProfileManager
+
+    fake_printers = FakePrinterManager([{"id": "printer-1", "name": "Shop X1C", "config": {"device_type": "x1c"}}])
+    manager = OrcaProfileManager(root=tmp_path, printer_manager=fake_printers)
+    monkeypatch.setattr(api_routes, "printer_manager", fake_printers)
+    monkeypatch.setattr(api_routes, "orca_profile_manager", manager)
+    monkeypatch.setattr(api_routes, "works_service", SimpleNamespace(list_services=lambda: []))
+
+    response = TestClient(create_app()).patch(
+        "/api/plus/printers/printer-1/orca-profile",
+        json={
+            "orca_machine_preset": "Bambu Lab X1 Carbon 0.4 nozzle",
+            "nozzle_diameter": 0.4,
+            "ams_enabled": True,
+            "filament_presets": ["Bambu PLA Basic @BBL X1C"],
+            "process_preset": "0.20mm Standard @BBL X1C",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["item"]["status"] == "ready"
+    assert manager.require_confirmed_profile("printer-1")["filament_presets"] == ["Bambu PLA Basic @BBL X1C"]
